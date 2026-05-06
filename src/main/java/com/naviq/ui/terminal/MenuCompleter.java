@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class MenuCompleter {
+
     private static boolean multiLine = false;
 
     public static void toggleMultiLine() {
@@ -31,13 +32,13 @@ public class MenuCompleter {
 
     // ── Styles ─────────────────────────────────────────
     private static final AttributedStyle
-            STYLE_SELECTED = AttributedStyle.DEFAULT.foreground(231).background(45).bold(),
-            STYLE_NORMAL = AttributedStyle.DEFAULT.background(30).foreground(231),
-            STYLE_TYPE = AttributedStyle.DEFAULT.foreground(231).background(66),
-            STYLE_HIGHLIGHT = AttributedStyle.DEFAULT.foreground(9).background(30),
-            STYLE_SCROLLBAR = AttributedStyle.DEFAULT.background(236),
-            STYLE_SCROLL_THUMB = AttributedStyle.DEFAULT.background(250),
-            STYLE_ICON = AttributedStyle.DEFAULT.foreground(242);
+        STYLE_SELECTED = AttributedStyle.DEFAULT.foreground(231).background(45).bold(),
+        STYLE_NORMAL = AttributedStyle.DEFAULT.background(30).foreground(231),
+        STYLE_TYPE = AttributedStyle.DEFAULT.foreground(231).background(66),
+        STYLE_HIGHLIGHT = AttributedStyle.DEFAULT.foreground(9).background(30),
+        STYLE_SCROLLBAR = AttributedStyle.DEFAULT.background(236),
+        STYLE_SCROLL_THUMB = AttributedStyle.DEFAULT.background(250),
+        STYLE_ICON = AttributedStyle.DEFAULT.foreground(242);
 
     private static final int PAGE_SIZE = 10;
 
@@ -49,8 +50,9 @@ public class MenuCompleter {
     // ───────────────────────────────────────────────────
     public static void register(LineReader lineReader) {
         reader = lineReader;
-        if (!(lineReader instanceof LineReaderImpl impl))
+        if (!(lineReader instanceof LineReaderImpl impl)) {
             throw new IllegalArgumentException("Need LineReaderImpl");
+        }
 
         terminalMenu = new TerminalMenu(lineReader);
 
@@ -112,7 +114,12 @@ public class MenuCompleter {
             return true;
         });
 
-        map.bind(new Reference("delete-autosuggestion"), "\u007f");
+        map.bind(
+            new Reference("delete-autosuggestion"),
+            "\u007f",      // DEL
+            "\b",          // BACKSPACE
+            "\u001b[3~"    // DELETE (ANSI escape)
+        );
         map.bind(new Reference("menu-complete"), "\t");
         map.bind(new Reference("autosuggest"), " ");
         map.bind(new Reference("enter-autosuggestion"), "\r", "\n");
@@ -123,8 +130,9 @@ public class MenuCompleter {
         map.bind(new Reference("clear-menu-right"), KeyMap.key(impl.getTerminal(), Capability.key_right));
         map.bind(new Reference("clear-menu-left"), KeyMap.key(impl.getTerminal(), Capability.key_left));
 
-        for (char c : "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.".toCharArray())
+        for (char c : "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.".toCharArray()) {
             map.bind(new Reference("autosuggest"), String.valueOf(c));
+        }
     }
 
     private static void registerWidget(LineReaderImpl impl, String name, Widget w) {
@@ -133,6 +141,7 @@ public class MenuCompleter {
 
     // ───────────────────────────────────────────────────
     public record Ctx(String prefix, boolean dotMode, String sqlSearch, int csrSearch) {
+
     }
 
     public static Ctx buildCtx(String sql, int cursor) {
@@ -168,9 +177,9 @@ public class MenuCompleter {
         Ctx ctx = buildCtx(sql, cursor);
 
         List<Suggest> list = filter(
-                PostgresCompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
-                ctx.prefix(),
-                ctx.dotMode()
+            PostgresCompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
+            ctx.prefix(),
+            ctx.dotMode()
         );
 
         if (list.isEmpty()) {
@@ -191,11 +200,13 @@ public class MenuCompleter {
         Ctx ctx = buildCtx(sql, cursor);
 
         List<Suggest> all = filter(
-                PostgresCompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
-                ctx.prefix(),
-                ctx.dotMode()
+            PostgresCompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
+            ctx.prefix(),
+            ctx.dotMode()
         );
-        if (all.isEmpty()) return;
+        if (all.isEmpty()) {
+            return;
+        }
 
         if (all.size() == 1) {
             hide();
@@ -214,13 +225,21 @@ public class MenuCompleter {
 
                 List<Suggest> filtered = filter(all, ctx.prefix(), ctx.dotMode());
 
-                if (filtered.isEmpty()) selected = 0;
-                else selected = Math.min(selected, filtered.size() - 1);
+                if (filtered.isEmpty()) {
+                    selected = 0;
+                } else {
+                    selected = Math.min(selected, filtered.size() - 1);
+                }
 
-                if (selected < scroll) scroll = selected;
-                if (selected >= scroll + PAGE_SIZE) scroll = selected - PAGE_SIZE + 1;
+                if (selected < scroll) {
+                    scroll = selected;
+                }
+                if (selected >= scroll + PAGE_SIZE) {
+                    scroll = selected - PAGE_SIZE + 1;
+                }
 
-                List<AttributedString> lines = render(filtered, selected, scroll, ctx.prefix(), ctx.dotMode());
+                List<AttributedString> lines = render(filtered, selected, scroll, ctx.prefix(),
+                    ctx.dotMode());
 
                 terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE + 1), 1, 1);
 
@@ -231,8 +250,9 @@ public class MenuCompleter {
                 }
 
                 String key = br.readBinding(km, null, true);
-                if (key == null) break;
-
+                if (key == null) {
+                    break;
+                }
 
                 switch (key) {
                     case "up" -> selected = (selected <= 0) ? filtered.size() - 1 : selected - 1;
@@ -240,8 +260,9 @@ public class MenuCompleter {
 
                     case "enter", "space" -> {
                         hide();
-                        if (!filtered.isEmpty())
+                        if (!filtered.isEmpty()) {
                             insert(reader, filtered.get(selected), ctx.prefix(), ctx.dotMode());
+                        }
                         return;
                     }
                     case "esc", "ctrlc" -> {
@@ -277,11 +298,11 @@ public class MenuCompleter {
 
     // ───────────────────────────────────────────────────
     private static List<AttributedString> render(
-            List<Suggest> items,
-            int selected,
-            int scroll,
-            String prefix,
-            boolean dot
+        List<Suggest> items,
+        int selected,
+        int scroll,
+        String prefix,
+        boolean dot
     ) {
         List<AttributedString> out = new ArrayList<>();
 
@@ -315,11 +336,11 @@ public class MenuCompleter {
 
             row.append("  ");
             row.style(sel ? STYLE_SELECTED : AttributedStyle.DEFAULT.background(30).foreground(114))
-                    .append(pad(s.getColumnType(), columnTypeW));
+                .append(pad(s.getColumnType(), columnTypeW));
 
             row.append("  ");
             row.style(sel ? STYLE_SELECTED : STYLE_TYPE)
-                    .append(pad(type, typeW));
+                .append(pad(type, typeW));
 
             // ── SCROLLBAR ─────────────────────
             row.append(" ");
@@ -338,8 +359,8 @@ public class MenuCompleter {
             String text = " ↓ [" + remaining + "] MORE ";
             int pad = Math.max(0, menuWidth - text.length());
             f.style(AttributedStyle.DEFAULT.background(23).foreground(231))
-                    .append(text)
-                    .append(" ".repeat(pad));
+                .append(text)
+                .append(" ".repeat(pad));
 
             // cột scrollbar cuối — cùng dòng, khác style
             f.style(STYLE_SCROLLBAR).append(" ");
@@ -350,12 +371,17 @@ public class MenuCompleter {
     }
 
     static AttributedStyle styleByColumnType(String t) {
-        if (t == null) return STYLE_NORMAL;
+        if (t == null) {
+            return STYLE_NORMAL;
+        }
 
         return switch (t) {
-            case "int", "int4", "int8", "numeric" -> AttributedStyle.DEFAULT.background(30).foreground(220); // vàng
-            case "text", "varchar" -> AttributedStyle.DEFAULT.background(30).foreground(114); // xanh lá
-            case "timestamp", "date" -> AttributedStyle.DEFAULT.background(30).foreground(109); // cyan
+            case "int", "int4", "int8", "numeric" ->
+                AttributedStyle.DEFAULT.background(30).foreground(220); // vàng
+            case "text", "varchar" ->
+                AttributedStyle.DEFAULT.background(30).foreground(114); // xanh lá
+            case "timestamp", "date" ->
+                AttributedStyle.DEFAULT.background(30).foreground(109); // cyan
             case "bool" -> AttributedStyle.DEFAULT.background(30).foreground(141); // tím
             default -> AttributedStyle.DEFAULT.background(30).foreground(244);
         };
@@ -364,13 +390,15 @@ public class MenuCompleter {
     // ───────────────────────────────────────────────────
     private static void insert(LineReaderImpl reader, Suggest s, String prefix, boolean dot) {
         reader.getBuffer().move(-prefix.length());
-        for (int i = 0; i < prefix.length(); i++) reader.getBuffer().delete();
+        for (int i = 0; i < prefix.length(); i++) {
+            reader.getBuffer().delete();
+        }
 
         if (dot && prefix.contains(".")) {
             String alias = prefix.substring(0, prefix.lastIndexOf('.'));
             String col = s.getKey().contains(".")
-                    ? s.getKey().substring(s.getKey().lastIndexOf('.') + 1)
-                    : s.getKey();
+                ? s.getKey().substring(s.getKey().lastIndexOf('.') + 1)
+                : s.getKey();
             reader.getBuffer().write(alias + "." + col);
         } else {
             reader.getBuffer().write(s.getKey());
@@ -378,20 +406,21 @@ public class MenuCompleter {
     }
 
     // ───────────────────────────────────────────────────
-    private static void highlight(AttributedStringBuilder sb, String word, String match, boolean dot) {
+    private static void highlight(AttributedStringBuilder sb, String word, String match,
+        boolean dot) {
         if (match.isEmpty()) {
             sb.append(word);
             return;
         }
 
         String m = dot && match.contains(".")
-                ? match.substring(match.lastIndexOf('.') + 1)
-                : match;
+            ? match.substring(match.lastIndexOf('.') + 1)
+            : match;
 
         int j = 0;
         for (int i = 0; i < word.length(); i++) {
             if (j < m.length() &&
-                    Character.toLowerCase(word.charAt(i)) == Character.toLowerCase(m.charAt(j))) {
+                Character.toLowerCase(word.charAt(i)) == Character.toLowerCase(m.charAt(j))) {
                 sb.style(STYLE_HIGHLIGHT).append(word.charAt(i));
                 j++;
             } else {
@@ -406,7 +435,9 @@ public class MenuCompleter {
 
     private static String extractPrefix(String s, int cursor) {
         int i = cursor - 1;
-        while (i >= 0 && isIdentifier(s.charAt(i))) i--;
+        while (i >= 0 && isIdentifier(s.charAt(i))) {
+            i--;
+        }
         return s.substring(i + 1, cursor);
     }
 
@@ -444,7 +475,9 @@ public class MenuCompleter {
         if (s == null) {
             s = "";
         }
-        if (s.length() >= w) return s.substring(0, w);
+        if (s.length() >= w) {
+            return s.substring(0, w);
+        }
         return s + " ".repeat(w - s.length());
     }
 
@@ -465,12 +498,14 @@ public class MenuCompleter {
     }
 
     private static AttributedStyle scrollbarStyle(
-            int row,
-            int visible,
-            int total,
-            int scroll
+        int row,
+        int visible,
+        int total,
+        int scroll
     ) {
-        if (total <= visible) return STYLE_NORMAL;
+        if (total <= visible) {
+            return STYLE_NORMAL;
+        }
 
         float ratio = (float) visible / total;
         int thumbSize = Math.max(1, Math.round(ratio * visible));
@@ -479,16 +514,16 @@ public class MenuCompleter {
         int thumbStart = Math.round(posRatio * visible);
 
         return (row >= thumbStart && row < thumbStart + thumbSize)
-                ? STYLE_SCROLL_THUMB
-                : STYLE_SCROLLBAR;
+            ? STYLE_SCROLL_THUMB
+            : STYLE_SCROLLBAR;
     }
 
     private static String buildGhost(String key, String prefix, boolean dot) {
         String display = display(key, dot);
 
         String match = dot && prefix.contains(".")
-                ? prefix.substring(prefix.lastIndexOf('.') + 1)
-                : prefix;
+            ? prefix.substring(prefix.lastIndexOf('.') + 1)
+            : prefix;
 
         if (display.toLowerCase().startsWith(match.toLowerCase())) {
             return display.substring(match.length());
@@ -538,37 +573,39 @@ public class MenuCompleter {
     // ───────────────────────────────────────────────────
     public static List<Suggest> filter(List<Suggest> all, String prefix, boolean dot) {
         String m = dot && prefix.contains(".")
-                ? prefix.substring(prefix.lastIndexOf('.') + 1)
-                : prefix;
+            ? prefix.substring(prefix.lastIndexOf('.') + 1)
+            : prefix;
 
         // Lấy schema từ prefix: "public.d" → "public"
         String schemaPrefix = dot && prefix.contains(".")
-                ? prefix.substring(0, prefix.lastIndexOf('.')).toLowerCase()
-                : null;
+            ? prefix.substring(0, prefix.lastIndexOf('.')).toLowerCase()
+            : null;
 
         return all.stream()
-                .map(s -> new AbstractMap.SimpleEntry<>(s, display(s.getKey(), dot)))
-                .filter(e -> {
-                    // Nếu có schema prefix → chỉ giữ item cùng schema
-                    if (schemaPrefix != null) {
-                        String key = e.getKey().getKey().toLowerCase();
-                        if (!key.startsWith(schemaPrefix + ".")) return false;
+            .map(s -> new AbstractMap.SimpleEntry<>(s, display(s.getKey(), dot)))
+            .filter(e -> {
+                // Nếu có schema prefix → chỉ giữ item cùng schema
+                if (schemaPrefix != null) {
+                    String key = e.getKey().getKey().toLowerCase();
+                    if (!key.startsWith(schemaPrefix + ".")) {
+                        return false;
                     }
-                    return fuzzyMatch(e.getValue(), m);
-                })
-                .sorted(Comparator.comparingInt(e -> {
-                    // thứ tự tiên equals -> prefix -> fuzzy
-                    String w = e.getValue();
-                    if (w.equalsIgnoreCase(m)) {
-                        return -1000;
-                    }
-                    if (w.toLowerCase().startsWith(m.toLowerCase())) {
-                        return -100;
-                    }
-                    return fuzzyScore(w, m);
-                }))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
+                }
+                return fuzzyMatch(e.getValue(), m);
+            })
+            .sorted(Comparator.comparingInt(e -> {
+                // thứ tự tiên equals -> prefix -> fuzzy
+                String w = e.getValue();
+                if (w.equalsIgnoreCase(m)) {
+                    return -1000;
+                }
+                if (w.toLowerCase().startsWith(m.toLowerCase())) {
+                    return -100;
+                }
+                return fuzzyScore(w, m);
+            }))
+            .map(Map.Entry::getKey)
+            .collect(Collectors.toList());
     }
 
     private static String display(String key, boolean dot) {
@@ -576,7 +613,9 @@ public class MenuCompleter {
     }
 
     static boolean fuzzyMatch(String word, String input) {
-        if (input == null || input.isEmpty()) return true;
+        if (input == null || input.isEmpty()) {
+            return true;
+        }
 
         word = word.toLowerCase();
         input = input.toLowerCase();
@@ -595,23 +634,33 @@ public class MenuCompleter {
     }
 
     static int fuzzyScore(String word, String input) {
-        if (input.isEmpty()) return 0;
+        if (input.isEmpty()) {
+            return 0;
+        }
         word = word.toLowerCase();
         input = input.toLowerCase();
 
         // prefix thắng tất
-        if (word.startsWith(input)) return -input.length() * 10;
+        if (word.startsWith(input)) {
+            return -input.length() * 10;
+        }
 
         int score = 0;
         int lastMatch = -1;
 
         for (char c : input.toCharArray()) {
             int idx = word.indexOf(c, lastMatch + 1);
-            if (idx == -1) return Integer.MAX_VALUE;
+            if (idx == -1) {
+                return Integer.MAX_VALUE;
+            }
 
             score += (idx - lastMatch - 1);   // phạt gap
-            if (idx == lastMatch + 1) score -= 3; // thưởng liên tiếp
-            if (idx == 0 || word.charAt(idx - 1) == '_') score -= 4; // thưởng word boundary
+            if (idx == lastMatch + 1) {
+                score -= 3; // thưởng liên tiếp
+            }
+            if (idx == 0 || word.charAt(idx - 1) == '_') {
+                score -= 4; // thưởng word boundary
+            }
 
             lastMatch = idx;
         }

@@ -42,10 +42,10 @@ public class NaviQCli {
         String coloredPrompt = "\u001B[32m" + visiblePrompt + "\u001B[0m";
 
         Terminal terminal = TerminalBuilder.builder()
-                .system(true)
-                .streams(System.in, System.out)
-                .encoding(StandardCharsets.UTF_8)
-                .build();
+            .system(true)
+            .encoding(StandardCharsets.UTF_8)
+            .jansi(true)   // enables ANSI colours + UTF-8 on Windows
+            .build();
 
         Highlighter highlighter = new CustomHighlighter();
 
@@ -57,7 +57,9 @@ public class NaviQCli {
             public boolean redisplay() {
                 var result = super.redisplay();
                 var c = getTerminal().getCursorPosition(null);
-                if (c != null) statusBar.updateCursor(c.getY() + 1, c.getX() + 1);
+                if (c != null) {
+                    statusBar.updateCursor(c.getY() + 1, c.getX() + 1);
+                }
                 statusBar.render();
                 return result;
             }
@@ -73,7 +75,8 @@ public class NaviQCli {
         impl.setOpt(LineReader.Option.HISTORY_IGNORE_SPACE);
         impl.setParser(new Parser() {
             @Override
-            public ParsedLine parse(String line, int cursor, ParseContext context) throws SyntaxError {
+            public ParsedLine parse(String line, int cursor, ParseContext context)
+                throws SyntaxError {
                 if (context == ParseContext.ACCEPT_LINE && MULTI_LINE) {
                     if (!line.trim().endsWith(";")) {
                         throw new EOFError(-1, cursor, "missing semicolon");
@@ -108,7 +111,7 @@ public class NaviQCli {
         statusBar.setQueryStatus("idle");
         statusBar.render();
 
-        terminal.handle(Terminal.Signal.WINCH, s -> statusBar.render());
+//        terminal.handle(Terminal.Signal.WINCH, s -> statusBar.render());
 
         printStartupInfo(impl);
 
@@ -177,9 +180,13 @@ public class NaviQCli {
                         stmt.execute(line);
                         long elapsed = System.currentTimeMillis() - startTime; // ← THÊM
                         String msg;
-                        if (trimmed.startsWith("CREATE TABLE")) msg = "Table created.";
-                        else if (trimmed.startsWith("DROP TABLE")) msg = "Table dropped.";
-                        else msg = "Table truncated.";
+                        if (trimmed.startsWith("CREATE TABLE")) {
+                            msg = "Table created.";
+                        } else if (trimmed.startsWith("DROP TABLE")) {
+                            msg = "Table dropped.";
+                        } else {
+                            msg = "Table truncated.";
+                        }
                         impl.printAbove(msg + "\nTime: " + String.format("%.3f", elapsed / 1000.0) + "s\n");
                     }
                     statusBar.setQueryStatus("IDLE");
@@ -189,11 +196,13 @@ public class NaviQCli {
                     List<List<String>> rows = new ArrayList<>();
 
                     try (Statement stmt = PostgresDataSource.get().createStatement();
-                         ResultSet rs = stmt.executeQuery(line)) {
+                        ResultSet rs = stmt.executeQuery(line)) {
 
                         ResultSetMetaData meta = rs.getMetaData();
                         int columnCount = meta.getColumnCount();
-                        for (int i = 1; i <= columnCount; i++) headers.add(meta.getColumnLabel(i));
+                        for (int i = 1; i <= columnCount; i++) {
+                            headers.add(meta.getColumnLabel(i));
+                        }
 
                         while (rs.next()) {
                             List<String> row = new ArrayList<>();
@@ -217,8 +226,9 @@ public class NaviQCli {
                         StringBuilder err = new StringBuilder();
                         err.append(RED).append("ERROR: ").append(msg.getMessage()).append("\n");
 
-                        if (msg.getDetail() != null)
+                        if (msg.getDetail() != null) {
                             err.append("DETAIL: ").append(msg.getDetail()).append("\n");
+                        }
 
                         if (msg.getPosition() > 0) {
                             int pos = msg.getPosition() - 1; // 0-based
@@ -227,7 +237,9 @@ public class NaviQCli {
                             int lineNum = 1;
                             int col = pos;
                             for (String l : lines) {
-                                if (col <= l.length()) break;
+                                if (col <= l.length()) {
+                                    break;
+                                }
                                 col -= (l.length() + 1); // +1 cho \n
                                 lineNum++;
                             }
@@ -248,15 +260,19 @@ public class NaviQCli {
                 statusBar.setQueryStatus("ERROR");
             }
         }
+        terminal.flush();
+        terminal.writer().print("\u001b[2J\u001b[H");
+        terminal.writer().flush();
+        terminal.close();
     }
 
     private static void printHelp(LineReader reader) {
         String text =
-                "\n╔══ Keys ═══════════════╗\n" +
-                        "Ctrl+T   Toggle multi-line\n" +
-                        "TAB      autocomplete\n" +
-                        "\\q       exit\n" +
-                        "╚═══════════════════════╝\n";
+            "\n╔══ Keys ═══════════════╗\n" +
+                "Ctrl+T   Toggle multi-line\n" +
+                "TAB      autocomplete\n" +
+                "\\q       exit\n" +
+                "╚═══════════════════════╝\n";
 
         reader.printAbove(text);
     }
@@ -268,11 +284,11 @@ public class NaviQCli {
         String serverVersion = "PostgreSQL (unknown)";
 
         String info =
-                "Using local time zone " + clientZone +
-                        " (server uses " + serverZone + ")\n" +
-                        "Server: " + serverVersion + "\n" +
-                        "Version: 1.0.0\n" +
-                        "Home: http://your-cli.dev\n";
+            "Using local time zone " + clientZone +
+                " (server uses " + serverZone + ")\n" +
+                "Server: " + serverVersion + "\n" +
+                "Version: 1.0.0\n" +
+                "Home: http://your-cli.dev\n";
 
         reader.printAbove(info);
     }

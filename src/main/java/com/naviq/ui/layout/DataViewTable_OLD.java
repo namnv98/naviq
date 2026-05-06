@@ -1,22 +1,17 @@
 package com.naviq.ui.layout;
 
-import org.jline.terminal.Attributes;
-import org.jline.terminal.Terminal;
-
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import org.jline.terminal.Attributes;
+import org.jline.terminal.Terminal;
 
-public class DataViewTable {
+public class DataViewTable_OLD {
 
     private static final int DEFAULT_MAX_FIELD_WIDTH = 5000;
-
-    // 🔥 detect Windows → dùng ASCII
-    private static final boolean ASCII =
-        System.getProperty("os.name").toLowerCase().contains("win");
 
     public static void print(
             Terminal terminal,
@@ -46,7 +41,11 @@ public class DataViewTable {
         Attributes savedAttrs = terminal.enterRawMode();
         try {
             while (true) {
-                int ch = terminal.input().read();
+                int ch = terminal.input().read(); // ← đổi reader() thành input()
+
+                // debug tạm
+                out.print("\r\u001b[2K[key=" + ch + "]");
+                out.flush();
 
                 if (ch == 'f' || ch == 'F') {
                     out.print("\r\u001b[2K");
@@ -109,40 +108,34 @@ public class DataViewTable {
     }
 
     private static String borderTop(int[] widths) {
-        StringBuilder sb = new StringBuilder().append(ASCII ? "+" : "╭");
+        StringBuilder sb = new StringBuilder().append("╭");
         for (int i = 0; i < widths.length; i++) {
-            sb.append((ASCII ? "-" : "─").repeat(widths[i] + 2));
-            sb.append(i < widths.length - 1
-                ? (ASCII ? "+" : "┬")
-                : (ASCII ? "+" : "╮"));
+            sb.append("─".repeat(widths[i] + 2));
+            sb.append(i < widths.length - 1 ? "┬" : "╮");
         }
         return sb.toString();
     }
 
     private static String borderMid(int[] widths) {
-        StringBuilder sb = new StringBuilder().append(ASCII ? "+" : "├");
+        StringBuilder sb = new StringBuilder().append("├");
         for (int i = 0; i < widths.length; i++) {
-            sb.append((ASCII ? "-" : "─").repeat(widths[i] + 2));
-            sb.append(i < widths.length - 1
-                ? (ASCII ? "+" : "┼")
-                : (ASCII ? "+" : "┤"));
+            sb.append("─".repeat(widths[i] + 2));
+            sb.append(i < widths.length - 1 ? "┼" : "┤");
         }
         return sb.toString();
     }
 
     private static String borderBot(int[] widths) {
-        StringBuilder sb = new StringBuilder().append(ASCII ? "+" : "╰");
+        StringBuilder sb = new StringBuilder().append("╰");
         for (int i = 0; i < widths.length; i++) {
-            sb.append((ASCII ? "-" : "─").repeat(widths[i] + 2));
-            sb.append(i < widths.length - 1
-                ? (ASCII ? "+" : "┴")
-                : (ASCII ? "+" : "╯"));
+            sb.append("─".repeat(widths[i] + 2));
+            sb.append(i < widths.length - 1 ? "┴" : "╯");
         }
         return sb.toString();
     }
 
     private static String formatRow(List<String> cells, int[] widths) {
-        StringBuilder sb = new StringBuilder().append(ASCII ? "|" : "│");
+        StringBuilder sb = new StringBuilder().append("│");
 
         for (int i = 0; i < widths.length; i++) {
             String raw = i < cells.size() ? clean(cells.get(i)) : "";
@@ -151,11 +144,9 @@ public class DataViewTable {
             sb.append(" ").append(cell);
 
             int pad = widths[i] - displayWidth(cell);
-            if (pad > 0) {
-                sb.append(" ".repeat(pad));
-            }
+            if (pad > 0) sb.append(" ".repeat(pad));
 
-            sb.append(" ").append(ASCII ? "|" : "│");
+            sb.append(" │");
         }
 
         return sb.toString();
@@ -165,10 +156,10 @@ public class DataViewTable {
     private static final String RESET = "\u001b[0m";
 
     private static String formatHeader(List<String> cells, int[] widths) {
-        StringBuilder sb = new StringBuilder().append(ASCII ? "|" : "│");
+        StringBuilder sb = new StringBuilder().append("│");
 
         for (int i = 0; i < widths.length; i++) {
-            String raw = i < cells.size() ? clean(cells.get(i)) : "";
+            String raw  = i < cells.size() ? clean(cells.get(i)) : "";
             String cell = truncate(raw, widths[i]);
 
             // 🔥 bọc màu
@@ -177,11 +168,9 @@ public class DataViewTable {
             sb.append(" ").append(colored);
 
             int pad = widths[i] - displayWidth(cell);
-            if (pad > 0) {
-                sb.append(" ".repeat(pad));
-            }
+            if (pad > 0) sb.append(" ".repeat(pad));
 
-            sb.append(" ").append(ASCII ? "|" : "│");
+            sb.append(" │");
         }
 
         return sb.toString();
@@ -223,13 +212,9 @@ public class DataViewTable {
         while (calcTableWidth(tw) > termWidth) {
             int maxIdx = 0;
             for (int i = 1; i < tw.length; i++) {
-                if (tw[i] > tw[maxIdx]) {
-                    maxIdx = i;
-                }
+                if (tw[i] > tw[maxIdx]) maxIdx = i;
             }
-            if (tw[maxIdx] <= 3) {
-                break;
-            }
+            if (tw[maxIdx] <= 3) break;
             tw[maxIdx]--;
         }
 
@@ -244,15 +229,12 @@ public class DataViewTable {
 
         return tw;
     }
-
     // -------------------------------------------------------------------------
     // Clean
     // -------------------------------------------------------------------------
 
     private static String clean(String s) {
-        if (s == null) {
-            return "";
-        }
+        if (s == null) return "";
         return s.replace("\n", " ").replace("\r", "");
     }
 
@@ -261,9 +243,7 @@ public class DataViewTable {
     // -------------------------------------------------------------------------
 
     private static String truncate(String s, int maxWidth) {
-        if (displayWidth(s) <= maxWidth) {
-            return s;
-        }
+        if (displayWidth(s) <= maxWidth) return s;
 
         StringBuilder sb = new StringBuilder();
         int w = 0;
@@ -272,9 +252,8 @@ public class DataViewTable {
             int cp = s.codePointAt(i);
             int cw = isFullWidth(cp) ? 2 : 1;
 
-            // 🔥 dùng ASCII "..." thay vì "…"
-            if (w + cw > maxWidth - 3) {
-                sb.append("...");
+            if (w + cw > maxWidth - 1) {
+                sb.append("…");
                 break;
             }
 

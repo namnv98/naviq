@@ -16,26 +16,24 @@
     </properties>
 
     <dependencies>
+        <!-- JLine 3 — all-in-one uber jar (terminal + reader + completers) -->
         <dependency>
-            <groupId>org.antlr</groupId>
-            <artifactId>antlr4-runtime</artifactId>
-            <version>${antlr4.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.fusesource.jansi</groupId>
-            <artifactId>jansi</artifactId>
-            <version>2.4.0</version>
+            <groupId>org.jline</groupId>
+            <artifactId>jline</artifactId>
+            <version>3.30.12</version>
         </dependency>
 
         <dependency>
             <groupId>org.jline</groupId>
-            <artifactId>jline</artifactId>
-            <version>4.0.12</version>
+            <artifactId>jline-terminal-jansi</artifactId>
+            <version>3.30.12</version>
         </dependency>
+
+        <!-- Các dep khác của bạn -->
         <dependency>
-            <groupId>org.jline</groupId>
-            <artifactId>jline-builtins</artifactId>
-            <version>4.0.12</version>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4-runtime</artifactId>
+            <version>${antlr4.version}</version>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -47,9 +45,7 @@
             <artifactId>commons-lang3</artifactId>
             <version>3.20.0</version>
         </dependency>
-
     </dependencies>
-
     <build>
         <plugins>
 

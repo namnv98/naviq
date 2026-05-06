@@ -1,6 +1,1 @@
-java -jar target/naviq-1.0.0.jar \
-  --host=localhost \
-  --port=5432 \
-  --dbname=my_database \
-  --user=my_user \
-  --password=my_password
+java "-Djline.terminal=jna" "--enable-native-access=ALL-UNNAMED" "-Dfile.encoding=UTF-8" -jar D:\works\h01\code\naviq\target\naviq-1.0.0.jar --host=localhost  --port=5432 --dbname=my_database --user=my_user --password=my_password
