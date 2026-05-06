@@ -1,14 +1,18 @@
 package com.naviq.ui.layout;
 
-import org.jline.terminal.Attributes;
-import org.jline.terminal.Terminal;
-
-import java.io.OutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import org.jline.builtins.Less;
+import org.jline.builtins.Options;
+import org.jline.builtins.Source;
+import org.jline.terminal.Attributes;
+import org.jline.terminal.Terminal;
 
 public class DataViewTable {
 
@@ -70,27 +74,46 @@ public class DataViewTable {
     // -------------------------------------------------------------------------
 
     private static void paginate(Terminal terminal, String content) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder("less", "-S", "-R", "-X", "+1");
-        pb.redirectInput(ProcessBuilder.Redirect.PIPE);
-        pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+        Less less =
+            new Less(
+                terminal,
+                Paths.get("."),
+                Options.compile(Less.usage()).parse(List.of("--chop-long-lines")));
 
-        Process p = pb.start();
-        try (OutputStream os = p.getOutputStream()) {
-            os.write(content.getBytes(StandardCharsets.UTF_8));
-            os.flush();
-        }
-        p.waitFor();
+        Source source = new Source.InputStreamSource(
+            new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)),
+            true,
+            "content"
+        );
+
+        List<Source> sources = new ArrayList<>();
+        sources.add(source);
+
+        less.run(sources);
     }
+
+//    private static void paginate(Terminal terminal, String content) throws Exception {
+//        ProcessBuilder pb = new ProcessBuilder("less", "-S", "-R", "-X", "+1");
+//        pb.redirectInput(ProcessBuilder.Redirect.PIPE);
+//        pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+//        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
+//
+//        Process p = pb.start();
+//        try (OutputStream os = p.getOutputStream()) {
+//            os.write(content.getBytes(StandardCharsets.UTF_8));
+//            os.flush();
+//        }
+//        p.waitFor();
+//    }
 
     // -------------------------------------------------------------------------
     // Render
     // -------------------------------------------------------------------------
 
     private static String render(
-            List<String> columns,
-            List<List<String>> rows,
-            int[] widths) {
+        List<String> columns,
+        List<List<String>> rows,
+        int[] widths) {
 
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);

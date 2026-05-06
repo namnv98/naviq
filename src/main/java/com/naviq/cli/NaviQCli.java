@@ -36,6 +36,7 @@ public class NaviQCli {
                 System.setProperty("DB_" + parts[0].toUpperCase(), parts[1]);
             }
         }
+        System.setProperty("org.jline.terminal.type", "xterm-256color");
 
         String dbName = "SLQ";
         String visiblePrompt = dbName + "> ";
@@ -44,7 +45,6 @@ public class NaviQCli {
         Terminal terminal = TerminalBuilder.builder()
             .system(true)
             .encoding(StandardCharsets.UTF_8)
-            .jansi(true)   // enables ANSI colours + UTF-8 on Windows
             .build();
 
         Highlighter highlighter = new CustomHighlighter();
