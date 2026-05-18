@@ -1,1 +1,1 @@
-java -jar D:\works\h01\code\naviq\target\naviq-1.0.0.jar --host=10.1.9.2  --port=5432 --dbname=pawn_db --user=devops --password=Abc@123456
+java -jar D:\works\h01\code\naviq\target\naviq-1.0.0.jar --host=  --port=5432 --dbname= --user=devops --password=
