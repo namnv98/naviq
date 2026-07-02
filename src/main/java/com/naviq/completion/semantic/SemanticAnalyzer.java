@@ -26,7 +26,7 @@ public class SemanticAnalyzer {
      * null (fallback token-scan qua DmlTargetResolver) nếu parse lỗi nặng -
      * KHÔNG BAO GIỜ throw ra ngoài, completion không được sập vì lý do này.
      */
-    public static SemanticAnalysisResult analyze(String sql, int rawCursorOffset) {
+    public static Result analyze(String sql, int rawCursorOffset) {
         // BẮT BUỘC clamp trước khi dùng - caller (vd MenuCompleter) có thể truyền
         // offset không khớp độ dài "sql" thật (đã xác nhận qua crash thực tế:
         // StringIndexOutOfBoundsException khi sql rỗng nhưng cursorOffset=1).
@@ -75,7 +75,7 @@ public class SemanticAnalyzer {
 
             var scope = model.scopeAt(tokenIdx);
             var result = model.resolveAt(cursorOffset, scope);
-            return new SemanticAnalysisResult(
+            return new Result(
                     result.danglingQualifier(),
                     result.danglingQualifierResolvesTo(),
                     result.danglingQualifierScope(),
@@ -90,19 +90,19 @@ public class SemanticAnalyzer {
             fallbackTokens.fill();
             int fallbackCaret = TokenPositionUtil.findCaretTokenIndex(fallbackTokens, cursorOffset);
             String qualifier = DmlTargetResolver.extractQualifier(fallbackTokens, fallbackCaret);
-            return new SemanticAnalysisResult(qualifier, null, null, java.util.Map.of(), java.util.Map.of());
+            return new Result(qualifier, null, null, java.util.Map.of(), java.util.Map.of());
         }
     }
 
-    public record SemanticAnalysisResult(
+    public record Result(
             String qualifier,
             String qualifierResolvesTo,
             SemanticScope.Scope qualifierDerivedScope,
             Map<String, String> visibleAliases,
             Map<String, SemanticScope.Scope> visibleDerivedScopes
     ) {
-        public static SemanticAnalysisResult empty() {
-            return new SemanticAnalysisResult(null, null, null, Map.of(), Map.of());
+        public static Result empty() {
+            return new Result(null, null, null, Map.of(), Map.of());
         }
     }
 }

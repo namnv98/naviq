@@ -23,69 +23,60 @@ import static java.util.Objects.isNull;
  * SyntacticAnalyzer     - tầng cú pháp (AntlrCompletionEngineFix: token/rule hợp lệ)
  * DerivedColumnExpander - mở rộng cột của subquery/CTE (bao gồm case wildcard)
  * AliasNameSuggester    - đặt tên alias tự động + tìm tableName trước "AS"
- * DmlTargetResolver     - fallback token-scan cho INSERT/UPDATE/ALTER (dùng nội
- * bộ bởi SemanticAnalyzer khi parse lỗi nặng)
+ * DmlTargetResolver     - fallback token-scan cho INSERT/UPDATE/ALTER (dùng nội bộ bởi SemanticAnalyzer khi parse lỗi nặng)
  * <p>
  * 2 tầng (Semantic/Syntactic) ĐỘC LẬP, không tầng nào thay được tầng kia - xem
  * javadoc gốc trong SemanticAnalyzer/SyntacticAnalyzer để biết lý do.
  */
-public class PostgresCompletionEngine {
-
-    public static void main(String[] args) {
-        var suggests = suggests("s",
-                "s".length());
-        System.out.println();
-    }
-
+public class CompletionEngine {
     public static List<Suggest> suggests(String sql, Integer cursorCharPos) {
         var suggests = new ArrayList<Suggest>();
         if (isNull(cursorCharPos)) {
             cursorCharPos = sql.length();
         }
-        final int cursorOffset = cursorCharPos;
+        int cursorOffset = cursorCharPos;
 
-        SemanticAnalyzer.SemanticAnalysisResult sem = SemanticAnalyzer.analyze(sql, cursorOffset);
-        SyntacticAnalyzer.Result syn = SyntacticAnalyzer.analyze(sql, cursorOffset - 1);
+        SemanticAnalyzer.Result semanticResult = SemanticAnalyzer.analyze(sql, cursorOffset);
+        SyntacticAnalyzer.Result syntacticResults = SyntacticAnalyzer.analyze(sql, cursorOffset - 1);
 
-        for (Map.Entry<Integer, List<Integer>> entry : syn.candidates().tokens.entrySet()) {
-            suggests.add(Suggest.of(
-                    PostgreSQLParser.VOCABULARY.getDisplayName(entry.getKey()).toLowerCase().replaceAll("'", ""), "keyword"
-            ));
+        for (Map.Entry<Integer, List<Integer>> entry : syntacticResults.candidates().tokens.entrySet()) {
+            addKeywordSuggestions(suggests, entry.getKey());
         }
 
-        for (Map.Entry<Integer, List<AntlrCompletionEngine.RuleFrame>> entry : syn.candidates().rules.entrySet()) {
+        for (Map.Entry<Integer, List<AntlrCompletionEngine.RuleFrame>> entry : syntacticResults.candidates().rules.entrySet()) {
             String ruleName = PostgreSQLParser.ruleNames[entry.getKey()];
-
             switch (ruleName) {
-                case "columnName" -> {
-                    addColumnSuggestions(suggests, sem);
-                }
-                case "dataTypeName" -> {
-                    SchemaIndex.DATA_TYPES.forEach(t -> suggests.add(Suggest.of(t, "datatype", t)));
-                }
-                case "tableAlias" -> {
-                    var tableName = AliasNameSuggester.extractTableBeforeAs(syn.tokenStream(), syn.caretTokenIndex());
-                    if (tableName != null) {
-                        String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
-                        suggests.add(Suggest.of(alias, "column"));
-                    }
-                }
-                case "tableName" -> {
-                    addTableNameSuggestions(suggests, syn);
-                }
-                default -> { /* rule khác không cần xử lý riêng */ }
+                case "columnName" -> addColumnSuggestions(suggests, semanticResult);
+                case "dataTypeName" -> addDataTypeSuggestions(suggests);
+                case "tableAlias" -> addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
+                case "tableName" -> addTableNameSuggestions(suggests, syntacticResults);
             }
         }
         return suggests;
     }
 
-    private static void addColumnSuggestions(List<Suggest> suggests, SemanticAnalyzer.SemanticAnalysisResult sem) {
+    private static void addKeywordSuggestions(List<Suggest> suggests, Integer key) {
+        suggests.add(Suggest.of(PostgreSQLParser.VOCABULARY.getDisplayName(key).toLowerCase().replace("'", ""), "keyword"));
+    }
+
+    private static void addDataTypeSuggestions(List<Suggest> suggests) {
+        SchemaIndex.DATA_TYPES.forEach(t -> suggests.add(Suggest.of(t, "datatype", t)));
+    }
+
+    private static void addTableAliasSuggestions(List<Suggest> suggests, SyntacticAnalyzer.Result syn, SemanticAnalyzer.Result sem) {
+        var tableName = AliasNameSuggester.extractTableBeforeAs(syn.tokenStream(), syn.caretTokenIndex());
+        if (tableName != null) {
+            String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
+            suggests.add(Suggest.of(alias, "column"));
+        }
+    }
+
+    private static void addColumnSuggestions(List<Suggest> suggests, SemanticAnalyzer.Result sem) {
         SchemaIndex.FUNCTIONS.forEach(fn -> suggests.add(Suggest.of(fn, "function")));
         if (sem.qualifier() != null) {
             String qualifier = sem.qualifier();
             if (sem.qualifierDerivedScope() != null) {
-                // qualifier trỏ tới subquery/CTE - lấy cột TRỰC TIẾP từ SELECT list
-                // của nó, KHÔNG tra schema bằng tên giả "<cte#N>" (luôn rỗng).
+                // qualifier trỏ tới subquery/CTE - lấy cột TRỰC TIẾP từ SELECT list của nó, KHÔNG tra schema bằng tên giả "<cte#N>".
                 DerivedColumnExpander.addDerivedColumns(suggests, qualifier, sem.qualifierDerivedScope());
             } else if (sem.qualifierResolvesTo() != null) {
                 SchemaIndex.getColumnsOfTable(sem.qualifierResolvesTo()).forEach(c -> suggests.add(Suggest.of(qualifier + "." + c.name(), "column", c.dataType())));
@@ -105,8 +96,7 @@ public class PostgresCompletionEngine {
             });
         } else {
             // Không có FROM nào cả (hoặc SemanticAnalyzer rơi vào fallback) - fallback toàn schema, phương án cuối.
-//            SchemaIndex.SCHEMA_TABLE_INDEX.keySet().forEach(t -> SchemaIndex.getColumnsOfTable(t).forEach(c ->
-//                    suggests.add(Suggest.of(c.fullName(), "column", c.dataType()))));
+            SchemaIndex.SCHEMA_TABLE_INDEX.keySet().forEach(t -> SchemaIndex.getColumnsOfTable(t).forEach(c -> suggests.add(Suggest.of(c.fullName(), "column", c.dataType()))));
         }
     }
 

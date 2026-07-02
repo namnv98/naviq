@@ -1,6 +1,5 @@
 package com.naviq.cli;
 
-import com.naviq.completion.suggests.PostgresCompletionEngine;
 import com.naviq.datasource.PostgresDataSource;
 import com.naviq.cli.layout.BottomStatusBar;
 import com.naviq.cli.terminal.CustomHighlighter;

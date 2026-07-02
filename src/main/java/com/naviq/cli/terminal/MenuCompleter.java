@@ -1,6 +1,6 @@
 package com.naviq.cli.terminal;
 
-import com.naviq.completion.suggests.PostgresCompletionEngine;
+import com.naviq.completion.suggests.CompletionEngine;
 import com.naviq.completion.model.Suggest;
 import com.naviq.cli.anchor.AnchorStrategyUtil;
 import com.naviq.cli.layout.TerminalMenu;
@@ -177,7 +177,7 @@ public class MenuCompleter {
         Ctx ctx = buildCtx(sql, cursor);
 
         List<Suggest> list = filter(
-            PostgresCompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
+            CompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
             ctx.prefix(),
             ctx.dotMode()
         );
@@ -200,7 +200,7 @@ public class MenuCompleter {
         Ctx ctx = buildCtx(sql, cursor);
 
         List<Suggest> all = filter(
-            PostgresCompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
+            CompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
             ctx.prefix(),
             ctx.dotMode()
         );
