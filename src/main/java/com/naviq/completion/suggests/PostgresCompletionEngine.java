@@ -2,7 +2,7 @@ package com.naviq.completion.suggests;
 
 import com.example.PostgreSQLParser;
 import com.naviq.datasource.SchemaIndex;
-import com.naviq.completion.syntactic.AntlrCompletionEngineFix;
+import com.naviq.completion.syntactic.AntlrCompletionEngine;
 import com.naviq.completion.model.Suggest;
 import com.naviq.completion.semantic.*;
 import com.naviq.completion.syntactic.SyntacticAnalyzer;
@@ -53,7 +53,7 @@ public class PostgresCompletionEngine {
             ));
         }
 
-        for (Map.Entry<Integer, List<AntlrCompletionEngineFix.RuleFrame>> entry : syn.candidates().rules.entrySet()) {
+        for (Map.Entry<Integer, List<AntlrCompletionEngine.RuleFrame>> entry : syn.candidates().rules.entrySet()) {
             String ruleName = PostgreSQLParser.ruleNames[entry.getKey()];
 
             switch (ruleName) {

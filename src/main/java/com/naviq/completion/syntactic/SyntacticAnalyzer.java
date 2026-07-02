@@ -26,7 +26,7 @@ public class SyntacticAnalyzer {
      * làm mất hoàn toàn tác dụng cache (mỗi completion request tính lại follow set
      * từ đầu dù ATN state giống hệt lần trước).
      */
-    private static final AntlrCompletionEngineFix.FollowSetsByState FOLLOW_SETS = new AntlrCompletionEngineFix.FollowSetsByState();
+    private static final AntlrCompletionEngine.FollowSetsByState FOLLOW_SETS = new AntlrCompletionEngine.FollowSetsByState();
 
     /**
      * PHẢI dùng chung (static) CÙNG VỚI FOLLOW_SETS ở trên - FollowSetsByState cache
@@ -72,7 +72,7 @@ public class SyntacticAnalyzer {
     public record Result(
         CommonTokenStream tokenStream,
         int caretTokenIndex,
-        AntlrCompletionEngineFix.CandidatesCollection candidates
+        AntlrCompletionEngine.CandidatesCollection candidates
     ) {}
 
     public static Result analyze(String sql, int cursorOffset) {
@@ -84,7 +84,7 @@ public class SyntacticAnalyzer {
         tokenStream.fill();
 
         int caretTokenIndex = TokenPositionUtil.findCaretTokenIndex(tokenStream, cursorOffset);
-        AntlrCompletionEngineFix engine = new AntlrCompletionEngineFix(parser, IGNORED_TOKENS, PREFERRED_RULES, FOLLOW_SETS);
+        AntlrCompletionEngine engine = new AntlrCompletionEngine(parser, IGNORED_TOKENS, PREFERRED_RULES, FOLLOW_SETS);
         var candidates = engine.collectCandidates(caretTokenIndex);
 
         return new Result(tokenStream, caretTokenIndex, candidates);

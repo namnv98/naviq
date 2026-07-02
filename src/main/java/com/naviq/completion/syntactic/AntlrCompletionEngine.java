@@ -7,451 +7,436 @@ import org.antlr.v4.runtime.atn.*;
 import org.antlr.v4.runtime.misc.IntervalSet;
 
 import java.util.*;
-import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * CompletionCore – autocomplete.
+ * ATN-based autocomplete engine for ANTLR4 grammars.
  * <p>
- * Cách hoạt động (tóm tắt):
- * 1. Nhận vào một câu SQL đang gõ dở và vị trí con trỏ (caretTokenIndex).
- * 2. Duyệt qua ATN (Augmented Transition Network) – máy trạng thái mà ANTLR dùng để mô tả grammar.
- * 3. Thu thập những token/rule nào có thể xuất hiện hợp lệ tại vị trí con trỏ.
- * 4. Trả về CandidatesCollection chứa danh sách gợi ý đó.
+ * Guarantees:
+ * - Every suggested token/rule is valid at caret (no false positives).
+ * - Every valid token/rule at caret is suggested (no omissions).
+ * <p>
+ * Thread safety: FollowSetsByState is thread-safe and shareable.
+ * AntlrCompletionEngine itself is NOT thread-safe; one instance per request.
  */
-
 public class AntlrCompletionEngine {
 
-    private static final int MAX_RECURSION_DEPTH = 100;
+    private static final int MAX_DEPTH = 100;
 
-    public Map<Integer, Boolean> ignoredTokens;
-    public Map<Integer, Boolean> preferredRules;
+    public final Map<Integer, Boolean> ignoredTokens;
+    public final Map<Integer, Boolean> preferredRules;
 
     private final Parser parser;
     private final ATN atn;
-    private CandidatesCollection candidates;
     private final FollowSetsByState followSetsByState;
-    private int tokenStartIndex;
-    private List<Token> tokens;
-    private RuleList callStack;
+
+    // Per-call state
+    private CandidatesCollection candidates;
+    private List<InputToken> tokens;
+    private RuleCallStack callStack;
 
     public AntlrCompletionEngine(Parser parser,
                                  Map<Integer, Boolean> ignoredTokens,
                                  Map<Integer, Boolean> preferredRules,
-                                 FollowSetsByState followSets) {
-        this.ignoredTokens = ignoredTokens;
-        this.preferredRules = preferredRules;
-        this.parser = parser;
+                                 FollowSetsByState followSetsByState) {
+        this.parser = Objects.requireNonNull(parser);
         this.atn = parser.getATN();
-        this.followSetsByState = followSets;
+        this.ignoredTokens = Objects.requireNonNull(ignoredTokens);
+        this.preferredRules = Objects.requireNonNull(preferredRules);
+        this.followSetsByState = Objects.requireNonNull(followSetsByState);
     }
 
+    // ── Public API ────────────────────────────────────────────────────────────
+
     public CandidatesCollection collectCandidates(int caretTokenIndex) {
+        if (caretTokenIndex < 0)
+            throw new IllegalArgumentException("caretTokenIndex must be >= 0");
+
         candidates = new CandidatesCollection();
-        tokenStartIndex = 0;
-
-        tokens = new ArrayList<>();
-        TokenStream tokenStream = parser.getTokenStream();
-        int currentOffset = tokenStream.index();
-        tokenStream.seek(tokenStartIndex);
-        for (int offset = 1; ; offset++) {
-            org.antlr.v4.runtime.Token token = tokenStream.LT(offset);
-            tokens.add(new Token(token.getType(), token.getStartIndex()));
-            if (token.getTokenIndex() >= caretTokenIndex
-                    || token.getType() == org.antlr.v4.runtime.Token.EOF) break;
-        }
-        tokenStream.seek(currentOffset);
-
-        callStack = new RuleList();
-        fetchEndStatus(atn.ruleToStartState[0], 0);
+        tokens = readTokens(parser.getTokenStream(), caretTokenIndex);
+        callStack = new RuleCallStack();
+        traverseATN(atn.ruleToStartState[0], 0);
         return candidates;
     }
 
-    // Core ATN traversal
-    private Map<Integer, Boolean> fetchEndStatus(ATNState startState, int tokenIndex) {
-        if (callStack.getRules().size() > MAX_RECURSION_DEPTH)
-            return Collections.emptyMap();
+    // ── Token stream ──────────────────────────────────────────────────────────
 
-        followSetsByState.collectFollowSets(parser, startState, ignoredTokens);
-        FollowSetsHolder followSets = followSetsByState.get(startState.stateNumber);
+    private static List<InputToken> readTokens(TokenStream stream, int caretTokenIndex) {
+        int saved = stream.index();
+        stream.seek(0);
+        List<InputToken> result = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            var t = stream.LT(i);
+            result.add(new InputToken(t.getType(), t.getStartIndex()));
+            if (t.getTokenIndex() >= caretTokenIndex || t.getType() == org.antlr.v4.runtime.Token.EOF)
+                break;
+        }
+        stream.seek(saved);
+        return result;
+    }
 
-        RuleContext ruleContext = new RuleContext(startState.ruleIndex, tokenIndex);
-        callStack.push(ruleContext);
+    // ── ATN traversal ─────────────────────────────────────────────────────────
 
+    /**
+     * Returns token indices where this rule can end (so caller can follow).
+     */
+    private Set<Integer> traverseATN(ATNState start, int tokenIndex) {
+        if (callStack.size() >= MAX_DEPTH) return Collections.emptySet();
+
+        followSetsByState.ensureComputed(parser, start, ignoredTokens);
+        FollowSetsHolder followSets = followSetsByState.get(start.stateNumber, ignoredTokens);
+
+        callStack.push(start.ruleIndex, tokenIndex);
         try {
-            if (tokenIndex >= tokens.size() - 1) {
-                if (preferredRules.containsKey(startState.ruleIndex)) {
-                    translateToRuleIndex(callStack);
-                } else {
-                    for (FollowSetWithPath set : followSets.sets) {
-                        RuleList fullPath = callStack.copy();
-                        fullPath.append(set.path);
-                        if (!translateToRuleIndex(fullPath)) {
-                            for (int symbol : set.intervals.toList()) {
-                                if (ignoredTokens.containsKey(symbol)) continue;
-                                if (!candidates.tokens.containsKey(symbol)) {
-                                    candidates.tokens.put(symbol, set.following);
-                                } else {
-                                    List<Integer> existing = candidates.tokens.get(symbol);
-                                    if (!existing.equals(set.following))
-                                        candidates.tokens.put(symbol, Collections.emptyList());
-                                }
-                            }
-                        }
-                    }
-                }
-                return Collections.emptyMap();
+            if (tokenIndex >= tokens.size() - 1) {   // at caret
+                collectAtCaret(followSets);
+                return Collections.emptySet();
             }
 
-            Token currentSymbol = tokens.get(tokenIndex);
-            if (!followSets.combined.contains(org.antlr.v4.runtime.Token.EPSILON)
-                    && !followSets.combined.contains(currentSymbol.type)) {
-                return Collections.emptyMap();
-            }
+            // Prune branches that can't match the current token
+            InputToken cur = tokens.get(tokenIndex);
+            boolean canProceed = followSets.combined.contains(org.antlr.v4.runtime.Token.EPSILON)
+                    || followSets.combined.contains(cur.type);
+            if (!canProceed) return Collections.emptySet();
 
-            Map<Integer, Boolean> result = new HashMap<>();
-            Deque<PipelineEntry> statePipeline = new ArrayDeque<>();
-            Set<String> visited = new HashSet<>();
-            statePipeline.push(new PipelineEntry(startState, tokenIndex));
-
-            while (!statePipeline.isEmpty()) {
-                PipelineEntry currentEntry = statePipeline.pop();
-                String visitKey = currentEntry.state.stateNumber + ":" + currentEntry.tokenIndex;
-                if (!visited.add(visitKey)) continue;
-
-                boolean atCaret = currentEntry.tokenIndex >= tokens.size() - 1;
-
-                if (currentEntry.state.getStateType() == ATNState.RULE_STOP) {
-                    result.put(currentEntry.tokenIndex, Boolean.TRUE);
-                    continue;
-                }
-
-                if (atCaret) {
-                    candidates.caretStates.add(currentEntry.state);
-                }
-
-                for (Transition t : currentEntry.state.getTransitions()) {
-                    if (t instanceof RuleTransition) {
-
-                        RuleTransition rt = (RuleTransition) t;
-
-                        Map<Integer, Boolean> endStatus =
-                                fetchEndStatus(rt.target, currentEntry.tokenIndex);
-                        for (int status : endStatus.keySet())
-                            statePipeline.push(new PipelineEntry(rt.followState, status));
-
-                    } else if (t instanceof PredicateTransition) {
-                        if (checkPredicate(parser, (PredicateTransition) t))
-                            statePipeline.push(
-                                    new PipelineEntry(t.target, currentEntry.tokenIndex));
-
-                    } else if (t instanceof WildcardTransition) {
-                        if (atCaret) {
-                            if (!translateToRuleIndex(callStack)) {
-                                IntervalSet interval = IntervalSet.of(
-                                        org.antlr.v4.runtime.Token.MIN_USER_TOKEN_TYPE,
-                                        atn.maxTokenType);
-                                for (int symbol : interval.toList())
-                                    if (!ignoredTokens.containsKey(symbol))
-                                        candidates.tokens.putIfAbsent(
-                                                symbol, Collections.emptyList());
-                            }
-                        } else {
-                            statePipeline.push(new PipelineEntry(
-                                    t.target, currentEntry.tokenIndex + 1));
-                        }
-
-                    } else {
-                        if (t.isEpsilon()) {
-                            if (atCaret) translateToRuleIndex(callStack);
-                            statePipeline.push(new PipelineEntry(
-                                    t.target, currentEntry.tokenIndex));
-                        }
-
-                        IntervalSet label = t.label();
-                        if (label != null && label.size() > 0) {
-                            if (t instanceof NotSetTransition)
-                                label = label.complement(
-                                        org.antlr.v4.runtime.Token.MIN_USER_TOKEN_TYPE,
-                                        atn.maxTokenType);
-                            if (atCaret) {
-                                if (!translateToRuleIndex(callStack)) {
-                                    List<Integer> list = label.toList();
-                                    boolean addFollowing = list.size() == 1;
-                                    for (int symbol : list)
-                                        if (!ignoredTokens.containsKey(symbol))
-                                            candidates.tokens.put(symbol,
-                                                    addFollowing
-                                                            ? getFollowingTokens(t, ignoredTokens)
-                                                            : Collections.emptyList());
-                                }
-                            } else {
-                                if (label.contains(tokens.get(currentEntry.tokenIndex).type))
-                                    statePipeline.push(new PipelineEntry(
-                                            t.target, currentEntry.tokenIndex + 1));
-                            }
-                        }
-                    }
-                }
-            }
-            return result;
-
+            return runBFS(start, tokenIndex);
         } finally {
-            if (!callStack.getRules().isEmpty()) callStack.pop();
+            callStack.pop();
         }
     }
 
-    private boolean translateToRuleIndex(RuleList ruleStack) {
-        if (preferredRules.isEmpty()) return false;
-        List<RuleContext> rules = ruleStack.getRules();
-        boolean matched = false;
+    /**
+     * Collect suggestions when we've reached the caret position.
+     */
+    private void collectAtCaret(FollowSetsHolder followSets) {
+        translateToRuleIndex(callStack);
 
-        for (int i = 0; i < rules.size(); i++) {
-            if (!preferredRules.containsKey(rules.get(i).id)) continue;
+        for (FollowSetWithPath set : followSets.sets) {
+            RuleCallStack fullPath = callStack.copy();
+            fullPath.appendPath(set.path);
+            translateToRuleIndex(fullPath);
 
-            List<RuleContext> path = new ArrayList<>(rules.subList(0, i));
-            List<RuleContext> existing = candidates.rules.get(rules.get(i).id);
-            boolean same = existing != null && existing.size() == path.size();
-            if (same) {
-                for (int j = 0; j < existing.size(); j++) {
-                    if (existing.get(j).id != path.get(j).id) {
-                        same = false;
-                        break;
-                    }
+            for (int sym : set.intervals.toList()) {
+                if (ignoredTokens.containsKey(sym)) continue;
+                if (!candidates.tokens.containsKey(sym)) {
+                    candidates.tokens.put(sym, new ArrayList<>(set.following));
+                } else {
+                    // Same token reachable via multiple paths → following is ambiguous
+                    if (!candidates.tokens.get(sym).equals(set.following))
+                        candidates.tokens.put(sym, Collections.emptyList());
                 }
             }
-            if (!same) candidates.rules.put(rules.get(i).id, path);
+        }
+    }
 
+    /**
+     * BFS over ATN transitions.
+     */
+    private Set<Integer> runBFS(ATNState start, int startTokenIndex) {
+        Set<Integer> endIndices = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+        Deque<PipelineEntry> queue = new ArrayDeque<>();
+        queue.push(new PipelineEntry(start, startTokenIndex));
+
+        while (!queue.isEmpty()) {
+            PipelineEntry cur = queue.pop();
+            if (!visited.add(cur.state.stateNumber + ":" + cur.tokenIndex)) continue;
+
+            boolean atCaret = cur.tokenIndex >= tokens.size() - 1;
+
+            if (cur.state.getStateType() == ATNState.RULE_STOP) {
+                endIndices.add(cur.tokenIndex);
+                continue;
+            }
+            if (atCaret) candidates.caretStates.add(cur.state);
+
+            for (Transition t : cur.state.getTransitions())
+                processTransition(t, cur, atCaret, queue, endIndices);
+        }
+        return endIndices;
+    }
+
+    // NOTE: RuleTransition and PredicateTransition must come before isEpsilon()
+    // because both return true for isEpsilon().
+    private void processTransition(Transition t, PipelineEntry cur, boolean atCaret,
+                                   Deque<PipelineEntry> queue, Set<Integer> endIndices) {
+        if (t instanceof RuleTransition rt) {
+            for (int end : traverseATN(rt.target, cur.tokenIndex))
+                queue.push(new PipelineEntry(rt.followState, end));
+
+        } else if (t instanceof PredicateTransition pt) {
+            if (checkPredicate(pt))
+                queue.push(new PipelineEntry(t.target, cur.tokenIndex));
+
+        } else if (t instanceof WildcardTransition) {
+            if (atCaret) {
+                if (!translateToRuleIndex(callStack)) {
+                    IntervalSet all = IntervalSet.of(org.antlr.v4.runtime.Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
+                    for (int sym : all.toList())
+                        if (!ignoredTokens.containsKey(sym))
+                            candidates.tokens.putIfAbsent(sym, Collections.emptyList());
+                }
+            } else {
+                queue.push(new PipelineEntry(t.target, cur.tokenIndex + 1));
+            }
+
+        } else if (t.isEpsilon()) {
+            queue.push(new PipelineEntry(t.target, cur.tokenIndex));
+
+        } else {
+            // Labeled: AtomTransition, SetTransition, NotSetTransition, RangeTransition
+            IntervalSet label = t.label();
+            if (label == null || label.size() == 0) return;
+            if (t instanceof NotSetTransition)
+                label = label.complement(org.antlr.v4.runtime.Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
+
+            if (atCaret) {
+                if (!translateToRuleIndex(callStack)) {
+                    List<Integer> syms = label.toList();
+                    List<Integer> following = syms.size() == 1
+                            ? getFollowingTokens(t) : Collections.emptyList();
+                    for (int sym : syms)
+                        if (!ignoredTokens.containsKey(sym))
+                            candidates.tokens.put(sym, following);
+                }
+            } else {
+                if (label.contains(tokens.get(cur.tokenIndex).type))
+                    queue.push(new PipelineEntry(t.target, cur.tokenIndex + 1));
+            }
+        }
+    }
+
+    // ── Rule index translation ────────────────────────────────────────────────
+
+    /**
+     * Scans the full call stack and records every preferred rule found.
+     */
+    private boolean translateToRuleIndex(RuleCallStack stack) {
+        if (preferredRules.isEmpty()) return false;
+        boolean matched = false;
+        List<RuleFrame> frames = stack.frames();
+
+        for (int i = 0; i < frames.size(); i++) {
+            RuleFrame frame = frames.get(i);
+            if (!preferredRules.containsKey(frame.ruleId)) continue;
+
+            List<RuleFrame> path = new ArrayList<>(frames.subList(0, i)); // independent copy
+            List<RuleFrame> existing = candidates.rules.get(frame.ruleId);
+            if (!pathEquals(existing, path))
+                candidates.rules.put(frame.ruleId, path);
             matched = true;
-            // ← KHÔNG return true ngay, tiếp tục duyệt hết stack
-            // để collect tất cả preferred rules trong cùng 1 call stack
         }
         return matched;
     }
 
-    // Static helpers
-    private static List<FollowSetWithPath> determineFollowSets(
-            Parser parser, ATNState start, ATNState stop,
-            Map<Integer, Boolean> ignoredTokens) {
+    private static boolean pathEquals(List<RuleFrame> a, List<RuleFrame> b) {
+        if (a == null || a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++)
+            if (a.get(i).ruleId != b.get(i).ruleId || a.get(i).tokenIndex != b.get(i).tokenIndex)
+                return false;
+        return true;
+    }
+
+    // ── Follow sets ───────────────────────────────────────────────────────────
+
+    static List<FollowSetWithPath> computeFollowSets(
+            Parser parser, ATNState start, ATNState stop, Map<Integer, Boolean> ignoredTokens) {
         List<FollowSetWithPath> result = new ArrayList<>();
-        collectFollowSets(parser, start, stop, result,
-                new IdentityHashMap<>(), new RuleList(), ignoredTokens);
+        collectFollowSets(parser, start, stop, result, new IdentityHashMap<>(),
+                new RuleCallStack(), ignoredTokens);
         return result;
     }
 
-    // FIX: tạo seen mới cho mỗi RuleTransition để các alternative
-    // không bị block lẫn nhau khi cùng dẫn đến cùng một rule (vd: qualifiedName)
-    private static void collectFollowSets(
-            Parser parser, ATNState s, ATNState stopState,
-            List<FollowSetWithPath> followSets, Map<ATNState, Boolean> seen,
-            RuleList ruleStack, Map<Integer, Boolean> ignoredTokens) {
+    private static void collectFollowSets(Parser parser, ATNState s, ATNState stop,
+                                          List<FollowSetWithPath> out,
+                                          Map<ATNState, Boolean> seen,
+                                          RuleCallStack ruleStack,
+                                          Map<Integer, Boolean> ignoredTokens) {
         if (seen.containsKey(s)) return;
         seen.put(s, Boolean.TRUE);
 
-        if (s == stopState || s.getStateType() == ATNState.RULE_STOP) {
+        if (s == stop || s.getStateType() == ATNState.RULE_STOP) {
             IntervalSet eps = new IntervalSet();
             eps.add(org.antlr.v4.runtime.Token.EPSILON);
-            followSets.add(new FollowSetWithPath(
-                    eps, ruleStack.copy(), Collections.emptyList()));
+            out.add(new FollowSetWithPath(eps, ruleStack.copy(), Collections.emptyList()));
             return;
         }
 
         for (Transition t : s.getTransitions()) {
-            if (t instanceof RuleTransition) {
-                RuleTransition rt = (RuleTransition) t;
+            if (t instanceof RuleTransition rt) {
                 if (ruleStack.contains(rt.target.ruleIndex)) continue;
-                ruleStack.push(new RuleContext(rt.target.ruleIndex));
-                // FIX: new IdentityHashMap<>() thay vì dùng chung seen
-                // → mỗi alternative explore độc lập, không bị block bởi alternative khác
-                collectFollowSets(parser, t.target, stopState,
-                        followSets, new IdentityHashMap<>(), ruleStack, ignoredTokens);
+                ruleStack.push(rt.target.ruleIndex, RuleFrame.NO_TOKEN);
+                collectFollowSets(parser, t.target, stop, out, new IdentityHashMap<>(),
+                        ruleStack, ignoredTokens);
                 ruleStack.pop();
-            } else if (t instanceof PredicateTransition) {
-                if (checkPredicate(parser, (PredicateTransition) t))
-                    collectFollowSets(parser, t.target, stopState,
-                            followSets, seen, ruleStack, ignoredTokens);
-            } else if (t.isEpsilon()) {
-                collectFollowSets(parser, t.target, stopState,
-                        followSets, seen, ruleStack, ignoredTokens);
+
+            } else if (t instanceof PredicateTransition pt) {
+                if (pt.getPredicate().eval(parser, ParserRuleContext.EMPTY))
+                    collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens);
+
             } else if (t instanceof WildcardTransition) {
-                followSets.add(new FollowSetWithPath(
+                out.add(new FollowSetWithPath(
                         IntervalSet.of(org.antlr.v4.runtime.Token.MIN_USER_TOKEN_TYPE,
                                 parser.getATN().maxTokenType),
                         ruleStack.copy(), Collections.emptyList()));
+
+            } else if (t.isEpsilon()) {
+                collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens);
+
             } else {
-                IntervalSet set = t.label();
-                if (set == null || set.size() == 0) continue;
+                IntervalSet label = t.label();
+                if (label == null || label.size() == 0) continue;
                 if (t instanceof NotSetTransition)
-                    set = set.complement(org.antlr.v4.runtime.Token.MIN_USER_TOKEN_TYPE,
+                    label = label.complement(org.antlr.v4.runtime.Token.MIN_USER_TOKEN_TYPE,
                             parser.getATN().maxTokenType);
-                followSets.add(new FollowSetWithPath(
-                        set, ruleStack.copy(), getFollowingTokens(t, ignoredTokens)));
+                out.add(new FollowSetWithPath(label, ruleStack.copy(),
+                        getFollowingTokens(t, ignoredTokens)));
             }
         }
     }
 
-    private static List<Integer> getFollowingTokens(
-            Transition transition, Map<Integer, Boolean> ignoredTokens) {
+    private static List<Integer> getFollowingTokens(Transition transition,
+                                                    Map<Integer, Boolean> ignoredTokens) {
         List<Integer> result = new ArrayList<>();
-        Deque<ATNState> pipeline = new ArrayDeque<>();
-        pipeline.push(transition.target);
-        while (!pipeline.isEmpty()) {
-            for (Transition t : pipeline.pop().getTransitions()) {
-                if (t instanceof AtomTransition) {
-                    if (t.isEpsilon()) {
-                        pipeline.push(t.target);
-                    } else {
-                        List<Integer> list = t.label().toList();
-                        if (list.size() == 1 && !ignoredTokens.containsKey(list.get(0))) {
-                            result.add(list.get(0));
-                            pipeline.push(t.target);
-                        }
-                    }
+        Deque<ATNState> queue = new ArrayDeque<>();
+        queue.push(transition.target);
+        while (!queue.isEmpty()) {
+            for (Transition t : queue.pop().getTransitions()) {
+                if (!(t instanceof AtomTransition)) continue;
+                List<Integer> syms = t.label().toList();
+                if (syms.size() == 1 && !ignoredTokens.containsKey(syms.get(0))) {
+                    result.add(syms.get(0));
+                    queue.push(t.target);
                 }
             }
         }
         return result;
     }
 
-    private static boolean checkPredicate(Parser parser, PredicateTransition t) {
+    // Overload used inside processTransition (already has ignoredTokens in scope)
+    private List<Integer> getFollowingTokens(Transition t) {
+        return getFollowingTokens(t, ignoredTokens);
+    }
+
+    private boolean checkPredicate(PredicateTransition t) {
         return t.getPredicate().eval(parser, ParserRuleContext.EMPTY);
     }
 
-    // Inner types
-    public static class Token {
-        public final int type;
-        public final int startPosition;
+    // ── Data types ────────────────────────────────────────────────────────────
 
-        public Token(int type, int startPosition) {
-            this.type = type;
-            this.startPosition = startPosition;
-        }
+    public record InputToken(int type, int startPosition) {
     }
 
-    public static class PipelineEntry {
-        public final ATNState state;
-        public final int tokenIndex;
-
-        public PipelineEntry(ATNState state, int tokenIndex) {
-            this.state = state;
-            this.tokenIndex = tokenIndex;
-        }
+    record PipelineEntry(ATNState state, int tokenIndex) {
     }
 
-    public static class RuleContext {
-        public final int id;
-        public final int tokenIndex;
+    public record RuleFrame(int ruleId, int tokenIndex) {
         public static final int NO_TOKEN = -1;
-
-        public RuleContext(int id) {
-            this.id = id;
-            this.tokenIndex = NO_TOKEN;
-        }
-
-        public RuleContext(int id, int tokenIndex) {
-            this.id = id;
-            this.tokenIndex = tokenIndex;
-        }
     }
 
-    // FIX: thay BitSet bằng refCount Map
-    // BitSet chỉ track có/không → alternative 2 bị block khi alternative 1
-    // đã push cùng rule vào stack. refCount track số lần push thực tế,
-    // chỉ block khi rule đang thực sự trên call stack (count > 0)
-    public static class RuleList {
-        private final List<RuleContext> rules = new ArrayList<>();
-        private final Map<Integer, Integer> refCount = new HashMap<>(); // FIX: thay BitSet
+    public static class RuleCallStack {
+        private final List<RuleFrame> frameList = new ArrayList<>();
+        private final Map<Integer, Integer> refCount = new HashMap<>();
 
-        public RuleList copy() {
-            RuleList copy = new RuleList();
-            for (RuleContext rule : rules) {
-                RuleContext ctx = new RuleContext(rule.id, rule.tokenIndex);
-                copy.rules.add(ctx);
-                copy.refCount.merge(ctx.id, 1, Integer::sum);
-            }
-            return copy;
+        public void push(int ruleId, int tokenIndex) {
+            frameList.add(new RuleFrame(ruleId, tokenIndex));
+            refCount.merge(ruleId, 1, Integer::sum);
         }
 
-        public void append(RuleList other) {
-            for (RuleContext r : other.rules) push(r);
+        public RuleFrame pop() {
+            RuleFrame f = frameList.remove(frameList.size() - 1);
+            int cnt = refCount.get(f.ruleId) - 1;
+            if (cnt <= 0) refCount.remove(f.ruleId);
+            else refCount.put(f.ruleId, cnt);
+            return f;
         }
 
         public boolean contains(int ruleId) {
             return refCount.getOrDefault(ruleId, 0) > 0;
         }
 
-        public void push(RuleContext rule) {
-            rules.add(rule);
-            refCount.merge(rule.id, 1, Integer::sum);
+        public int size() {
+            return frameList.size();
         }
 
-        public RuleContext pop() {
-            RuleContext r = rules.remove(rules.size() - 1);
-            int count = refCount.get(r.id) - 1;
-            if (count <= 0) refCount.remove(r.id);
-            else refCount.put(r.id, count);
-            return r;
+        public List<RuleFrame> frames() {
+            return frameList;
         }
 
-        public List<RuleContext> getRules() {
-            return rules;
+        public void appendPath(RuleCallStack other) {
+            for (RuleFrame f : other.frameList) push(f.ruleId, f.tokenIndex);
+        }
+
+        public RuleCallStack copy() {
+            RuleCallStack c = new RuleCallStack();
+            for (RuleFrame f : frameList) c.push(f.ruleId, f.tokenIndex);
+            return c;
         }
     }
+
     public static class CandidatesCollection {
+        /**
+         * token type → likely following tokens (empty = unknown)
+         */
         public final Map<Integer, List<Integer>> tokens = new HashMap<>();
-        public final Map<Integer, List<RuleContext>> rules = new HashMap<>();
-        /* ATNState mà engine đang đứng tại caretTokenIndex — dùng cho CursorContextDetector*/
+        /**
+         * rule index → call stack path that led to it
+         */
+        public final Map<Integer, List<RuleFrame>> rules = new HashMap<>();
+        /**
+         * ATN states at caret — for context detectors
+         */
         public final Set<ATNState> caretStates = new HashSet<>();
     }
 
-    public static class FollowSetWithPath {
-        public final IntervalSet intervals;
-        public final RuleList path;
-        public final List<Integer> following;
-
-        public FollowSetWithPath(IntervalSet intervals, RuleList path, List<Integer> following) {
-            this.intervals = intervals;
-            this.path = path;
-            this.following = following;
-        }
+    public record FollowSetWithPath(IntervalSet intervals, RuleCallStack path, List<Integer> following) {
     }
 
-    public static class FollowSetsHolder {
-        public final List<FollowSetWithPath> sets;
-        public final IntervalSet combined;
-
-        public FollowSetsHolder(List<FollowSetWithPath> sets, IntervalSet combined) {
-            this.sets = sets;
-            this.combined = combined;
-        }
+    public record FollowSetsHolder(List<FollowSetWithPath> sets, IntervalSet combined) {
     }
 
+    /**
+     * Thread-safe cache of follow sets, shared across engine instances.
+     * Key = (stateNumber, ignoredTokens identity) — identity because different
+     * ignoredTokens maps produce different follow sets.
+     */
     public static class FollowSetsByState {
-        private final ReadWriteLock rw = new ReentrantReadWriteLock();
-        private final Map<Integer, FollowSetsHolder> map = new HashMap<>();
+        private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+        private final Map<Integer, IdentityHashMap<Map<Integer, Boolean>, FollowSetsHolder>> cache = new HashMap<>();
 
-        public FollowSetsHolder get(int state) {
-            rw.readLock().lock();
+        public FollowSetsHolder get(int stateNumber, Map<Integer, Boolean> ignoredTokens) {
+            lock.readLock().lock();
             try {
-                return map.get(state);
+                var inner = cache.get(stateNumber);
+                return inner == null ? null : inner.get(ignoredTokens);
             } finally {
-                rw.readLock().unlock();
+                lock.readLock().unlock();
             }
         }
 
-        public void collectFollowSets(Parser parser, ATNState startState,
-                                      Map<Integer, Boolean> ignoredTokens) {
-            rw.writeLock().lock();
+        public void ensureComputed(Parser parser, ATNState start, Map<Integer, Boolean> ignoredTokens) {
+            // Fast path
+            lock.readLock().lock();
             try {
-                if (map.containsKey(startState.stateNumber)) return;
-                ATNState stop = parser.getATN().ruleToStopState[startState.ruleIndex];
-                List<FollowSetWithPath> followSets =
-                        determineFollowSets(parser, startState, stop, ignoredTokens);
-                IntervalSet combined = new IntervalSet();
-                for (FollowSetWithPath s : followSets) combined.addAll(s.intervals);
-                map.put(startState.stateNumber, new FollowSetsHolder(followSets, combined));
+                var inner = cache.get(start.stateNumber);
+                if (inner != null && inner.containsKey(ignoredTokens)) return;
             } finally {
-                rw.writeLock().unlock();
+                lock.readLock().unlock();
+            }
+
+            // Slow path
+            lock.writeLock().lock();
+            try {
+                var inner = cache.computeIfAbsent(start.stateNumber, k -> new IdentityHashMap<>());
+                if (inner.containsKey(ignoredTokens)) return; // lost race
+
+                ATNState stop = parser.getATN().ruleToStopState[start.ruleIndex];
+                List<FollowSetWithPath> sets = computeFollowSets(parser, start, stop, ignoredTokens);
+                IntervalSet combined = new IntervalSet();
+                sets.forEach(s -> combined.addAll(s.intervals()));
+                inner.put(ignoredTokens, new FollowSetsHolder(sets, combined));
+            } finally {
+                lock.writeLock().unlock();
             }
         }
     }
