@@ -1,145 +1,122 @@
 # 🚀 NaviQ CLI
 
-> **Grammar-driven SQL autocomplete powered by ANTLR ATN traversal**
+> A SQL autocomplete engine that asks the parser instead of guessing.
 
-**NaviQ CLI** is a command-line tool that provides **intelligent SQL autocomplete**, built as part of an exploration
-into how **ANTLR-based syntax completion** works under the hood.
+Most SQL autocomplete tools work by prefix-matching against a list of known names. That's fast to build and mostly
+works — until the query gets a subquery, a CTE that references an earlier CTE, or an alias three levels deep, and
+suddenly the tool is just guessing again.
+
+**NaviQ CLI** takes a different approach: it asks ANTLR's own grammar what's valid at the cursor, and asks a real
+scope-resolution pass what an alias actually points to — the same two questions a database engine would ask, just
+answered early enough to suggest something useful mid-keystroke.
 
 ---
 ![img.png](img.png)
+
 ## ✨ Highlights
 
-* ⚡ **Context-aware autocomplete**
-* 🧠 **Grammar-driven (ANTLR4)**
-* 🔍 **ATN traversal for valid next tokens**
-* 🧩 **Understands aliases, CTEs, and subqueries**
-* 🖥️ **Custom terminal UI (JLine)**
-* 🚀 **Deterministic suggestions (no guessing)**
+* **Two independent analyses, not one heuristic** — a syntax layer (what token is grammatically valid here) and a
+  semantic layer (what does this alias actually resolve to)
+* **Deterministic, not fuzzy** — suggestions come from ATN traversal, not prefix scoring
+* **Understands real SQL structure** — nested subqueries, CTEs referencing earlier CTEs, JOINs, alias shadowing
+* **Survives half-typed input** — `SELECT id.` and `SELECT | FROM t` resolve correctly instead of confusing the
+  parser
+* **A typo doesn't take down the query** — one bad table name doesn't break suggestions for the rest of the
+  statement
+* **Custom terminal UI (JLine)**
 
 ---
 
 ## ⚙️ How It Works
 
+Every keystroke runs two analyses in parallel and combines their answers. Neither one can replace the other — they
+literally answer different questions.
+
 ```
-input SQL + cursor position
-        │
-        ▼
-ANTLR Lexer → Token Stream
-        │
-        ▼
-locate caret position
-        │
-        ▼
-CompletionCore.collectCandidates()
-        │
-        ▼
-ATN traversal (DFS/BFS)
-        │
-        ▼
-collect:
-  - valid tokens
-  - valid grammar rules
-        │
-        ▼
-semantic mapping:
-  - tables
-  - columns
-  - functions
-  - aliases
-        │
-        ▼
-filter + ranking
-        │
-        ▼
-render → terminal UI
+                     input SQL + cursor position
+                                 │
+                 ┌───────────────┴───────────────┐
+                 ▼                                ▼
+      SYNTACTIC LAYER                   SEMANTIC LAYER
+      "what's grammatically             "what does this name
+       valid right here?"                actually point to?"
+
+      ATN traversal (DFS/BFS)            tolerant grammar +
+      stops exactly at the caret         tree walk over scopes
+
+      → candidate token types            → alias → table / CTE /
+      → candidate grammar rules            subquery resolution
+        (columnName, tableName…)         → real columns a derived
+                                            table projects
+                 │                                │
+                 └───────────────┬────────────────┘
+                                  ▼
+                 "columnName expected here" +
+                 "this alias resolves to orders"
+                     → suggest orders' real columns
+                                  │
+                                  ▼
+                    schema lookup (real DB columns/types)
+                                  │
+                                  ▼
+                            terminal UI (JLine)
 ```
 
 ---
 
-## 🧠 Core Idea
+## 🧠 The Core Idea
 
-Instead of guessing:
+Naive autocomplete asks one question: *what starts with what the user just typed?* That's a string-matching
+problem, and it treats SQL as flat text.
 
-> ❌ match prefix → filter strings
+NaviQ CLI asks two narrower questions instead, and only combines the answers at the end:
 
-NaviQ CLI leverages the parser’s internal mechanism:
+**Is this grammatically valid?** ANTLR's ATN (Augmented Transition Network) already encodes every legal path
+through the grammar. At the caret's token index, walking that network directly yields every token and rule that
+could legally appear next — not a guess, a fact derived from the grammar itself.
 
-> ✅ **ANTLR’s ATN (Abstract Transition Network)**
+**What does that name actually mean?** Knowing that a `columnName` is grammatically valid at the cursor is useless
+without knowing *which table*. A separate pass walks the parse tree and resolves aliases through nested subqueries,
+CTEs, and JOINs the way a real query planner would — including cases like a CTE that references an earlier CTE, or
+an alias that legitimately shadows an outer one with the same name.
 
-At the cursor position:
-
-* determine the current parser state
-* traverse all valid transitions in the ATN
-* collect **all possible next tokens and rules**
-
-👉 Result:
-
-* ✔ Suggestions are always **syntactically valid**
-* ✔ No heuristics
-* ✔ Fully deterministic
+Put together: every suggestion is both syntactically valid *and* semantically correct, not just a plausible-looking
+string.
 
 ---
 
-## 🧩 Architecture
+## 🩹 The Hard Part: Input That Isn't Finished Yet
 
-```
-          +----------------------+
-          |   SQL Input + Caret  |
-          +----------+-----------+
-                     |
-                     v
-          +----------------------+
-          |      ANTLR Lexer     |
-          +----------------------+
-                     |
-                     v
-          +----------------------+
-          |     Token Stream     |
-          +----------------------+
-                     |
-                     v
-          +----------------------+
-          |   Completion Core    |
-          |  (ATN Traversal)     |
-          +----------------------+
-                     |
-          +----------+-----------+
-          |                      |
-          v                      v
-+----------------+     +------------------+
-| Syntax Tokens  |     | Grammar Rules    |
-+----------------+     +------------------+
-          \              /
-           \            /
-            v          v
-        +----------------------+
-        | Semantic Mapping     |
-        | (schema, alias, ctx) |
-        +----------------------+
-                     |
-                     v
-        +----------------------+
-        |   Suggestion Engine  |
-        +----------------------+
-                     |
-                     v
-        +----------------------+
-        |    Terminal UI       |
-        |      (JLine)         |
-        +----------------------+
-```
+Autocomplete has to work on SQL mid-sentence. `SELECT id.` isn't valid — the dot has nothing after it. Parse that
+naively and ANTLR's default error recovery starts guessing about what to do with the broken token, and that
+guessing can go wrong in ways that are easy to miss: during development, a trailing alias in an otherwise unrelated
+part of the query got silently misattributed as a column alias, because recovery guessed the error was somewhere it
+wasn't.
+
+Two fixes, borrowed from how DBeaver's SQL engine handles the same problem:
+
+**Make the grammar tolerant instead of recovering from an error.** A dangling `identifier.` is accepted as valid
+grammar (`qualifiedName: identifier (DOT identifier)* DOT??` — non-greedy, so it doesn't swallow `table.*` by
+mistake). There's no error to recover from, so there's nothing to guess wrong about.
+
+**Give the parser something to anchor to when there's nothing there at all.** `SELECT | FROM t` has no token at the
+cursor for the grammar to hang onto. A synthetic identifier gets inserted at the cursor before parsing — but only
+when the cursor isn't already right after a dot, so it never interferes with the fix above. Without this, error
+recovery can delete a real keyword like `FROM` while trying to make sense of the gap.
+
+A third safeguard, `isUnreliable()`, cross-checks the parse tree against the error listener's reported token
+positions, so even a genuine typo (`123abc` as a table name) stays contained to that one table instead of poisoning
+scope resolution for the rest of the query.
 
 ---
 
 ## 🎯 Examples
 
-### Basic alias resolution
+**Basic alias resolution**
 
 ```sql
-select u. from users u
+select u.from users u
 ```
-
-**Suggestions:**
 
 ```
 u.id
@@ -147,115 +124,89 @@ u.email
 u.created_at
 ```
 
----
-
-### CTE-aware completion
+**CTE-aware completion**
 
 ```sql
-WITH t AS (
-  SELECT id, email FROM users
-)
-SELECT t. FROM t
+WITH t AS (SELECT id, email FROM users)
+SELECT t.FROM t
 ```
-
-**Suggestions:**
 
 ```
 t.id
 t.email
 ```
 
----
+Resolved from the CTE's own `SELECT` list — not from re-scanning `users` — so a CTE with a `WHERE` or renamed
+columns still suggests exactly what it actually projects.
 
-### Subquery with alias
+**Subquery with alias**
 
 ```sql
-SELECT * FROM (
-  SELECT id AS uid, name FROM users
-) u
+SELECT *
+FROM (SELECT id AS uid, name FROM users) u
 WHERE u.
 ```
-
-**Suggestions:**
 
 ```
 u.uid
 u.name
 ```
 
+**A typo elsewhere doesn't take the query down**
+
+```sql
+SELECT *
+FROM 999bad bad
+         JOIN users good ON true
+WHERE good.
+```
+
+`999bad` is flagged as invalid — but `good.`, a perfectly valid alias in the same query, still resolves normally:
+
+```
+good.id
+good.email
+```
+
 ---
 
 ## 🔍 Why Not pgcli?
 
-pgcli is a great tool.
+pgcli is a great tool, and this isn't trying to replace it. Its autocomplete leans on heuristics and metadata rather
+than grammar traversal, which is fast and usually good enough — but it doesn't resolve scope through nested
+subqueries or CTEs the way a real parser does, so complex queries eventually outrun it.
 
-However:
-
-* its autocomplete mainly relies on **heuristics and metadata**
-* it does not use **grammar traversal**
-
-👉 NaviQ CLI explores a different approach:
-
-* grammar-driven
-* ATN-based
-* deterministic completion
+NaviQ CLI exists because I wanted to understand *why* that gap exists, and to see how far a two-layer,
+grammar-driven approach could close it. It's a side project for learning, not a pgcli replacement — though on
+deeply nested queries, it does noticeably better.
 
 ---
 
 ## 🛠 Tech Stack
 
-* **Java**
-* **ANTLR4**
-* **JLine**
-* **PostgreSQL**
+Java · ANTLR4 · JLine · PostgreSQL
 
 ---
 
 ## 🎯 Goals
 
-* Gain a deep understanding of how **parsers work**
-* Build autocomplete that strictly follows **grammar rules**
-* Create a foundation that can be extended to:
-
-    * other languages
-    * DSLs
-    * configuration languages
+* Understand how parsers actually work, at both the syntax (ATN) and semantic (scope resolution) level
+* Build autocomplete that strictly follows grammar rules while staying usable on input that isn't finished yet
+* Build a foundation extensible to other languages, DSLs, or configuration formats
 
 ---
 
 ## 🚧 Status
 
-> Experimental / Side Project
+_Experimental / Side Project_
 
-* [x] Basic completion
-* [x] Alias resolution
-* [x] CTE support
-* [x] Subquery support
-* [ ] Ranking improvements
-* [ ] Performance optimization
-* [ ] Multi-database support
-
----
-
-## 🧪 Final Note
-
-## 🙃 Why not just use pgcli?
-
-I’m **not trying to reinvent the wheel** — there are already many great tools out there, and pgcli is one of them.
-
-The motivation behind building NaviQ CLI is simple:
-
-* I enjoy CLI tools because they are **lightweight, fast, and minimal**
-* I wanted to deeply understand how **autocomplete works internally**, especially with ANTLR
-* And most importantly:
-
-> 👉 This is just a side project for learning and exploration — not intended to replace pgcli (though it does provide
-> noticeably better suggestions for complex queries).
-
----
-
-NaviQ CLI is built as a playground to:
-
-* experiment with **grammar-driven completion**
-* better understand **parsers and ATN traversal**
-* explore how to implement autocomplete that is **strictly syntax-aware**
+- [x] Basic completion
+- [x] Alias resolution
+- [x] CTEs, including a CTE referencing an earlier CTE
+- [x] Subqueries, including nested and JOIN-position subqueries
+- [x] Tolerant of incomplete input (`alias.`, empty cursor positions)
+- [x] Error isolation — a typo in one table doesn't break the rest of the query
+- [ ] Ranking improvements
+- [ ] Performance — the common case (cursor right after a dot) parses once; the "empty position" case still parses
+  twice, since syntax and semantics can't yet safely share one tree there
+- [ ] Multi-database support

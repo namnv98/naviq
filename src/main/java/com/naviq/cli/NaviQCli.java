@@ -1,11 +1,12 @@
 package com.naviq.cli;
 
-import com.naviq.completion.draft.PostgresCompletionEngine;
+import com.naviq.completion.suggests.PostgresCompletionEngine;
 import com.naviq.datasource.PostgresDataSource;
-import com.naviq.ui.layout.BottomStatusBar;
-import com.naviq.ui.terminal.CustomHighlighter;
-import com.naviq.ui.terminal.MenuCompleter;
-import com.naviq.ui.layout.DataViewTable;
+import com.naviq.cli.layout.BottomStatusBar;
+import com.naviq.cli.terminal.CustomHighlighter;
+import com.naviq.cli.terminal.MenuCompleter;
+import com.naviq.cli.layout.DataViewTable;
+import com.naviq.datasource.SchemaIndex;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.*;
 import org.jline.reader.impl.DefaultParser;
@@ -175,7 +176,7 @@ public class NaviQCli {
                 } else if (trimmed.startsWith("CREATE TABLE")
                         || trimmed.startsWith("DROP TABLE")
                         || trimmed.startsWith("TRUNCATE")) {
-                    PostgresCompletionEngine.reloadDB();
+                    SchemaIndex.reload();
                     try (Statement stmt = PostgresDataSource.get().createStatement()) {
                         stmt.execute(line);
                         long elapsed = System.currentTimeMillis() - startTime; // ← THÊM

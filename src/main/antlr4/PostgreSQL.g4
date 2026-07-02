@@ -345,7 +345,7 @@ dropFunctionStmt
 // ===================== QUALIFIED NAME =====================
 
 qualifiedName
-    : identifier (DOT identifier)*
+    : identifier (DOT identifier)* DOT??
     ;
 
 columnName
