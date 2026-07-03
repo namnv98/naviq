@@ -38,14 +38,27 @@ cteName
     ;
 
 // ===================== SELECT =====================
+// selectStmt = 1 hoặc nhiều selectCore nối bằng UNION/INTERSECT/EXCEPT,
+// rồi ORDER BY/LIMIT áp dụng cho toàn bộ kết quả cuối cùng.
 
 selectStmt
-    : SELECT selectElements FROM tableSources
+    : selectCore (setOperator selectCore)*
+      orderByClause?
+      limitClause?
+    ;
+
+setOperator
+    : UNION ALL?
+    | INTERSECT ALL?
+    | EXCEPT ALL?
+    ;
+
+selectCore
+    : SELECT (DISTINCT (ON LPAREN expressionList RPAREN)?)?
+      selectElements FROM tableSources
       whereClause?
       groupByClause?
       havingClause?
-      orderByClause?
-      limitClause?
     ;
 
 selectElements
@@ -69,8 +82,8 @@ tableSources
     ;
 
 tableSource
-    : tableName (AS? tableAlias)?                       #simpleTable
-    | LPAREN selectStmt RPAREN (AS? tableAlias)?        #subqueryTable
+    : tableName (AS? tableAlias)?                                #simpleTable
+    | LATERAL? LPAREN selectStmt RPAREN (AS? tableAlias)?         #subqueryTable
     ;
 
 tableAlias
@@ -137,13 +150,15 @@ expression
     | expression op=(STAR | SLASH) expression                               #exprMulDiv
     | expression op=(PLUS | MINUS) expression                               #exprAddSub
     | expression op=(EQ | GT | LT | GTE | LTE | NEQ) expression            #exprCompare
+    | expression BETWEEN expression AND expression                          #exprBetween
+    | expression NOT BETWEEN expression AND expression                      #exprNotBetween
     | expression AND expression                                             #exprAnd
     | expression OR expression                                              #exprOr
     | NOT expression                                                        #exprNot
     | expression IS NULL_                                                   #exprIsNull
     | expression IS NOT NULL_                                               #exprIsNotNull
-    | expression IN LPAREN expressionList RPAREN                            #exprIn
-    | expression NOT IN LPAREN expressionList RPAREN                        #exprNotIn
+    | expression IN LPAREN (expressionList | selectStmt) RPAREN             #exprIn
+    | expression NOT IN LPAREN (expressionList | selectStmt) RPAREN         #exprNotIn
     | expression LIKE expression                                            #exprLike
     | EXISTS LPAREN selectStmt RPAREN                                       #exprExists
     | LPAREN selectStmt RPAREN                                              #exprSubquery
@@ -171,8 +186,16 @@ caseWhen
     ;
 
 // functionCall bắt buộc có LPAREN sau tên → ATN phân biệt được với columnName
+// overClause là window function: OVER (PARTITION BY ... ORDER BY ...)
 functionCall
-    : functionName LPAREN (STAR | expressionList)? RPAREN
+    : functionName LPAREN (STAR | expressionList)? RPAREN overClause?
+    ;
+
+overClause
+    : OVER LPAREN
+        (PARTITION BY expressionList)?
+        (ORDER BY orderItem (COMMA orderItem)*)?
+      RPAREN
     ;
 
 // Rule riêng để preferredRules bắt được
@@ -187,10 +210,13 @@ columnList
     ;
 
 // ===================== INSERT =====================
+// Hỗ trợ cả INSERT ... VALUES (nhiều dòng) lẫn INSERT ... SELECT
 
 insertStmt
-    : INSERT INTO tableName LPAREN columnList RPAREN
-      VALUES LPAREN valueList RPAREN
+    : INSERT INTO tableName (LPAREN columnList RPAREN)?
+      ( VALUES LPAREN valueList RPAREN (COMMA LPAREN valueList RPAREN)*
+      | selectStmt
+      )
     ;
 
 valueList
@@ -353,9 +379,11 @@ columnName
     ;
 
 // ===================== BASIC =====================
+// identifier chấp nhận cả ID thường lẫn quoted identifier "Tên Có Hoa/Space"
 
 identifier
     : ID
+    | QUOTED_IDENT
     ;
 
 literal
@@ -383,6 +411,13 @@ VALUES      : V A L U E S;
 UPDATE      : U P D A T E;
 SET         : S E T;
 DELETE      : D E L E T E;
+
+// keywords — SELECT modifiers / set operations
+DISTINCT    : D I S T I N C T;
+UNION       : U N I O N;
+INTERSECT   : I N T E R S E C T;
+EXCEPT      : E X C E P T;
+ALL         : A L L;
 
 // keywords — DDL
 CREATE      : C R E A T E;
@@ -426,6 +461,10 @@ RESTRICT    : R E S T R I C T;
 OR          : O R;
 REPLACE     : R E P L A C E;
 
+// keywords — window function
+OVER        : O V E R;
+PARTITION   : P A R T I T I O N;
+
 // keywords — query
 FROM        : F R O M;
 WHERE       : W H E R E;
@@ -447,10 +486,12 @@ FULL        : F U L L;
 OUTER       : O U T E R;
 CROSS       : C R O S S;
 NATURAL     : N A T U R A L;
+LATERAL     : L A T E R A L;
 ON          : O N;
 USING       : U S I N G;
 AND         : A N D;
 NOT         : N O T;
+BETWEEN     : B E T W E E N;
 LIKE        : L I K E;
 EXISTS      : E X I S T S;
 IS          : I S;
@@ -488,6 +529,11 @@ DOLLAR_BODY
 
 ID
     : [a-zA-Z_][a-zA-Z_0-9]*
+    ;
+
+// quoted identifier: "Tên Có Khoảng Trắng", escape dấu " bằng cách lặp đôi ""
+QUOTED_IDENT
+    : '"' ( '""' | ~["] )* '"'
     ;
 
 NUMBER
