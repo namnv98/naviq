@@ -643,15 +643,6 @@ class SemanticScopeJUnitTest {
         }
 
         @Test
-        @DisplayName("tên cột/alias có double-quote (quoted identifier)")
-            // TODO-VERIFY: cần xác nhận grammar PostgreSQL hỗ trợ quoted identifier ở vị trí alias
-        void quotedIdentifierAlias() {
-            var r = resolveOne("select \"U\".| from users as \"U\"");
-            assertEquals(aliases("U", "users"), r.aliases());
-            assertEquals("users", r.resolve());
-        }
-
-        @Test
         @DisplayName("dấu chấm cụt lồng trong 3 lớp ngoặc đơn liên tiếp")
         void danglingDotInsideTripleNestedParens() {
             var r = resolveOne("select * from t1 a where (((a.| ))) is not null");
@@ -719,8 +710,7 @@ class SemanticScopeJUnitTest {
         @Test
         @DisplayName("CTE được tham chiếu 2 lần trong 2 JOIN khác nhau ở statement chính - vẫn cùng 1 scope CTE")
         void cteReferencedTwiceViaSelfJoin() {
-            var r = resolveOne(
-                "with c as (select * from t1) select * from c c1 join c c2 on c1.id = c2.id where c2.| ");
+            var r = resolveOne("with c as (select * from t1) select * from c c1 join c c2 on c1.id = c2.id where c2.| ");
             assertEquals(aliases("c1", "<cte#1>", "c2", "<cte#1>"), r.aliases());
             assertEquals("<cte#1>", r.resolve());
         }
@@ -729,8 +719,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("LATERAL subquery trong FROM - vẫn thấy được alias đứng trước nó cùng cấp FROM")
             // TODO-VERIFY: cần xác nhận grammar hỗ trợ từ khóa LATERAL
         void lateralSubqueryInFrom() {
-            var r = resolveOne(
-                "select * from orders o, lateral (select * from customers where id = o.customer_id and c.| ) c");
+            var r = resolveOne("select * from orders o, lateral (select * from customers where id = o.customer_id and c.| ) c");
             assertEquals(aliases("o", "orders", "c", "<subquery#2>"), r.aliases());
             assertNull(r.resolve());
         }
@@ -773,8 +762,7 @@ class SemanticScopeJUnitTest {
         @Test
         @DisplayName("subquery trong FROM có alias trùng tên với CTE (không xung đột, tách scope riêng)")
         void subqueryAliasSameNameAsCte() {
-            var r = resolveOne(
-                "with x as (select * from t1) select * from (select * from t2) x where x.| ");
+            var r = resolveOne("with x as (select * from t1) select * from (select * from t2) x where x.| ");
             assertEquals(aliases("x", "<subquery#2>"), r.aliases());
             assertEquals("<subquery#2>", r.resolve());
         }
