@@ -1,17 +1,21 @@
 package com.naviq.completion.suggests;
 
-import com.example.PostgreSQLParser;
+import com.naviq.antlr4.*;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 
 import java.util.List;
 import java.util.Map;
 
-/** Đặt tên alias tự động (kiểu "orders" -> "o") + tìm tên bảng đứng trước "AS" tại vị trí cursor. */
+/**
+ * Đặt tên alias tự động (kiểu "orders" -> "o") + tìm tên bảng đứng trước "AS" tại vị trí cursor.
+ */
 public class AliasNameSuggester {
 
     public static String suggestAlias(Map<String, String> aliasMap, String tableName) {
-        if (tableName == null || tableName.isEmpty()) return null;
+        if (tableName == null || tableName.isEmpty()) {
+            return null;
+        }
 
         var keySet = aliasMap.keySet();
 
@@ -48,8 +52,9 @@ public class AliasNameSuggester {
     }
 
     static int skipHidden(List<Token> tokens, int from, int size) {
-        while (from < size && tokens.get(from).getChannel() != Token.DEFAULT_CHANNEL)
+        while (from < size && tokens.get(from).getChannel() != Token.DEFAULT_CHANNEL) {
             from++;
+        }
         return from;
     }
 
@@ -59,7 +64,9 @@ public class AliasNameSuggester {
         int fromIdx = -1;
         for (int i = caretTokenIndex - 1; i >= 0; i--) {
             Token t = tokens.get(i);
-            if (t.getChannel() != Token.DEFAULT_CHANNEL) continue;
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
 
             if (t.getType() == PostgreSQLParser.FROM) {
                 fromIdx = i;
@@ -67,7 +74,9 @@ public class AliasNameSuggester {
             }
         }
 
-        if (fromIdx < 0) return null;
+        if (fromIdx < 0) {
+            return null;
+        }
 
         int i = fromIdx + 1;
         while (i < caretTokenIndex) {
@@ -104,7 +113,9 @@ public class AliasNameSuggester {
             }
 
             if (t.getType() == PostgreSQLParser.ID) {
-                if (sb.length() > 0) sb.insert(0, ".");
+                if (sb.length() > 0) {
+                    sb.insert(0, ".");
+                }
                 sb.insert(0, t.getText());
             } else if (t.getType() == PostgreSQLParser.DOT) {
                 // skip

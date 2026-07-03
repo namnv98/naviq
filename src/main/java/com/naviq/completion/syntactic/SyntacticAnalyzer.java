@@ -1,7 +1,6 @@
 package com.naviq.completion.syntactic;
 
-import com.example.PostgreSQLLexer;
-import com.example.PostgreSQLParser;
+import com.naviq.antlr4.*;
 import com.naviq.utils.TokenPositionUtil;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;

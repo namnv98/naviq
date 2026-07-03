@@ -1,6 +1,6 @@
 package com.naviq.cli.terminal;
 
-import com.example.PostgreSQLLexer;
+import com.naviq.antlr4.*;
 import com.naviq.datasource.SchemaIndex;
 import com.naviq.datasource.SchemaLoader;
 import org.antlr.v4.runtime.CharStream;

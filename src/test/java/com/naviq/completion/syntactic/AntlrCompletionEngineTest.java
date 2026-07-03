@@ -1,7 +1,6 @@
 package com.naviq.completion.syntactic;
 
-import com.example.PostgreSQLLexer;
-import com.example.PostgreSQLParser;
+import com.naviq.antlr4.*;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
@@ -16,13 +15,12 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * JUnit test cho AntlrCompletionEngine - tầng SYNTACTIC (ATN traversal), độc lập
- * hoàn toàn với SemanticScope (tầng SEMANTIC). Test ở đây chỉ quan tâm "token/rule
- * nào hợp lệ về mặt NGỮ PHÁP tại vị trí caret", KHÔNG quan tâm alias trỏ tới bảng
- * nào - đó là việc của SemanticScopeJUnitTest.
- *
- * ignoredTokens/preferredRules dùng ĐÚNG bộ mà SyntacticAnalyzer dùng thật, để test
- * phản ánh đúng hành vi production, không phải cấu hình tùy tiện.
+ * JUnit test cho AntlrCompletionEngine - tầng SYNTACTIC (ATN traversal), độc lập hoàn toàn với
+ * SemanticScope (tầng SEMANTIC). Test ở đây chỉ quan tâm "token/rule nào hợp lệ về mặt NGỮ PHÁP tại
+ * vị trí caret", KHÔNG quan tâm alias trỏ tới bảng nào - đó là việc của SemanticScopeJUnitTest.
+ * <p>
+ * ignoredTokens/preferredRules dùng ĐÚNG bộ mà SyntacticAnalyzer dùng thật, để test phản ánh đúng
+ * hành vi production, không phải cấu hình tùy tiện.
  */
 class AntlrCompletionEngineTest {
 
@@ -67,7 +65,8 @@ class AntlrCompletionEngineTest {
     private static AntlrCompletionEngine.CandidatesCollection collect(String rawWithCaret) {
         int caretCharOffset = rawWithCaret.indexOf('|');
         assertTrue(caretCharOffset >= 0, "Thiếu ký tự '|' đánh dấu caret trong: " + rawWithCaret);
-        String sql = rawWithCaret.substring(0, caretCharOffset) + rawWithCaret.substring(caretCharOffset + 1);
+        String sql = rawWithCaret.substring(0, caretCharOffset) + rawWithCaret.substring(
+            caretCharOffset + 1);
 
         var lexer = new PostgreSQLLexer(CharStreams.fromString(sql));
         var tokens = new CommonTokenStream(lexer);
@@ -77,7 +76,7 @@ class AntlrCompletionEngineTest {
 
         int caretTokenIndex = findCaretTokenIndex(tokens, caretCharOffset);
         var engine = new AntlrCompletionEngine(
-                parser, IGNORED_TOKENS, PREFERRED_RULES, new AntlrCompletionEngine.FollowSetsByState()
+            parser, IGNORED_TOKENS, PREFERRED_RULES, new AntlrCompletionEngine.FollowSetsByState()
         );
         return engine.collectCandidates(caretTokenIndex);
     }
@@ -86,9 +85,15 @@ class AntlrCompletionEngineTest {
         List<Token> tokens = tokenStream.getTokens();
         for (int i = 0; i < tokens.size() - 1; i++) {
             Token t = tokens.get(i);
-            if (t.getChannel() != Token.DEFAULT_CHANNEL) continue;
-            if (t.getStartIndex() <= cursorCharPos && cursorCharPos <= t.getStopIndex()) return i;
-            if (t.getStartIndex() > cursorCharPos) return i;
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
+            if (t.getStartIndex() <= cursorCharPos && cursorCharPos <= t.getStopIndex()) {
+                return i;
+            }
+            if (t.getStartIndex() > cursorCharPos) {
+                return i;
+            }
         }
         return tokens.size() - 1;
     }
@@ -135,7 +140,8 @@ class AntlrCompletionEngineTest {
         @Test
         @DisplayName("dấu chấm cụt ở giữa câu, có cột khác + JOIN + WHERE phía sau")
         void danglingDotWithFullQueryAfterCaret() {
-            var c = collect("select u.| , o.id from users u join orders o on true where u.active = true");
+            var c = collect(
+                "select u.| , o.id from users u join orders o on true where u.active = true");
             assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
         }
 
@@ -152,7 +158,8 @@ class AntlrCompletionEngineTest {
             tokens.fill();
 
             var engine = new AntlrCompletionEngine(
-                    parser, IGNORED_TOKENS, PREFERRED_RULES, new AntlrCompletionEngine.FollowSetsByState()
+                parser, IGNORED_TOKENS, PREFERRED_RULES,
+                new AntlrCompletionEngine.FollowSetsByState()
             );
             var c = engine.collectCandidates(0); // caret ngay trước token "select"
 
@@ -171,7 +178,8 @@ class AntlrCompletionEngineTest {
         @DisplayName("tableName - có/không có WHERE...ORDER BY...LIMIT phía sau cho ra CÙNG kết quả")
         void tableNameCandidatesIdenticalRegardlessOfTrailingClauses() {
             var short_ = collect("select * from |");
-            var long_ = collect("select * from | where a = 1 group by b having count(*) > 1 order by b limit 10");
+            var long_ = collect(
+                "select * from | where a = 1 group by b having count(*) > 1 order by b limit 10");
             assertEquals(short_.rules.keySet(), long_.rules.keySet());
         }
 
@@ -179,7 +187,8 @@ class AntlrCompletionEngineTest {
         @DisplayName("columnName sau dấu chấm - có/không có phần còn lại của câu cho ra CÙNG kết quả")
         void columnNameCandidatesIdenticalRegardlessOfTrailingContent() {
             var short_ = collect("select u.| from users u");
-            var long_ = collect("select u.| , o.id, o.total from users u join orders o on u.id = o.user_id where o.total > 100 order by o.total desc limit 5");
+            var long_ = collect(
+                "select u.| , o.id, o.total from users u join orders o on u.id = o.user_id where o.total > 100 order by o.total desc limit 5");
             assertEquals(short_.rules.keySet(), long_.rules.keySet());
         }
 
@@ -187,7 +196,8 @@ class AntlrCompletionEngineTest {
         @DisplayName("tableAlias - có/không có toàn bộ phần thân câu phía sau cho ra CÙNG kết quả")
         void tableAliasCandidatesIdenticalRegardlessOfTrailingContent() {
             var short_ = collect("select * from users |");
-            var long_ = collect("select * from users | join orders o on true where o.total > 100 group by o.id order by o.total limit 20");
+            var long_ = collect(
+                "select * from users | join orders o on true where o.total > 100 group by o.id order by o.total limit 20");
             assertEquals(short_.rules.keySet(), long_.rules.keySet());
         }
 
@@ -195,7 +205,8 @@ class AntlrCompletionEngineTest {
         @DisplayName("bộ token gợi ý keyword (candidates.tokens) cũng bất biến, không chỉ candidates.rules")
         void tokenCandidatesAlsoIdenticalRegardlessOfTrailingContent() {
             var short_ = collect("select * from users u |");
-            var long_ = collect("select * from users u | join orders o on u.id = o.user_id where o.total > 100");
+            var long_ = collect(
+                "select * from users u | join orders o on u.id = o.user_id where o.total > 100");
             assertEquals(short_.tokens.keySet(), long_.tokens.keySet());
         }
     }
@@ -213,58 +224,58 @@ class AntlrCompletionEngineTest {
 
         static java.util.stream.Stream<String> cases() {
             return java.util.stream.Stream.of(
-                    // ---- flat, mọi clause ----
-                    "select | from t",
-                    "select a, | from t",
-                    "select * from t where |",
-                    "select a from t group by |",
-                    "select a from t group by a having |",
-                    "select a from t order by |",
-                    "select count(|) from t",
-                    "select * from a join b on |",
-                    "select u.| from users u",
+                // ---- flat, mọi clause ----
+                "select | from t",
+                "select a, | from t",
+                "select * from t where |",
+                "select a from t group by |",
+                "select a from t group by a having |",
+                "select a from t order by |",
+                "select count(|) from t",
+                "select * from a join b on |",
+                "select u.| from users u",
 
-                    // ---- 1 tầng subquery trong FROM ----
-                    "select * from (select | from t) x",
-                    "select * from (select * from t where |) x",
-                    "select * from (select u.| from users u) x",
-                    "select * from (select a from t group by |) x",
-                    "select * from (select a from t order by |) x",
-                    "select * from (select count(|) from t) x",
+                // ---- 1 tầng subquery trong FROM ----
+                "select * from (select | from t) x",
+                "select * from (select * from t where |) x",
+                "select * from (select u.| from users u) x",
+                "select * from (select a from t group by |) x",
+                "select * from (select a from t order by |) x",
+                "select * from (select count(|) from t) x",
 
-                    // ---- subquery trong WHERE (EXISTS) ----
-                    "select * from t where exists (select | from u)",
-                    "select * from t where exists (select * from u where |)",
+                // ---- subquery trong WHERE (EXISTS) ----
+                "select * from t where exists (select | from u)",
+                "select * from t where exists (select * from u where |)",
 
-                    // ---- scalar subquery trong SELECT list ----
-                    "select (select | from u) from t",
-                    "select (select * from u where |) from t",
+                // ---- scalar subquery trong SELECT list ----
+                "select (select | from u) from t",
+                "select (select * from u where |) from t",
 
-                    // ---- scalar subquery trong WHERE ----
-                    "select * from t where a = (select | from u)",
+                // ---- scalar subquery trong WHERE ----
+                "select * from t where a = (select | from u)",
 
-                    // ---- CTE - bên trong thân CTE ----
-                    "with c as (select | from t) select * from c",
-                    "with c as (select * from t where |) select * from c",
-                    "with c as (select u.| from users u) select * from c",
+                // ---- CTE - bên trong thân CTE ----
+                "with c as (select | from t) select * from c",
+                "with c as (select * from t where |) select * from c",
+                "with c as (select u.| from users u) select * from c",
 
-                    // ---- CTE - ở statement CHÍNH sau khi CTE đã đóng ----
-                    "with c as (select * from t) select | from c",
-                    "with c as (select * from t) select * from c where |",
+                // ---- CTE - ở statement CHÍNH sau khi CTE đã đóng ----
+                "with c as (select * from t) select | from c",
+                "with c as (select * from t) select * from c where |",
 
-                    // ---- CTE thứ 2 tham chiếu CTE thứ 1 ----
-                    "with a as (select * from t1), b as (select * from a where |) select * from b",
+                // ---- CTE thứ 2 tham chiếu CTE thứ 1 ----
+                "with a as (select * from t1), b as (select * from a where |) select * from b",
 
-                    // ---- 2 tầng subquery lồng nhau ----
-                    "select * from (select * from (select | from t) y) x",
-                    "select * from (select * from (select * from t where |) y) x",
+                // ---- 2 tầng subquery lồng nhau ----
+                "select * from (select * from (select | from t) y) x",
+                "select * from (select * from (select * from t where |) y) x",
 
-                    // ---- cursor ở outer query SAU KHI 1 subquery trong FROM đã đóng ----
-                    "select * from (select * from t) x where |",
-                    "select a, | from (select * from t) x",
+                // ---- cursor ở outer query SAU KHI 1 subquery trong FROM đã đóng ----
+                "select * from (select * from t) x where |",
+                "select a, | from (select * from t) x",
 
-                    // ---- JOIN bên trong subquery ----
-                    "select * from (select * from a join b on |) x"
+                // ---- JOIN bên trong subquery ----
+                "select * from (select * from a join b on |) x"
             );
         }
 
@@ -273,7 +284,7 @@ class AntlrCompletionEngineTest {
         void columnNameExpected(String sqlWithCaret) {
             var c = collect(sqlWithCaret);
             assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName),
-                    "Kỳ vọng RULE_columnName tại: " + sqlWithCaret);
+                "Kỳ vọng RULE_columnName tại: " + sqlWithCaret);
         }
     }
 
@@ -283,37 +294,37 @@ class AntlrCompletionEngineTest {
 
         static java.util.stream.Stream<String> cases() {
             return java.util.stream.Stream.of(
-                    // ---- flat, mọi statement type ----
-                    "select * from |",
-                    "select * from a join |",
-                    "insert into |",
-                    "update |",
-                    "delete from |",
-                    "truncate |",
-                    "truncate table |",
-                    "drop table |",
-                    "alter table |",
-                    "alter table t rename to |",
+                // ---- flat, mọi statement type ----
+                "select * from |",
+                "select * from a join |",
+                "insert into |",
+                "update |",
+                "delete from |",
+                "truncate |",
+                "truncate table |",
+                "drop table |",
+                "alter table |",
+                "alter table t rename to |",
 
-                    // ---- subquery trong FROM (tầng trong) ----
-                    "select * from (select * from |) x",
-                    "select * from (select * from a join |) x",
+                // ---- subquery trong FROM (tầng trong) ----
+                "select * from (select * from |) x",
+                "select * from (select * from a join |) x",
 
-                    // ---- 2 tầng subquery lồng ----
-                    "select * from (select * from (select * from |) y) x",
+                // ---- 2 tầng subquery lồng ----
+                "select * from (select * from (select * from |) y) x",
 
-                    // ---- subquery trong EXISTS/scalar ----
-                    "select * from t where exists (select 1 from |)",
-                    "select (select 1 from |) from t",
+                // ---- subquery trong EXISTS/scalar ----
+                "select * from t where exists (select 1 from |)",
+                "select (select 1 from |) from t",
 
-                    // ---- CTE - bên trong thân CTE ----
-                    "with c as (select * from |) select * from c",
+                // ---- CTE - bên trong thân CTE ----
+                "with c as (select * from |) select * from c",
 
-                    // ---- CTE thứ 2 - bên trong thân của nó ----
-                    "with a as (select * from t1), b as (select * from |) select * from b",
+                // ---- CTE thứ 2 - bên trong thân của nó ----
+                "with a as (select * from t1), b as (select * from |) select * from b",
 
-                    // ---- sau khi CTE đã đóng, statement chính ----
-                    "with c as (select * from t) select * from |"
+                // ---- sau khi CTE đã đóng, statement chính ----
+                "with c as (select * from t) select * from |"
             );
         }
 
@@ -322,7 +333,7 @@ class AntlrCompletionEngineTest {
         void tableNameExpected(String sqlWithCaret) {
             var c = collect(sqlWithCaret);
             assertTrue(hasRule(c, PostgreSQLParser.RULE_tableName),
-                    "Kỳ vọng RULE_tableName tại: " + sqlWithCaret);
+                "Kỳ vọng RULE_tableName tại: " + sqlWithCaret);
         }
     }
 
@@ -332,26 +343,26 @@ class AntlrCompletionEngineTest {
 
         static java.util.stream.Stream<String> cases() {
             return java.util.stream.Stream.of(
-                    // ---- flat ----
-                    "select * from t |",
-                    "select * from t as |",
-                    "select * from a join b |",
-                    "select * from a join b as |",
+                // ---- flat ----
+                "select * from t |",
+                "select * from t as |",
+                "select * from a join b |",
+                "select * from a join b as |",
 
-                    // ---- trong subquery FROM ----
-                    "select * from (select * from t |) x",
-                    "select * from (select * from t as |) x",
+                // ---- trong subquery FROM ----
+                "select * from (select * from t |) x",
+                "select * from (select * from t as |) x",
 
-                    // ---- trong CTE ----
-                    "with c as (select * from t |) select * from c",
-                    "with c as (select * from t as |) select * from c",
+                // ---- trong CTE ----
+                "with c as (select * from t |) select * from c",
+                "with c as (select * from t as |) select * from c",
 
-                    // ---- 2 tầng lồng ----
-                    "select * from (select * from (select * from t |) y) x",
+                // ---- 2 tầng lồng ----
+                "select * from (select * from (select * from t |) y) x",
 
-                    // ---- trong EXISTS/scalar subquery ----
-                    "select * from t where exists (select * from u |)",
-                    "select (select * from u |) from t"
+                // ---- trong EXISTS/scalar subquery ----
+                "select * from t where exists (select * from u |)",
+                "select (select * from u |) from t"
             );
         }
 
@@ -360,7 +371,7 @@ class AntlrCompletionEngineTest {
         void tableAliasExpected(String sqlWithCaret) {
             var c = collect(sqlWithCaret);
             assertTrue(hasRule(c, PostgreSQLParser.RULE_tableAlias),
-                    "Kỳ vọng RULE_tableAlias tại: " + sqlWithCaret);
+                "Kỳ vọng RULE_tableAlias tại: " + sqlWithCaret);
         }
     }
 
@@ -370,23 +381,23 @@ class AntlrCompletionEngineTest {
 
         static java.util.stream.Stream<String> cases() {
             return java.util.stream.Stream.of(
-                    // ---- flat ----
-                    "select | from t",
-                    "select * from t where |",
-                    "select a from t group by |",
-                    "select a from t order by |",
-                    "select case when | then 1 else 0 end from t",
-                    "select * from a join b on |",
-                    "select count(|) from t",
+                // ---- flat ----
+                "select | from t",
+                "select * from t where |",
+                "select a from t group by |",
+                "select a from t order by |",
+                "select case when | then 1 else 0 end from t",
+                "select * from a join b on |",
+                "select count(|) from t",
 
-                    // ---- trong subquery ----
-                    "select * from (select | from t) x",
-                    "select * from t where exists (select | from u)",
-                    "select (select | from u) from t",
+                // ---- trong subquery ----
+                "select * from (select | from t) x",
+                "select * from t where exists (select | from u)",
+                "select (select | from u) from t",
 
-                    // ---- trong CTE ----
-                    "with c as (select | from t) select * from c",
-                    "with c as (select * from t) select | from c"
+                // ---- trong CTE ----
+                "with c as (select | from t) select * from c",
+                "with c as (select * from t) select | from c"
             );
         }
 
@@ -395,7 +406,7 @@ class AntlrCompletionEngineTest {
         void functionCallExpected(String sqlWithCaret) {
             var c = collect(sqlWithCaret);
             assertTrue(hasRule(c, PostgreSQLParser.RULE_functionCall),
-                    "Kỳ vọng RULE_functionCall tại: " + sqlWithCaret);
+                "Kỳ vọng RULE_functionCall tại: " + sqlWithCaret);
         }
     }
 
@@ -1015,14 +1026,16 @@ class AntlrCompletionEngineTest {
         @Test
         @DisplayName("columnName ở tầng trong cùng (tầng 3)")
         void columnNameAtInnermostLevel() {
-            var c = collect("select * from (select * from (select * from (select | from t) y) x) w");
+            var c = collect(
+                "select * from (select * from (select * from (select | from t) y) x) w");
             assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
         }
 
         @Test
         @DisplayName("tableName ở tầng trong cùng (tầng 3)")
         void tableNameAtInnermostLevel() {
-            var c = collect("select * from (select * from (select * from (select * from |) y) x) w");
+            var c = collect(
+                "select * from (select * from (select * from (select * from |) y) x) w");
             assertTrue(hasRule(c, PostgreSQLParser.RULE_tableName));
         }
 
@@ -1280,7 +1293,8 @@ class AntlrCompletionEngineTest {
             tokens.fill();
 
             var engine = new AntlrCompletionEngine(
-                    parser, IGNORED_TOKENS, PREFERRED_RULES, new AntlrCompletionEngine.FollowSetsByState()
+                parser, IGNORED_TOKENS, PREFERRED_RULES,
+                new AntlrCompletionEngine.FollowSetsByState()
             );
             assertThrows(IllegalArgumentException.class, () -> engine.collectCandidates(-1));
         }
@@ -1296,7 +1310,8 @@ class AntlrCompletionEngineTest {
             parser1.removeErrorListeners();
             tokens1.fill();
             int caret1 = findCaretTokenIndex(tokens1, "select * from ".length());
-            var engine1 = new AntlrCompletionEngine(parser1, IGNORED_TOKENS, PREFERRED_RULES, followSets);
+            var engine1 = new AntlrCompletionEngine(parser1, IGNORED_TOKENS, PREFERRED_RULES,
+                followSets);
             var c1 = engine1.collectCandidates(caret1);
 
             var lexer2 = new PostgreSQLLexer(CharStreams.fromString("select * from users"));
@@ -1305,7 +1320,8 @@ class AntlrCompletionEngineTest {
             parser2.removeErrorListeners();
             tokens2.fill();
             int caret2 = findCaretTokenIndex(tokens2, "select * from ".length());
-            var engine2 = new AntlrCompletionEngine(parser2, IGNORED_TOKENS, PREFERRED_RULES, followSets);
+            var engine2 = new AntlrCompletionEngine(parser2, IGNORED_TOKENS, PREFERRED_RULES,
+                followSets);
             var c2 = engine2.collectCandidates(caret2);
 
             // Cùng vị trí ngữ pháp (ngay sau FROM) -> cùng kỳ vọng tableName, dù
@@ -1313,6 +1329,102 @@ class AntlrCompletionEngineTest {
             // "shared across engine instances" của FollowSetsByState).
             assertTrue(hasRule(c1, PostgreSQLParser.RULE_tableName));
             assertTrue(hasRule(c2, PostgreSQLParser.RULE_tableName));
+        }
+    }
+
+    // =====================================================================
+    // Nhóm MỚI: DISTINCT/DISTINCT ON, LIMIT/OFFSET, UNION/UNION ALL,
+    // functionCall lồng nhau, IF NOT EXISTS, subquery trong danh sách IN,
+    // BETWEEN, window function
+    // =====================================================================
+
+    @Nested
+    @DisplayName("Mở rộng: DISTINCT, LIMIT/OFFSET, UNION, functionCall lồng, IF NOT EXISTS")
+    class ExtendedGroupNew {
+
+        @Test
+        @DisplayName("sau SELECT DISTINCT - kỳ vọng columnName")
+        void afterSelectDistinct() {
+            var c = collect("select distinct | from t");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
+        }
+
+        @Test
+        @DisplayName("sau SELECT DISTINCT ON (...) - kỳ vọng columnName bên trong ngoặc")
+        void insideDistinctOnParens() {
+            var c = collect("select distinct on (|");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
+        }
+
+        @Test
+        @DisplayName("sau LIMIT <n> - kỳ vọng token OFFSET hợp lệ tiếp theo")
+        void afterLimitExpectsOffset() {
+            var c = collect("select * from t limit 10 |");
+            assertTrue(hasToken(c, PostgreSQLParser.OFFSET));
+        }
+
+        @Test
+        @DisplayName("UNION - vế thứ 2 vẫn kỳ vọng columnName ở SELECT list")
+        void columnNameInSecondSelectOfUnion() {
+            var c = collect("select a from t1 union select | from t2");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
+        }
+
+        @Test
+        @DisplayName("UNION ALL - FROM ở vế thứ 2 vẫn kỳ vọng tableName")
+        void tableNameInSecondFromOfUnionAll() {
+            var c = collect("select a from t1 union all select a from |");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_tableName));
+        }
+
+        @Test
+        @DisplayName("functionCall lồng trong tham số của functionCall khác - kỳ vọng columnName ở tầng trong")
+        void columnNameInsideNestedFunctionCall() {
+            var c = collect("select upper(coalesce(|)) from t");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
+        }
+
+        @Test
+        @DisplayName("CREATE TABLE IF NOT EXISTS - kỳ vọng tableName sau đó")
+        void createTableIfNotExists() {
+            var c = collect("create table if not exists |");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_tableName));
+        }
+
+        @Test
+        @DisplayName("DROP TABLE IF EXISTS - kỳ vọng tableName sau đó")
+        void dropTableIfExists() {
+            var c = collect("drop table if exists |");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_tableName));
+        }
+
+        @Test
+        @DisplayName("subquery bên trong danh sách IN - kỳ vọng tableName trong FROM của subquery")
+        void tableNameInsideInSubquery() {
+            var c = collect("select * from t where a in (select id from |)");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_tableName));
+        }
+
+        @Test
+        @DisplayName("BETWEEN ... AND ... - vế trước AND kỳ vọng columnName")
+        void columnNameInBetweenClause() {
+            var c = collect("select * from t where a between | and 100");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
+        }
+
+        @Test
+        @DisplayName("HAVING với hàm aggregate - kỳ vọng functionCall")
+        void functionCallInHaving() {
+            var c = collect("select a, count(*) from t group by a having | > 1");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_functionCall));
+        }
+
+        @Test
+        @DisplayName("WINDOW function - bên trong PARTITION BY kỳ vọng columnName")
+            // TODO-VERIFY: cần xác nhận grammar hỗ trợ OVER (PARTITION BY ...)
+        void columnNameInsidePartitionBy() {
+            var c = collect("select row_number() over (partition by |) from t");
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_columnName));
         }
     }
 }

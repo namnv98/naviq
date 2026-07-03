@@ -1,6 +1,6 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
          http://www.apache.org/xsd/maven-4.0.0.xsd">
 
     <modelVersion>4.0.0</modelVersion>
@@ -22,7 +22,6 @@
             <artifactId>jline</artifactId>
             <version>3.30.12</version>
         </dependency>
-
         <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline-terminal-jansi</artifactId>
@@ -45,8 +44,6 @@
             <artifactId>commons-lang3</artifactId>
             <version>3.20.0</version>
         </dependency>
-
-
         <!-- JUnit 5 -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -54,27 +51,9 @@
             <version>5.10.2</version>
             <scope>test</scope>
         </dependency>
-
-        <!-- Apache Commons Lang (cho StringUtils trong ColumnInfo) -->
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-lang3</artifactId>
-            <version>3.14.0</version>
-        </dependency>
     </dependencies>
     <build>
         <plugins>
-
-
-            <!-- Run main -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
-                <configuration>
-                    <mainClass>com.example.Main</mainClass>
-                </configuration>
-            </plugin>
 
             <plugin>
                 <groupId>org.antlr</groupId>
@@ -89,6 +68,7 @@
                             <visitor>true</visitor>
                             <listener>true</listener>
                             <sourceDirectory>src/main/antlr4</sourceDirectory>
+                            <outputDirectory>${project.build.directory}/generated-sources/antlr4/com/naviq/antlr4</outputDirectory>
                         </configuration>
                     </execution>
                 </executions>
@@ -107,7 +87,7 @@
                         <configuration>
                             <transformers>
                                 <transformer
-                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                  implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.naviq.cli.NaviQCli</mainClass>
                                 </transformer>
                             </transformers>

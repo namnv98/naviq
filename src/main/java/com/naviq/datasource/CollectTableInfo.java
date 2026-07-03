@@ -2,6 +2,7 @@ package com.naviq.datasource;
 
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
+import com.naviq.antlr4.*;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -72,7 +73,7 @@ public class CollectTableInfo {
             int type = tokens.get(i).getType();
 
             // ── mở scope mới ──
-            if (type == com.example.PostgreSQLParser.LPAREN) {
+            if (type == PostgreSQLParser.LPAREN) {
                 ScopeNode child = new ScopeNode(i, current);
                 current.children.add(child);
                 child.close = size;
@@ -81,25 +82,25 @@ public class CollectTableInfo {
             }
 
             // Detect CTE: WITH id AS (
-            if (type == com.example.PostgreSQLParser.WITH) {
+            if (type == PostgreSQLParser.WITH) {
                 int k = skipHidden(tokens, i + 1, size);
                 while (k < size) {
                     // đọc CTE name
-                    if (tokens.get(k).getType() != com.example.PostgreSQLParser.ID) break;
+                    if (tokens.get(k).getType() != PostgreSQLParser.ID) break;
                     String cteName = tokens.get(k).getText();
 
                     int k2 = skipHidden(tokens, k + 1, size);
-                    if (k2 >= size || tokens.get(k2).getType() != com.example.PostgreSQLParser.AS) break;
+                    if (k2 >= size || tokens.get(k2).getType() != PostgreSQLParser.AS) break;
 
                     int k3 = skipHidden(tokens, k2 + 1, size);
-                    if (k3 >= size || tokens.get(k3).getType() != com.example.PostgreSQLParser.LPAREN) break;
+                    if (k3 >= size || tokens.get(k3).getType() != PostgreSQLParser.LPAREN) break;
 
                     // Tìm RPAREN đóng của CTE body
                     int depth2 = 1;
                     int k4 = k3 + 1;
                     while (k4 < size && depth2 > 0) {
-                        if (tokens.get(k4).getType() == com.example.PostgreSQLParser.LPAREN) depth2++;
-                        if (tokens.get(k4).getType() == com.example.PostgreSQLParser.RPAREN) depth2--;
+                        if (tokens.get(k4).getType() == PostgreSQLParser.LPAREN) depth2++;
+                        if (tokens.get(k4).getType() == PostgreSQLParser.RPAREN) depth2--;
                         k4++;
                     }
                     int cteClose = k4 - 1; // vị trí RPAREN
@@ -116,21 +117,21 @@ public class CollectTableInfo {
 
                     // Tiếp tục xem có CTE tiếp theo không (WITH a AS (...), b AS (...))
                     int k5 = skipHidden(tokens, cteClose + 1, size);
-                    if (k5 >= size || tokens.get(k5).getType() != com.example.PostgreSQLParser.COMMA) break;
+                    if (k5 >= size || tokens.get(k5).getType() != PostgreSQLParser.COMMA) break;
                     k = skipHidden(tokens, k5 + 1, size);
                 }
                 continue;
             }
 
             // ── đóng scope ──
-            if (type == com.example.PostgreSQLParser.RPAREN) {
+            if (type == PostgreSQLParser.RPAREN) {
                 current.close = i;
 
                 // subquery alias:  (SELECT …) [AS] alias
                 int k = skipHidden(tokens, i + 1, size);
-                if (k < size && tokens.get(k).getType() == com.example.PostgreSQLParser.AS)
+                if (k < size && tokens.get(k).getType() == PostgreSQLParser.AS)
                     k = skipHidden(tokens, k + 1, size);
-                if (k < size && tokens.get(k).getType() == com.example.PostgreSQLParser.ID) {
+                if (k < size && tokens.get(k).getType() == PostgreSQLParser.ID) {
                     String alias = tokens.get(k).getText();
                     List<String> cols = extractSubqueryColumns(current, tokens, current.open, current.close);
                     // alias đăng ký ở scope CHA (nơi subquery được dùng)
@@ -146,7 +147,7 @@ public class CollectTableInfo {
             }
 
             // ── chỉ quan tâm FROM / JOIN / COMMA ──
-            if (type != com.example.PostgreSQLParser.FROM && type != com.example.PostgreSQLParser.JOIN && type != com.example.PostgreSQLParser.COMMA) {
+            if (type != PostgreSQLParser.FROM && type != PostgreSQLParser.JOIN && type != PostgreSQLParser.COMMA) {
                 continue;
             }
 
@@ -155,10 +156,10 @@ public class CollectTableInfo {
             if (j >= size) {
                 continue;
             }
-            if (tokens.get(j).getType() == com.example.PostgreSQLParser.LPAREN) {
+            if (tokens.get(j).getType() == PostgreSQLParser.LPAREN) {
                 continue; // subquery, bỏ qua
             }
-            if (tokens.get(j).getType() != com.example.PostgreSQLParser.ID) {
+            if (tokens.get(j).getType() != PostgreSQLParser.ID) {
                 continue;
             }
 
@@ -173,10 +174,10 @@ public class CollectTableInfo {
 
             // alias tuỳ chọn
             int k = skipHidden(tokens, lastTokenTableName + 1, size);
-            if (k < size && tokens.get(k).getType() == com.example.PostgreSQLParser.AS) {
+            if (k < size && tokens.get(k).getType() == PostgreSQLParser.AS) {
                 k = skipHidden(tokens, k + 1, size);
             }
-            if (k < size && tokens.get(k).getType() == com.example.PostgreSQLParser.ID) {
+            if (k < size && tokens.get(k).getType() == PostgreSQLParser.ID) {
                 current.aliases.put(tokens.get(k).getText(), tableName);
                 i = k;
             } else {
@@ -188,16 +189,16 @@ public class CollectTableInfo {
 
     public String[] readQualifiedName(List<Token> tokens, int start, int size) {
         int j = skipHidden(tokens, start, size);
-        if (j >= size || tokens.get(j).getType() != com.example.PostgreSQLParser.ID) {
+        if (j >= size || tokens.get(j).getType() != PostgreSQLParser.ID) {
             return null;
         }
 
         String part1 = tokens.get(j).getText();
         int afterPart1 = skipHidden(tokens, j + 1, size);
 
-        if (afterPart1 < size && tokens.get(afterPart1).getType() == com.example.PostgreSQLParser.DOT) {
+        if (afterPart1 < size && tokens.get(afterPart1).getType() == PostgreSQLParser.DOT) {
             int afterDot = skipHidden(tokens, afterPart1 + 1, size);
-            if (afterDot < size && tokens.get(afterDot).getType() == com.example.PostgreSQLParser.ID) {
+            if (afterDot < size && tokens.get(afterDot).getType() == PostgreSQLParser.ID) {
                 // schema.table
                 String full = part1 + "." + tokens.get(afterDot).getText();
                 return new String[]{full, String.valueOf(afterDot)};
@@ -213,7 +214,7 @@ public class CollectTableInfo {
 
     public ColumnName readColumeName(ScopeNode current, List<Token> tokens, int start, int size) {
         int i = skipHidden(tokens, start, size);
-        if (i >= size || tokens.get(i).getType() != com.example.PostgreSQLParser.ID) {
+        if (i >= size || tokens.get(i).getType() != PostgreSQLParser.ID) {
             return null;
         }
 
@@ -221,19 +222,19 @@ public class CollectTableInfo {
         int i1 = skipHidden(tokens, i + 1, size);
 
         // ── case 1: single column ──
-        if (i1 >= size || tokens.get(i1).getType() != com.example.PostgreSQLParser.DOT) {
+        if (i1 >= size || tokens.get(i1).getType() != PostgreSQLParser.DOT) {
             return new ColumnName(List.of(first), i);
         }
 
         // ── case 2: a.b or a.b.c ──
         int i2 = skipHidden(tokens, i1 + 1, size);
 
-        if (i2 >= size || tokens.get(i2).getType() == com.example.PostgreSQLParser.STAR) {
+        if (i2 >= size || tokens.get(i2).getType() == PostgreSQLParser.STAR) {
             var columnsOfTable = getColumnsOfTable(current.aliases.get(first)).stream().map(SchemaLoader.DBColumnInfo::name).collect(Collectors.toList());
             return new ColumnName(columnsOfTable, i);
         }
 
-        if (i2 >= size || tokens.get(i2).getType() != com.example.PostgreSQLParser.ID) {
+        if (i2 >= size || tokens.get(i2).getType() != PostgreSQLParser.ID) {
             return new ColumnName(List.of(first), i);
         }
 
@@ -242,9 +243,9 @@ public class CollectTableInfo {
         int i3 = skipHidden(tokens, i2 + 1, size);
 
         // ── case 3: schema.table.column ──
-        if (i3 < size && tokens.get(i3).getType() == com.example.PostgreSQLParser.DOT) {
+        if (i3 < size && tokens.get(i3).getType() == PostgreSQLParser.DOT) {
             int i4 = skipHidden(tokens, i3 + 1, size);
-            if (i4 < size && tokens.get(i4).getType() == com.example.PostgreSQLParser.ID) {
+            if (i4 < size && tokens.get(i4).getType() == PostgreSQLParser.ID) {
                 String third = tokens.get(i4).getText();
 
                 // schema.table.column
@@ -297,17 +298,17 @@ public class CollectTableInfo {
         int depth = 0;
         while (i < closeParen) {
             int type = tokens.get(i).getType();
-            if (type == com.example.PostgreSQLParser.LPAREN) {
+            if (type == PostgreSQLParser.LPAREN) {
                 depth++;
                 i++;
                 continue;
             }
-            if (type == com.example.PostgreSQLParser.RPAREN) {
+            if (type == PostgreSQLParser.RPAREN) {
                 depth--;
                 i++;
                 continue;
             }
-            if (depth == 0 && type == com.example.PostgreSQLParser.SELECT) break;
+            if (depth == 0 && type == PostgreSQLParser.SELECT) break;
             i++;
         }
         if (i >= closeParen) return cols; // không tìm thấy SELECT
@@ -319,13 +320,13 @@ public class CollectTableInfo {
         while (i < closeParen) {
             int type = tokens.get(i).getType();
 
-            if (type == com.example.PostgreSQLParser.LPAREN) {
+            if (type == PostgreSQLParser.LPAREN) {
                 depth++;
                 lastId = null;
                 i++;
                 continue;
             }
-            if (type == com.example.PostgreSQLParser.RPAREN) {
+            if (type == PostgreSQLParser.RPAREN) {
                 depth--;
                 i++;
                 continue;
@@ -334,12 +335,12 @@ public class CollectTableInfo {
                 i++;
                 continue;
             }
-            if (type == com.example.PostgreSQLParser.FROM) break;
+            if (type == PostgreSQLParser.FROM) break;
 
-            if (type == com.example.PostgreSQLParser.AS) {
+            if (type == PostgreSQLParser.AS) {
                 // AS luôn đặt tên column → flush ngay, bỏ qua lastId trước đó
                 int j = skipHidden(tokens, i + 1, closeParen);
-                if (j < closeParen && tokens.get(j).getType() == com.example.PostgreSQLParser.ID) {
+                if (j < closeParen && tokens.get(j).getType() == PostgreSQLParser.ID) {
                     cols.add(tokens.get(j).getText());
                     cols.remove(lastId);
                     lastId = null;
@@ -348,7 +349,7 @@ public class CollectTableInfo {
                 }
             }
 
-            if (type == com.example.PostgreSQLParser.STAR) {
+            if (type == PostgreSQLParser.STAR) {
                 current.aliases.forEach((s, s2) -> {
                     var columnsOfTable = getColumnsOfTable(current.aliases.get(s));
                     columnsOfTable.forEach(columnInfo -> {
@@ -359,12 +360,12 @@ public class CollectTableInfo {
                 continue;
             }
 
-            if (type == com.example.PostgreSQLParser.COMMA) {
+            if (type == PostgreSQLParser.COMMA) {
                 if (lastId != null) {
                     cols.add(lastId); // flush col không có alias
                 }
                 lastId = null;
-            } else if (type == com.example.PostgreSQLParser.ID) {
+            } else if (type == PostgreSQLParser.ID) {
                 var columnName = readColumeName(current, tokens, i, tokens.size());
                 if (columnName.names.size() == 1) {
                     //trường hợp chỉ có 1 name (không phải *) thì set lastId để xử lý type == PostgreSQLParser.AS ghi đè alias
@@ -376,7 +377,7 @@ public class CollectTableInfo {
                 });
                 i = columnName.tokenIndex + 1;
                 continue;
-            } else if (type != com.example.PostgreSQLParser.DOT) {
+            } else if (type != PostgreSQLParser.DOT) {
                 lastId = null; // expression như COUNT(), +, - → reset
             }
             i++;

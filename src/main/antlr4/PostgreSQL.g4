@@ -1,7 +1,7 @@
 grammar PostgreSQL;
 
 @header {
-    package com.example;
+package com.naviq.antlr4;
 }
 
 // ===================== PARSER =====================

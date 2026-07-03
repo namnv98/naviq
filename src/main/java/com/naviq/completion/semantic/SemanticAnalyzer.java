@@ -1,7 +1,6 @@
 package com.naviq.completion.semantic;
 
-import com.example.PostgreSQLLexer;
-import com.example.PostgreSQLParser;
+import com.naviq.antlr4.*;
 import com.naviq.utils.TokenPositionUtil;
 import com.naviq.completion.suggests.DmlTargetResolver;
 import org.antlr.v4.runtime.*;
@@ -27,10 +26,6 @@ public class SemanticAnalyzer {
      * KHÔNG BAO GIỜ throw ra ngoài, completion không được sập vì lý do này.
      */
     public static Result analyze(String sql, int rawCursorOffset) {
-        // BẮT BUỘC clamp trước khi dùng - caller (vd MenuCompleter) có thể truyền
-        // offset không khớp độ dài "sql" thật (đã xác nhận qua crash thực tế:
-        // StringIndexOutOfBoundsException khi sql rỗng nhưng cursorOffset=1).
-        // KHÔNG được tin tưởng mù quáng offset từ bên ngoài.
         final int cursorOffset = Math.max(0, Math.min(rawCursorOffset, sql.length()));
 
         boolean rightAfterDot = cursorOffset > 0 && sql.charAt(cursorOffset - 1) == '.';
@@ -55,7 +50,7 @@ public class SemanticAnalyzer {
 
             SemanticScope model = new SemanticScope();
             model.offendingTokenIndices.addAll(offendingTokens);
-            ParseTreeWalker.DEFAULT.walk((ParseTreeListener) model, tree);
+            ParseTreeWalker.DEFAULT.walk(model, tree);
 
             tokens.fill();
             int tokenIdx = 0;

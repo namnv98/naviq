@@ -1,6 +1,6 @@
 package com.naviq.completion.suggests;
 
-import com.example.PostgreSQLParser;
+import com.naviq.antlr4.*;
 import com.naviq.datasource.SchemaIndex;
 import com.naviq.completion.syntactic.AntlrCompletionEngine;
 import com.naviq.completion.model.Suggest;
