@@ -17,8 +17,7 @@ public class SchemaIndex {
     public static volatile Map<String, SchemaLoader.TableInfo> SCHEMA_TABLE_INDEX;
     public static volatile List<String> FUNCTIONS;
     public static volatile List<String> DATA_TYPES;
-    /** Giữ nguyên từ bản gốc - chưa rõ có được dùng ở nơi khác trong project không. */
-    public static volatile CollectTableInfo collectTableInfo;
+
 
     static {
         reload();
@@ -31,7 +30,6 @@ public class SchemaIndex {
             DATA_TYPES = SchemaLoader.loadDataTypes(PostgresDataSource.get());
             SCHEMA_TABLE_INDEX = buildSchemaTableIndex(DB_SCHEMA);
             FUNCTIONS = SchemaLoader.loadFunctions(PostgresDataSource.get());
-            collectTableInfo = new CollectTableInfo(TABLE_INDEX);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
