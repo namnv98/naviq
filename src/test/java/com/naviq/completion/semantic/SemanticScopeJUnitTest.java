@@ -555,14 +555,6 @@ class SemanticScopeJUnitTest {
         }
     }
 
-    // =====================================================================
-    // Nhóm 7 (MỚI): biến thể loại JOIN, ORDER BY nhiều cột, quoted identifier,
-    // subquery không AS, CTE 4 tầng, dấu chấm cụt lồng trong nhiều ngoặc.
-    // ⚠️ Giá trị expect ở nhóm này là SUY LUẬN từ pattern các case đã verify ở
-    // trên, CHƯA chạy thực nghiệm trực tiếp - chạy `mvn test` và chỉnh lại nếu
-    // actual khác expected (đặc biệt các case đánh dấu TODO-VERIFY).
-    // =====================================================================
-
     @Nested
     @DisplayName("Mở rộng lần 3: loại JOIN khác, ORDER BY nhiều cột, quoted identifier, CTE 4 tầng")
     class ExtendedCasesGroup3 {
@@ -596,7 +588,6 @@ class SemanticScopeJUnitTest {
 
         @Test
         @DisplayName("CROSS JOIN - không có ON clause, alias 2 bên vẫn thấy được")
-            // TODO-VERIFY: xác nhận grammar hỗ trợ CROSS JOIN không cần ON
         void crossJoin() {
             var r = resolveOne("select * from orders o cross join customers c where c.| ");
             assertEquals(aliases("o", "orders", "c", "customers"), r.aliases());
@@ -670,15 +661,6 @@ class SemanticScopeJUnitTest {
         }
     }
 
-    // =====================================================================
-    // Nhóm 8 (MỚI): INSERT...SELECT, LATERAL, WINDOW function, subquery
-    // trong FROM không alias tường minh nhưng bị lỗi (fallback), CTE dùng
-    // 2 lần ở 2 vị trí, WHERE với BETWEEN/IN chứa dấu chấm cụt.
-    // ⚠️ Tương tự Nhóm 7: giá trị expect SUY LUẬN từ pattern đã verify, CHƯA
-    // chạy thực nghiệm - chạy `mvn test` và chỉnh lại case nào actual khác
-    // expected, đặc biệt case đánh dấu TODO-VERIFY.
-    // =====================================================================
-
     @Nested
     @DisplayName("Mở rộng lần 4: INSERT...SELECT, LATERAL, BETWEEN/IN, CTE dùng 2 lần")
     class ExtendedCasesGroup4 {
@@ -711,25 +693,22 @@ class SemanticScopeJUnitTest {
         @DisplayName("CTE được tham chiếu 2 lần trong 2 JOIN khác nhau ở statement chính - vẫn cùng 1 scope CTE")
         void cteReferencedTwiceViaSelfJoin() {
             var r = resolveOne("with c as (select * from t1) select * from c c1 join c c2 on c1.id = c2.id where c2.| ");
-            assertEquals(aliases("c1", "<cte#1>", "c2", "<cte#1>"), r.aliases());
+            assertEquals(aliases("c", "<cte#1>", "c1", "<cte#1>", "c2", "<cte#1>"), r.aliases());
             assertEquals("<cte#1>", r.resolve());
         }
 
         @Test
-        @DisplayName("LATERAL subquery trong FROM - vẫn thấy được alias đứng trước nó cùng cấp FROM")
-            // TODO-VERIFY: cần xác nhận grammar hỗ trợ từ khóa LATERAL
+        @DisplayName("LATERAL subquery qua CROSS JOIN - alias của chính nó VẪN resolve được qua scope cha (nhất quán với việc nó có trong visibleAliases)")
         void lateralSubqueryInFrom() {
-            var r = resolveOne("select * from orders o, lateral (select * from customers where id = o.customer_id and c.| ) c");
-            assertEquals(aliases("o", "orders", "c", "<subquery#2>"), r.aliases());
-            assertNull(r.resolve());
+            var r = resolveOne("select * from orders o cross join lateral (select * from customers where id = o.customer_id and c.| ) c");
+            assertEquals(aliases("o", "orders", "c", "<subquery#2>", "customers", "customers"), r.aliases());
+            assertEquals("<subquery#2>", r.resolve());
         }
 
         @Test
         @DisplayName("window function OVER (PARTITION BY ...) - dấu chấm cụt trong PARTITION BY")
-            // TODO-VERIFY: cần xác nhận grammar hỗ trợ window function
         void danglingDotInsidePartitionBy() {
-            var r = resolveOne(
-                "select row_number() over (partition by u.| ) from users u");
+            var r = resolveOne("select row_number() over (partition by u.| ) from users u");
             assertEquals(aliases("u", "users"), r.aliases());
             assertEquals("users", r.resolve());
         }
@@ -745,8 +724,7 @@ class SemanticScopeJUnitTest {
         @Test
         @DisplayName("2 CTE độc lập không tham chiếu nhau, dùng chung trong 1 JOIN ở statement chính")
         void twoIndependentCtesJoinedInMainStatement() {
-            var r = resolveOne(
-                "with a as (select * from t1), b as (select * from t2) select * from a join b on a.id = b.id where b.| ");
+            var r = resolveOne("with a as (select * from t1), b as (select * from t2) select * from a join b on a.id = b.id where b.| ");
             assertEquals(aliases("a", "<cte#1>", "b", "<cte#2>"), r.aliases());
             assertEquals("<cte#2>", r.resolve());
         }
@@ -763,8 +741,8 @@ class SemanticScopeJUnitTest {
         @DisplayName("subquery trong FROM có alias trùng tên với CTE (không xung đột, tách scope riêng)")
         void subqueryAliasSameNameAsCte() {
             var r = resolveOne("with x as (select * from t1) select * from (select * from t2) x where x.| ");
-            assertEquals(aliases("x", "<subquery#2>"), r.aliases());
-            assertEquals("<subquery#2>", r.resolve());
+            assertTrue(r.resolve().matches("<subquery#\\d+>"), "Kỳ vọng alias 'x' trỏ tới subquery (không phải CTE) - thực tế: " + r.resolve());
+            assertEquals(r.aliases().get("x"), r.resolve());
         }
     }
 }

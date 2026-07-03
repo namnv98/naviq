@@ -139,6 +139,38 @@ public class MenuCompleter {
         impl.getWidgets().put(name, w);
     }
 
+    /**
+     * Số dòng (phân cách bởi '\n') còn lại PHÍA SAU vị trí cursor trong buffer hiện
+     * tại - dùng để biết chế độ multi-line có text NGƯỜI DÙNG ĐÃ GÕ nằm ngay dưới
+     * cursor không, để lấy đúng nội dung khôi phục lại khi menu ẩn đi.
+     *
+     * Tô màu bằng ĐÚNG highlighter đang gán cho LineReader (reader.getHighlighter())
+     * - KHÔNG trả text thuần, vì nếu không sẽ mất hết màu cú pháp khi TerminalMenu
+     * khôi phục lại các dòng này (đã xác nhận qua thực nghiệm: khôi phục đúng chữ
+     * nhưng bị mất màu do trước đây lưu text thuần không qua highlighter).
+     */
+    private static List<String> linesBelowCursor(LineReaderImpl reader, String sql, int cursor) {
+        if (cursor < 0 || cursor > sql.length()) return List.of();
+        String afterCursor = sql.substring(cursor);
+        // dòng ĐẦU TIÊN sau cursor (cùng dòng với cursor, phần còn lại phía sau nó)
+        // KHÔNG tính vào đây - nó đã được JLine tự vẽ lại đúng qua REDISPLAY bình
+        // thường (chỉ những dòng SAU dấu '\n' - tức dòng continuation khác - mới bị
+        // menu đè lên hoàn toàn và cần tự khôi phục).
+        String[] parts = afterCursor.split("\n", -1);
+        List<String> result = new ArrayList<>();
+        var highlighter = reader.getHighlighter();
+        // secondary prompt = " " (xem NaviQCli: SECONDARY_PROMPT_PATTERN = " ") -
+        // giữ nguyên PLAIN (không tô màu), chỉ tô màu phần nội dung SQL thật sự.
+        for (int i = 1; i < parts.length; i++) {
+            String lineText = parts[i];
+            String ansi = highlighter != null
+                ? highlighter.highlight(reader, lineText).toAnsi()
+                : lineText;
+            result.add(" " + ansi);
+        }
+        return result;
+    }
+
     // ───────────────────────────────────────────────────
     public record Ctx(String prefix, boolean dotMode, String sqlSearch, int csrSearch) {
 
@@ -187,7 +219,7 @@ public class MenuCompleter {
             return;
         }
         List<AttributedString> lines = render(list, -1, 0, ctx.prefix(), ctx.dotMode());
-        terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE), 1, 1);
+        terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE), 1, 1, linesBelowCursor(reader, sql, cursor));
         autosuggestionOpen = true;
     }
 
@@ -241,7 +273,8 @@ public class MenuCompleter {
                 List<AttributedString> lines = render(filtered, selected, scroll, ctx.prefix(),
                     ctx.dotMode());
 
-                terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE + 1), 1, 1);
+                terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE + 1), 1, 1,
+                    linesBelowCursor(reader, sql, cursor));
 
                 Suggest current = filtered.isEmpty() ? null : filtered.get(selected);
                 if (current != null) {
@@ -540,9 +573,26 @@ public class MenuCompleter {
 
         out.print("\u001b[s"); // save cursor
 
-        // Xóa ghost cũ bằng cách in spaces đè lên
+        // Xóa ghost cũ bằng cách in LẠI ĐÚNG TEXT THẬT đang nằm ngay sau cursor
+        // (KHÔNG phải khoảng trắng) - nếu cursor không đứng cuối dòng (đang sửa giữa
+        // câu), khoảng trắng sẽ xóa mất chính ký tự thật của câu SQL, và REDISPLAY
+        // của JLine không biết vùng này đã bị ghi ANSI thô nên không tự phục hồi
+        // được (cùng nguyên nhân với bug đã fix ở TerminalMenu.hide()).
         if (!lastGhost.isEmpty()) {
-            out.print(" ".repeat(lastGhost.length()));
+            String buf = reader.getBuffer().toString();
+            int cursor = reader.getBuffer().cursor();
+            // chỉ lấy phần còn lại TRÊN CÙNG DÒNG (tới '\n' đầu tiên nếu có), vì
+            // ghost/cursor luôn nằm trên 1 dòng terminal duy nhất
+            int nl = buf.indexOf('\n', cursor);
+            String restOfLine = nl >= 0 ? buf.substring(cursor, nl) : buf.substring(cursor);
+            if (restOfLine.length() >= lastGhost.length()) {
+                out.print(restOfLine.substring(0, lastGhost.length()));
+            } else {
+                // buffer thật ngắn hơn ghost cũ (hiếm, nhưng phòng thủ) - phần dư
+                // ra thật sự trống, an toàn để in khoảng trắng cho đúng phần đó
+                out.print(restOfLine);
+                out.print(" ".repeat(lastGhost.length() - restOfLine.length()));
+            }
         }
 
         out.print("\u001b[u"); // restore cursor (về vị trí cursor thật)
