@@ -1,12 +1,13 @@
 package com.naviq.completion.suggests;
 
-import com.naviq.antlr4.PostgreSQLParser;
-import com.naviq.completion.model.Suggest;
-import com.naviq.completion.semantic.SemanticAnalyzer;
-import com.naviq.completion.syntactic.AntlrCompletionEngine;
-import com.naviq.completion.syntactic.SyntacticAnalyzer;
+import com.naviq.antlr4.*;
 import com.naviq.datasource.SchemaIndex;
+import com.naviq.completion.syntactic.AntlrCompletionEngine;
+import com.naviq.completion.model.Suggest;
+import com.naviq.completion.semantic.*;
+import com.naviq.completion.syntactic.SyntacticAnalyzer;
 import org.antlr.v4.runtime.Token;
+import com.naviq.util.LoggingConfig;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,24 +25,16 @@ import static java.util.Objects.isNull;
  * SyntacticAnalyzer     - tầng cú pháp (AntlrCompletionEngineFix: token/rule hợp lệ)
  * DerivedColumnExpander - mở rộng cột của subquery/CTE (bao gồm case wildcard)
  * AliasNameSuggester    - đặt tên alias tự động + tìm tableName trước "AS"
+ * KeywordNoiseFilter    - lọc "rác" keyword (statement-start lặp lại + identifier-usable
+ * keyword khi đã có cột/alias/bảng thật) - xem javadoc trong file đó để biết chi tiết 2
+ * loại nhiễu khác nhau đang được xử lý
  * DmlTargetResolver     - fallback token-scan cho INSERT/UPDATE/ALTER (dùng nội bộ bởi SemanticAnalyzer khi parse lỗi nặng)
  * <p>
  * 2 tầng (Semantic/Syntactic) ĐỘC LẬP, không tầng nào thay được tầng kia - xem
  * javadoc gốc trong SemanticAnalyzer/SyntacticAnalyzer để biết lý do.
- * <p>
- * CẬP NHẬT (port sang grammar PostgreSQL đầy đủ): tên rule trong switch bên dưới đổi theo tên rule
- * THẬT của grammar mới (kiểu Postgres gram.y), khác hẳn tên rule rút gọn cũ:
- * - "columnName" cũ -> {@code columnref} (biểu thức cột trong SELECT list/WHERE/...)
- * - "dataTypeName" cũ -> {@code typename}
- * - "tableAlias" cũ -> {@code table_alias}
- * - "tableName" cũ -> {@code qualified_name} (FROM/UPDATE/DELETE/ALTER TABLE/TRUNCATE - đi qua
- * relation_expr) VÀ {@code any_name} (DROP TABLE/VIEW/INDEX/SEQUENCE/... - dùng any_name_list,
- * KHÔNG phải qualified_name, xem object_type_any_name trong grammar) - cả 2 đều nên gợi ý tên
- * bảng giống nhau nên cùng route vào addTableNameSuggestions().
  */
 public class CompletionEngine {
-    private static final Logger LOG = com.naviq.util.LoggingConfig.of(CompletionEngine.class);
-
+    private static final Logger LOG = LoggingConfig.of(CompletionEngine.class);
 
     public static List<Suggest> suggests(CompletionInputPreparer.PrepareCompletionInput input) {
         var suggests = suggests(input.sql(), input.cursor());
@@ -54,18 +47,40 @@ public class CompletionEngine {
             cursorCharPos = sql.length();
         }
         int cursorOffset = cursorCharPos;
+        boolean freshStatement = KeywordNoiseFilter.isFreshStatementPosition(sql, cursorOffset);
 
         SemanticAnalyzer.Result semanticResult = SemanticAnalyzer.analyze(sql, cursorOffset);
-        SyntacticAnalyzer.Result syntacticResults = SyntacticAnalyzer.analyze(sql, cursorOffset - 1);
+        // "-1" CẦN THIẾT cho completion kiểu prefix (vd "select * fr|" -> gợi ý "FROM") -
+        // trỏ caretTokenIndex VÀO CHÍNH token đang gõ dở, để engine coi đây là "slot còn
+        // mở, có thể là bất kỳ từ nào khớp prefix" thay vì "đã chốt xong, xét tiếp theo
+        // là gì". NHƯNG chỉ đúng khi ký tự ngay trước cursor CÓ THỂ còn đang gõ dở (chữ/
+        // số/_ - 1 phần của identifier/keyword) - SAI khi ký tự đó là dấu câu cố định
+        // (vd "(", ",", ".") vì dấu câu LUÔN là 1 token ĐÃ HOÀN CHỈNH ngay khi gõ, không
+        // thể "gõ dở" thêm được nữa. Đã xác nhận bằng debug trực tiếp: "insert into t (|"
+        // với "-1" cho ra rule "qualified_name" (SAI - tưởng vẫn đang ở vị trí TRƯỚC dấu
+        // "("), không có "-1" cho ra đúng "colid" (đang ở TRONG dấu ngoặc, chờ cột) - nên
+        // "-1" phải áp CÓ ĐIỀU KIỆN, không phải lúc nào cũng trừ.
+        char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length())
+                ? sql.charAt(cursorOffset - 1) : ' ';
+        boolean stillMidIdentifier = Character.isLetterOrDigit(charBeforeCursor) || charBeforeCursor == '_';
+        int syntacticCursor = stillMidIdentifier ? cursorOffset - 1 : cursorOffset;
+        SyntacticAnalyzer.Result syntacticResults = SyntacticAnalyzer.analyze(sql, syntacticCursor);
+        boolean hasRealColumns = KeywordNoiseFilter.hasColumnrefCandidate(syntacticResults);
 
         for (Map.Entry<Integer, List<Integer>> entry : syntacticResults.candidates().tokens.entrySet()) {
+            if (!freshStatement && KeywordNoiseFilter.STATEMENT_START_TOKENS.contains(entry.getKey())) {
+                continue;
+            }
+            if (hasRealColumns && KeywordNoiseFilter.IDENTIFIER_USABLE_KEYWORDS.contains(entry.getKey())) {
+                continue;
+            }
             addKeywordSuggestions(suggests, entry.getKey());
         }
 
         for (Map.Entry<Integer, List<AntlrCompletionEngine.RuleFrame>> entry : syntacticResults.candidates().rules.entrySet()) {
             String ruleName = PostgreSQLParser.ruleNames[entry.getKey()];
             switch (ruleName) {
-                case "columnref" -> addColumnSuggestions(suggests, semanticResult);
+                case "columnref", "colid" -> addColumnSuggestions(suggests, semanticResult);
                 case "typename" -> addDataTypeSuggestions(suggests);
                 case "table_alias" -> addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
                 case "qualified_name", "any_name" -> addTableNameSuggestions(suggests, syntacticResults);
@@ -86,7 +101,7 @@ public class CompletionEngine {
         var tableName = AliasNameSuggester.extractTableBeforeAs(syn.tokenStream(), syn.caretTokenIndex());
         if (tableName != null) {
             String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
-            suggests.add(Suggest.of(alias, "table"));
+            suggests.add(Suggest.of(alias, "alias"));
         }
     }
 

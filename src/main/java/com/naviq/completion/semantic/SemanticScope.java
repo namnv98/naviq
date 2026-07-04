@@ -80,17 +80,36 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
          */
         public final Map<String, Scope> derivedScopeAliases = new LinkedHashMap<>();
 
+        /**
+         * true CHỈ với scope được push để đăng ký bảng TARGET của 1 statement DDL/DML
+         * không có FROM thật (INSERT, ALTER TABLE, CREATE INDEX ON...) - dùng để NGĂN
+         * việc "leak" alias này xuống scope SELECT con bên trong (vd
+         * "insert into archive select u.| from users u") qua visibleAliases()/
+         * visibleDerivedScopes(): bảng TARGET (đích ghi/sửa đổi) không phải là 1 quan hệ
+         * có thể tham chiếu được TRONG 1 câu SELECT lồng bên trong nó (khác hẳn correlated
+         * subquery thật, nơi kế thừa alias từ scope NGOÀI là đúng và cần thiết) - nhưng
+         * VẪN PHẢI dùng được khi cursor đứng NGAY TRONG chính scope này (vd
+         * "insert into archive (|", "alter table t drop column |", "create index on t (|"),
+         * nên chỉ chặn kế thừa xuống scope CON, không chặn chính nó.
+         */
+        public boolean isDdlTargetScope = false;
+
         Scope(int id, Scope parent) {
             this.id = id;
             this.parent = parent;
         }
 
         /**
-         * Alias thấy được tại scope này, gồm cả kế thừa từ outer (correlated subquery).
+         * Alias thấy được tại scope này, gồm cả kế thừa từ outer (correlated subquery) -
+         * TRỪ alias của bảng target DDL/DML (INSERT/ALTER TABLE/CREATE INDEX) nếu đó là 1
+         * ANCESTOR (không phải chính scope này) - xem javadoc isDdlTargetScope.
          */
         public Map<String, String> visibleAliases() {
             Deque<Scope> chain = new ArrayDeque<>();
             for (Scope s = this; s != null; s = s.parent) {
+                if (s != this && s.isDdlTargetScope) {
+                    continue; // đừng kế thừa "bảng target DDL/DML" xuống scope SELECT con
+                }
                 chain.push(s);
             }
             Map<String, String> result = new LinkedHashMap<>();
@@ -106,6 +125,9 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         public Map<String, Scope> visibleDerivedScopes() {
             Deque<Scope> chain = new ArrayDeque<>();
             for (Scope s = this; s != null; s = s.parent) {
+                if (s != this && s.isDdlTargetScope) {
+                    continue;
+                }
                 chain.push(s);
             }
             Map<String, Scope> result = new LinkedHashMap<>();
@@ -265,6 +287,153 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
     @Override
     public void exitDeletestmt(PostgreSQLParser.DeletestmtContext ctx) {
         popScope(ctx.getStop());
+    }
+
+    // ---- INSERT - grammar dùng "insert_target: qualified_name (AS colid)?" riêng (không
+    //      relation_expr_opt_alias như UPDATE/DELETE) - PHẢI push scope riêng để phần cột
+    //      trong "(col1, col2, ...)" VÀ "SELECT ..."/"VALUES ..." bên trong insert_rest
+    //      thấy được bảng target (dùng cho gợi ý cột khi insert). FIX: trước đây KHÔNG có
+    //      handler này -> sem.visibleAliases() luôn RỖNG với INSERT -> gợi ý cột trong
+    //      "INSERT INTO t (|" luôn rỗng, dù bảng target hoàn toàn xác định được.
+
+    @Override
+    public void enterInsertstmt(PostgreSQLParser.InsertstmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerInsertTarget(child, ctx.insert_target());
+    }
+
+    @Override
+    public void exitInsertstmt(PostgreSQLParser.InsertstmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    // ---- ALTER TABLE / CREATE INDEX - CÙNG lý do với INSERT: cần bảng target trong
+    //      scope để "colid" (ALTER TABLE ... DROP COLUMN, CREATE INDEX ON t (...)) tra
+    //      được cột. Cả 2 rule đều có sẵn accessor relation_expr() (altertablestmt CÓ
+    //      NHIỀU alternative - chỉ alternative "ALTER TABLE ... relation_expr ..." mới có
+    //      relation_expr() non-null, các alternative khác như ALTER INDEX/SEQUENCE dùng
+    //      qualified_name() riêng - bỏ qua có chủ đích, hiếm cần completion cột ở đó).
+
+    @Override
+    public void enterAltertablestmt(PostgreSQLParser.AltertablestmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerRelationExprTarget(child, ctx.relation_expr());
+    }
+
+    @Override
+    public void exitAltertablestmt(PostgreSQLParser.AltertablestmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    @Override
+    public void enterIndexstmt(PostgreSQLParser.IndexstmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerRelationExprTarget(child, ctx.relation_expr());
+    }
+
+    @Override
+    public void exitIndexstmt(PostgreSQLParser.IndexstmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    private void registerRelationExprTarget(
+            Scope target,
+            PostgreSQLParser.Relation_exprContext relationExprCtx
+    ) {
+        if (target == null || relationExprCtx == null) {
+            return;
+        }
+        PostgreSQLParser.Qualified_nameContext qualifiedNameCtx = qualifiedNameOf(relationExprCtx);
+        if (qualifiedNameCtx == null || isUnreliable(relationExprCtx)) {
+            return;
+        }
+        String table = qualifiedNameCtx.getText();
+        String alias = lastPart(table);
+        Scope cteScope = resolveAsExistingCte(table);
+        if (cteScope != null) {
+            target.aliases.put(alias, "<cte#" + cteScope.id + ">");
+            target.derivedScopeAliases.put(alias, cteScope);
+        } else {
+            target.aliases.put(alias, table);
+        }
+    }
+
+    // ---- MERGE - "mergestmt: ... qualified_name alias_clause? USING qualified_name
+    //      alias_clause? ON a_expr ..." - CÓ 2 bảng (target + USING), mỗi bảng optional
+    //      alias riêng - cả 2 đều cần đăng ký để "colid"/"columnref" trong ON/WHEN MATCHED
+    //      SET resolve được cột của cả 2 bên. ANTLR sinh accessor DẠNG LIST vì cùng rule
+    //      xuất hiện 2 lần trong 1 alternative (qualified_name(0)/(1), alias_clause(0)/(1)).
+
+    @Override
+    public void enterMergestmt(PostgreSQLParser.MergestmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        var qualifiedNames = ctx.qualified_name();
+        var aliasClauses = ctx.alias_clause();
+        if (!qualifiedNames.isEmpty()) {
+            registerMergeTable(child, qualifiedNames.get(0),
+                    aliasClauses.isEmpty() ? null : aliasClauses.get(0));
+        }
+        // USING có thể là qualified_name HOẶC select_with_parens (subquery) - chỉ xử lý
+        // case bảng thường ở đây, bỏ qua có chủ đích nếu USING là subquery.
+        if (qualifiedNames.size() > 1) {
+            registerMergeTable(child, qualifiedNames.get(1),
+                    aliasClauses.size() > 1 ? aliasClauses.get(1) : null);
+        }
+    }
+
+    @Override
+    public void exitMergestmt(PostgreSQLParser.MergestmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    private void registerMergeTable(
+            Scope target,
+            PostgreSQLParser.Qualified_nameContext qualifiedNameCtx,
+            PostgreSQLParser.Alias_clauseContext aliasClauseCtx
+    ) {
+        if (target == null || qualifiedNameCtx == null || isUnreliable(qualifiedNameCtx)) {
+            return;
+        }
+        String table = qualifiedNameCtx.getText();
+        String alias = (aliasClauseCtx != null && aliasClauseCtx.colid() != null)
+                ? aliasClauseCtx.colid().getText() : lastPart(table);
+        Scope cteScope = resolveAsExistingCte(table);
+        if (cteScope != null) {
+            target.aliases.put(alias, "<cte#" + cteScope.id + ">");
+            target.derivedScopeAliases.put(alias, cteScope);
+        } else {
+            target.aliases.put(alias, table);
+        }
+    }
+
+    private void registerInsertTarget(
+            Scope target,
+            PostgreSQLParser.Insert_targetContext insertTargetCtx
+    ) {
+        // insert_target : qualified_name (AS colid)? ;
+        if (target == null || insertTargetCtx == null || insertTargetCtx.qualified_name() == null) {
+            return;
+        }
+        if (isUnreliable(insertTargetCtx)) {
+            return;
+        }
+        String table = insertTargetCtx.qualified_name().getText();
+        PostgreSQLParser.ColidContext aliasCtx = insertTargetCtx.colid();
+        String alias = aliasCtx != null ? aliasCtx.getText() : lastPart(table);
+        // Về lý thuyết INSERT INTO 1 CTE (writable CTE) là hợp lệ trong 1 số ngữ cảnh hiếm -
+        // giữ nhất quán với registerDmlTableAlias, dù thực tế insert_target hiếm khi trỏ
+        // tới CTE.
+        Scope cteScope = resolveAsExistingCte(table);
+        if (cteScope != null) {
+            target.aliases.put(alias, "<cte#" + cteScope.id + ">");
+            target.derivedScopeAliases.put(alias, cteScope);
+        } else {
+            target.aliases.put(alias, table);
+        }
     }
 
     private Scope pushScope(Token startToken) {

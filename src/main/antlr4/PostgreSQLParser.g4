@@ -4052,7 +4052,7 @@ target_el
    | a_expr target_alias? # target_label
    | STAR # target_star
    ;
-   
+
 target_alias
    : AS collabel
    | bare_col_label

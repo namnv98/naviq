@@ -69,17 +69,12 @@ public class SyntacticAnalyzer {
     private static Map<Integer, Boolean> buildPreferredRules() {
         Map<Integer, Boolean> m = new HashMap<>();
         m.put(PostgreSQLParser.RULE_qualified_name, true);  // tableName cũ - tên bảng/CTE (FROM,
-        // UPDATE/DELETE/ALTER TABLE/TRUNCATE - đều đi qua relation_expr -> qualified_name)
         m.put(PostgreSQLParser.RULE_any_name, true);        // DROP TABLE/VIEW/INDEX/SEQUENCE/...
-        // dùng any_name_list -> any_name (KHÔNG phải qualified_name) cho tên đối tượng bị drop -
-        // đây là rule RIÊNG, cấu trúc giống qualified_name (colid + dotted path) nhưng khác rule
-        // index, nên phải thêm thủ công, không tự động có qua qualified_name.
         m.put(PostgreSQLParser.RULE_columnref, true);       // columnName cũ - biểu thức cột (SELECT
-        // list/WHERE/...), tách riêng khỏi qualified_name ở grammar mới
         m.put(PostgreSQLParser.RULE_typename, true);        // dataTypeName cũ
         m.put(PostgreSQLParser.RULE_func_name, true);       // functionCall cũ - tên hàm (không phải
-        // toàn bộ lời gọi hàm kèm tham số)
         m.put(PostgreSQLParser.RULE_table_alias, true);     // tableAlias cũ
+        m.put(PostgreSQLParser.RULE_colid, true);
         return m;
     }
 
