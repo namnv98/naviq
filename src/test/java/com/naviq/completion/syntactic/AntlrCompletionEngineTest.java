@@ -140,6 +140,16 @@ class AntlrCompletionEngineTest {
         }
 
         @Test
+        @DisplayName("tableName vẫn đúng dù có WHERE/ORDER BY/LIMIT thật sự nằm sau caret")
+        void tableNameWithRealClausesAfterCaret1() {
+            var c = collect("select |");
+            for (var v: c.tokens.keySet()){
+                System.out.println(PostgreSQLParser.VOCABULARY.getLiteralName(v));
+            }
+            assertTrue(hasToken(c, PostgreSQLParser.RULE_selectstmt));
+        }
+
+        @Test
         @DisplayName("columnName ở giữa SELECT list, còn cột khác phía sau")
         void columnNameInMiddleOfSelectListWithMoreColumnsAfter() {
             var c = collect("select a, | , c from t where x = 1");

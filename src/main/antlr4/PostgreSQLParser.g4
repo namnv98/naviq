@@ -24,7 +24,12 @@ stmtblock
    ;
 
 stmtmulti
-   : (stmt SEMI?)*
+   // PATCH: bản gốc "(stmt SEMI?)*" cho phép NHIỀU statement liên tiếp KHÔNG CẦN dấu ";"
+   // ở giữa (chỉ cần optional sau MỖI statement) - sai khác so với Postgres thật
+   // (stmtmulti: stmtmulti ';' stmt | stmt - dấu ";" BẮT BUỘC giữa 2 statement, chỉ
+   // TÙY CHỌN ở cuối cùng). Sửa lại đúng cấu trúc: 1+ statement, các statement Ở GIỮA
+   // bắt buộc phải có ";", chỉ statement CUỐI mới được phép bỏ ";".
+   : (stmt (SEMI stmt)* SEMI?)?
    ;
 
 stmt
@@ -699,7 +704,7 @@ colconstraintelem
    | GENERATED generated_when AS (IDENTITY_P optparenthesizedseqoptlist? | OPEN_PAREN a_expr CLOSE_PAREN STORED)
    | REFERENCES qualified_name opt_column_list? key_match? key_actions?
    ;
-   
+
 opt_unique_null_treatment
    : NULLS_P NOT? DISTINCT
    ;
@@ -1677,11 +1682,11 @@ privilege_target
    | ALL PROCEDURES IN_P SCHEMA name_list
    | ALL ROUTINES IN_P SCHEMA name_list
    ;
-   
+
 parameter_name_list
    : parameter_name (COMMA parameter_name)*
    ;
-   
+
 parameter_name
    : colid (DOT colid)?
    ;
@@ -2264,11 +2269,11 @@ createpublicationstmt
    | CREATE PUBLICATION name FOR ALL TABLES opt_definition?
    | CREATE PUBLICATION name FOR pub_obj_list opt_definition?
    ;
-   
+
 pub_obj_list
    : publication_obj_spec (COMMA publication_obj_spec)*
    ;
-   
+
 publication_obj_spec
    : TABLE relation_expr opt_column_list? opt_where_clause?
    | TABLE IN_P SCHEMA (colid | CURRENT_SCHEMA)
@@ -3050,9 +3055,14 @@ table_ref
     ;
 
 joined_table
+    // PATCH (mirror indirection_el DOT?? patch): join_qual làm optional - "table JOIN table"
+    // (chưa gõ ON/USING) là trạng thái CỰC KỲ PHỔ BIẾN khi đang gõ dở 1 câu JOIN, y hệt lý
+    // do "dấu chấm cụt" được patch ở indirection_el. Nếu không patch, thiếu ON/USING gây
+    // lỗi parse THẬT, kích hoạt isUnreliable() chặn đăng ký alias - kể cả các alias HOÀN
+    // TOÀN HỢP LỆ đứng TRƯỚC chỗ lỗi (vd "FROM a AS x JOIN b AS |" mất luôn alias "x").
     : CROSS JOIN table_ref
     | NATURAL join_type? JOIN table_ref
-    | join_type? JOIN table_ref join_qual
+    | join_type? JOIN table_ref join_qual?
     ;
 
 alias_clause

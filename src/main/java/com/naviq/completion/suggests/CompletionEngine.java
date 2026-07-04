@@ -1,16 +1,17 @@
 package com.naviq.completion.suggests;
 
-import com.naviq.antlr4.*;
-import com.naviq.datasource.SchemaIndex;
-import com.naviq.completion.syntactic.AntlrCompletionEngine;
+import com.naviq.antlr4.PostgreSQLParser;
 import com.naviq.completion.model.Suggest;
-import com.naviq.completion.semantic.*;
+import com.naviq.completion.semantic.SemanticAnalyzer;
+import com.naviq.completion.syntactic.AntlrCompletionEngine;
 import com.naviq.completion.syntactic.SyntacticAnalyzer;
+import com.naviq.datasource.SchemaIndex;
 import org.antlr.v4.runtime.Token;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
 import static java.util.Objects.isNull;
 
@@ -39,6 +40,14 @@ import static java.util.Objects.isNull;
  * bảng giống nhau nên cùng route vào addTableNameSuggestions().
  */
 public class CompletionEngine {
+    private static final Logger LOG = com.naviq.util.LoggingConfig.of(CompletionEngine.class);
+
+
+    public static List<Suggest> suggests(CompletionInputPreparer.PrepareCompletionInput input) {
+        var suggests = suggests(input.sql(), input.cursor());
+        return SuggestFilter.filter(suggests, input.prefix(), input.dotMode());
+    }
+
     public static List<Suggest> suggests(String sql, Integer cursorCharPos) {
         var suggests = new ArrayList<Suggest>();
         if (isNull(cursorCharPos)) {
@@ -77,7 +86,7 @@ public class CompletionEngine {
         var tableName = AliasNameSuggester.extractTableBeforeAs(syn.tokenStream(), syn.caretTokenIndex());
         if (tableName != null) {
             String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
-            suggests.add(Suggest.of(alias, "column"));
+            suggests.add(Suggest.of(alias, "table"));
         }
     }
 
@@ -106,7 +115,7 @@ public class CompletionEngine {
             });
         } else {
             // Không có FROM nào cả (hoặc SemanticAnalyzer rơi vào fallback) - fallback toàn schema, phương án cuối.
-            SchemaIndex.SCHEMA_TABLE_INDEX.keySet().forEach(t -> SchemaIndex.getColumnsOfTable(t).forEach(c -> suggests.add(Suggest.of(c.fullName(), "column", c.dataType()))));
+//            SchemaIndex.SCHEMA_TABLE_INDEX.keySet().forEach(t -> SchemaIndex.getColumnsOfTable(t).forEach(c -> suggests.add(Suggest.of(c.fullName(), "column", c.dataType()))));
         }
     }
 

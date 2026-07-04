@@ -22,11 +22,6 @@
             <artifactId>jline</artifactId>
             <version>4.3.1</version>
         </dependency>
-        <dependency>
-            <groupId>org.jline</groupId>
-            <artifactId>jline-terminal-jni</artifactId>
-            <version>4.3.1</version>
-        </dependency>
 
         <!-- Các dep khác của bạn -->
         <dependency>
@@ -59,6 +54,11 @@
                 <groupId>org.antlr</groupId>
                 <artifactId>antlr4-maven-plugin</artifactId>
                 <version>4.13.1</version>
+                <configuration>
+                    <excludes>
+                        <exclude>PostgreSQLKeywords.g4</exclude>
+                    </excludes>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

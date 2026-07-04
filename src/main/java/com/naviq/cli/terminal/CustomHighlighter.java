@@ -16,19 +16,6 @@ import org.jline.utils.AttributedStyle;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-
-/**
- * CẬP NHẬT (port sang grammar PostgreSQL đầy đủ): một số token đổi tên vì trùng với từ khóa
- * reserved ở nơi khác trong grammar (theo đúng quy ước Postgres gram.y, hậu tố "_P"):
- * DELETE -> DELETE_P, ADD -> ADD_P, GROUP -> GROUP_P, INNER -> INNER_P, OUTER -> OUTER_P,
- * IN -> IN_P, NULL_ -> NULL_P, END -> END_P. Toán tử/hằng số cũng đổi tên:
- * EQ -> EQUAL, NEQ -> NOT_EQUALS, LTE -> LESS_EQUALS, GTE -> GREATER_EQUALS,
- * STRING -> StringConstant, NUMBER -> Numeric/Integral (2 token riêng cho số thực/nguyên),
- * ID -> Identifier. Các token còn lại (SELECT, INSERT, UPDATE, INTO, VALUES, SET, CREATE, TABLE,
- * DROP, TRUNCATE, ALTER, COLUMN, RENAME, FROM, WHERE, BY, ORDER, HAVING, LIMIT, OFFSET, AS, WITH,
- * ON, USING, JOIN, LEFT, RIGHT, FULL, CROSS, NATURAL, AND, OR, NOT, LIKE, EXISTS, IS, CASE, WHEN,
- * THEN, ASC, DESC, LT, GT, PLUS, MINUS, STAR, SLASH, DOT) giữ nguyên tên.
- */
 public class CustomHighlighter implements Highlighter {
     private static final Set<String> ALL_COLUMNS = SchemaIndex.TABLE_INDEX
             .values().stream()

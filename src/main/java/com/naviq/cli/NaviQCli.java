@@ -37,7 +37,7 @@ public class NaviQCli {
             }
         }
         System.setProperty("org.jline.terminal.type", "xterm-256color");
-
+        com.naviq.util.LoggingConfig.init();
         String dbName = "SLQ";
         String visiblePrompt = dbName + "> ";
         String coloredPrompt = "\u001B[32m" + visiblePrompt + "\u001B[0m";

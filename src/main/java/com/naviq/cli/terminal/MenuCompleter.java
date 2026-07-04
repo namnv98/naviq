@@ -4,6 +4,9 @@ import com.naviq.completion.suggests.CompletionEngine;
 import com.naviq.completion.model.Suggest;
 import com.naviq.cli.anchor.AnchorStrategyUtil;
 import com.naviq.cli.layout.TerminalMenu;
+import com.naviq.completion.suggests.CompletionHistory;
+import com.naviq.completion.suggests.CompletionInputPreparer;
+import com.naviq.completion.suggests.SuggestFilter;
 import org.jline.keymap.BindingReader;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.Binding;
@@ -20,8 +23,13 @@ import org.jline.utils.InfoCmp.Capability;
 import java.io.IOError;
 import java.io.PrintWriter;
 import java.util.*;
-import java.util.stream.Collectors;
-
+import com.naviq.completion.suggests.CompletionInputPreparer.PrepareCompletionInput;
+/**
+ * CẬP NHẬT: logic lọc/xếp hạng fuzzy (filter/display/fuzzyMatch/fuzzyScore) đã tách sang
+ * {@link SuggestFilter} (thuần, không đụng LineReader/Terminal) - xem javadoc bên đó cho
+ * phần cải tiến (gộp match+score 1 lần quét, camelCase boundary, tie-break theo độ dài).
+ * Phần còn lại (key-binding, render menu, ghost text) giữ nguyên tại đây.
+ */
 public class MenuCompleter {
 
     private static boolean multiLine = false;
@@ -32,13 +40,13 @@ public class MenuCompleter {
 
     // ── Styles ─────────────────────────────────────────
     private static final AttributedStyle
-        STYLE_SELECTED = AttributedStyle.DEFAULT.foreground(231).background(45).bold(),
-        STYLE_NORMAL = AttributedStyle.DEFAULT.background(30).foreground(231),
-        STYLE_TYPE = AttributedStyle.DEFAULT.foreground(231).background(66),
-        STYLE_HIGHLIGHT = AttributedStyle.DEFAULT.foreground(9).background(30),
-        STYLE_SCROLLBAR = AttributedStyle.DEFAULT.background(236),
-        STYLE_SCROLL_THUMB = AttributedStyle.DEFAULT.background(250),
-        STYLE_ICON = AttributedStyle.DEFAULT.foreground(242);
+            STYLE_SELECTED = AttributedStyle.DEFAULT.foreground(231).background(45).bold(),
+            STYLE_NORMAL = AttributedStyle.DEFAULT.background(30).foreground(231),
+            STYLE_TYPE = AttributedStyle.DEFAULT.foreground(231).background(66),
+            STYLE_HIGHLIGHT = AttributedStyle.DEFAULT.foreground(9).background(30),
+            STYLE_SCROLLBAR = AttributedStyle.DEFAULT.background(236),
+            STYLE_SCROLL_THUMB = AttributedStyle.DEFAULT.background(250),
+            STYLE_ICON = AttributedStyle.DEFAULT.foreground(242);
 
     private static final int PAGE_SIZE = 10;
 
@@ -115,10 +123,10 @@ public class MenuCompleter {
         });
 
         map.bind(
-            new Reference("delete-autosuggestion"),
-            "\u007f",      // DEL
-            "\b",          // BACKSPACE
-            "\u001b[3~"    // DELETE (ANSI escape)
+                new Reference("delete-autosuggestion"),
+                "\u007f",      // DEL
+                "\b",          // BACKSPACE
+                "\u001b[3~"    // DELETE (ANSI escape)
         );
         map.bind(new Reference("menu-complete"), "\t");
         map.bind(new Reference("autosuggest"), " ");
@@ -139,16 +147,6 @@ public class MenuCompleter {
         impl.getWidgets().put(name, w);
     }
 
-    /**
-     * Số dòng (phân cách bởi '\n') còn lại PHÍA SAU vị trí cursor trong buffer hiện
-     * tại - dùng để biết chế độ multi-line có text NGƯỜI DÙNG ĐÃ GÕ nằm ngay dưới
-     * cursor không, để lấy đúng nội dung khôi phục lại khi menu ẩn đi.
-     *
-     * Tô màu bằng ĐÚNG highlighter đang gán cho LineReader (reader.getHighlighter())
-     * - KHÔNG trả text thuần, vì nếu không sẽ mất hết màu cú pháp khi TerminalMenu
-     * khôi phục lại các dòng này (đã xác nhận qua thực nghiệm: khôi phục đúng chữ
-     * nhưng bị mất màu do trước đây lưu text thuần không qua highlighter).
-     */
     private static List<String> linesBelowCursor(LineReaderImpl reader, String sql, int cursor) {
         if (cursor < 0 || cursor > sql.length()) return List.of();
         String afterCursor = sql.substring(cursor);
@@ -164,36 +162,11 @@ public class MenuCompleter {
         for (int i = 1; i < parts.length; i++) {
             String lineText = parts[i];
             String ansi = highlighter != null
-                ? highlighter.highlight(reader, lineText).toAnsi()
-                : lineText;
+                    ? highlighter.highlight(reader, lineText).toAnsi()
+                    : lineText;
             result.add(" " + ansi);
         }
         return result;
-    }
-
-    // ───────────────────────────────────────────────────
-    public record Ctx(String prefix, boolean dotMode, String sqlSearch, int csrSearch) {
-
-    }
-
-    public static Ctx buildCtx(String sql, int cursor) {
-        String prefix = extractPrefix(sql, cursor);
-        boolean dot = prefix.contains(".");
-
-        String sqlSearch;
-        int csrSearch;
-
-        if (dot) {
-            // cắt sql tại vị trí trước dấu chấm đầu tiên của prefix
-            int dotPos = cursor - prefix.length() + prefix.indexOf('.');
-            sqlSearch = sql.substring(0, dotPos + 1); // giữ lại "public."
-            csrSearch = dotPos + 1;
-        } else {
-            sqlSearch = sql.substring(0, Math.max(0, cursor - prefix.length()));
-            csrSearch = sqlSearch.length();
-        }
-
-        return new Ctx(prefix, dot, sqlSearch, csrSearch);
     }
 
     // ───────────────────────────────────────────────────
@@ -206,19 +179,14 @@ public class MenuCompleter {
             return;
         }
 
-        Ctx ctx = buildCtx(sql, cursor);
+        PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
+        List<Suggest> suggests = CompletionEngine.suggests(prepareCompletionInput);
 
-        List<Suggest> list = filter(
-            CompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
-            ctx.prefix(),
-            ctx.dotMode()
-        );
-
-        if (list.isEmpty()) {
+        if (suggests.isEmpty()) {
             hide();
             return;
         }
-        List<AttributedString> lines = render(list, -1, 0, ctx.prefix(), ctx.dotMode());
+        List<AttributedString> lines = render(suggests, -1, 0, prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
         terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE), 1, 1, linesBelowCursor(reader, sql, cursor));
         autosuggestionOpen = true;
     }
@@ -229,20 +197,16 @@ public class MenuCompleter {
 
         String sql = reader.getBuffer().toString();
         int cursor = reader.getBuffer().cursor();
-        Ctx ctx = buildCtx(sql, cursor);
+        PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
+        List<Suggest> suggests = CompletionEngine.suggests(prepareCompletionInput);
 
-        List<Suggest> all = filter(
-            CompletionEngine.suggests(extractCompletionPrefix(sql), cursor),
-            ctx.prefix(),
-            ctx.dotMode()
-        );
-        if (all.isEmpty()) {
+        if (suggests.isEmpty()) {
             return;
         }
 
-        if (all.size() == 1) {
+        if (suggests.size() == 1) {
             hide();
-            insert(reader, all.get(0), ctx.prefix(), ctx.dotMode());
+            insert(reader, suggests.get(0), prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
             return;
         }
 
@@ -255,7 +219,7 @@ public class MenuCompleter {
         try {
             while (true) {
 
-                List<Suggest> filtered = filter(all, ctx.prefix(), ctx.dotMode());
+                List<Suggest> filtered = SuggestFilter.filter(suggests, prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
 
                 if (filtered.isEmpty()) {
                     selected = 0;
@@ -270,15 +234,15 @@ public class MenuCompleter {
                     scroll = selected - PAGE_SIZE + 1;
                 }
 
-                List<AttributedString> lines = render(filtered, selected, scroll, ctx.prefix(),
-                    ctx.dotMode());
+                List<AttributedString> lines = render(filtered, selected, scroll, prepareCompletionInput.prefix(),
+                        prepareCompletionInput.dotMode());
 
                 terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE + 1), 1, 1,
-                    linesBelowCursor(reader, sql, cursor));
+                        linesBelowCursor(reader, sql, cursor));
 
                 Suggest current = filtered.isEmpty() ? null : filtered.get(selected);
                 if (current != null) {
-                    String ghost = buildGhost(current.getKey(), ctx.prefix(), ctx.dotMode());
+                    String ghost = buildGhost(current.getKey(), prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
                     renderGhost(reader, ghost);
                 }
 
@@ -294,7 +258,7 @@ public class MenuCompleter {
                     case "enter", "space" -> {
                         hide();
                         if (!filtered.isEmpty()) {
-                            insert(reader, filtered.get(selected), ctx.prefix(), ctx.dotMode());
+                            insert(reader, filtered.get(selected), prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
                         }
                         return;
                     }
@@ -331,11 +295,11 @@ public class MenuCompleter {
 
     // ───────────────────────────────────────────────────
     private static List<AttributedString> render(
-        List<Suggest> items,
-        int selected,
-        int scroll,
-        String prefix,
-        boolean dot
+            List<Suggest> items,
+            int selected,
+            int scroll,
+            String prefix,
+            boolean dot
     ) {
         List<AttributedString> out = new ArrayList<>();
 
@@ -352,7 +316,7 @@ public class MenuCompleter {
 
             boolean sel = idx == selected;
 
-            String key = display(s.getKey(), dot);
+            String key = SuggestFilter.display(s.getKey(), dot);
             String type = s.getType();
 
             AttributedStringBuilder row = new AttributedStringBuilder();
@@ -369,11 +333,11 @@ public class MenuCompleter {
 
             row.append("  ");
             row.style(sel ? STYLE_SELECTED : AttributedStyle.DEFAULT.background(30).foreground(114))
-                .append(pad(s.getColumnType(), columnTypeW));
+                    .append(pad(s.getColumnType(), columnTypeW));
 
             row.append("  ");
             row.style(sel ? STYLE_SELECTED : STYLE_TYPE)
-                .append(pad(type, typeW));
+                    .append(pad(type, typeW));
 
             // ── SCROLLBAR ─────────────────────
             row.append(" ");
@@ -392,8 +356,8 @@ public class MenuCompleter {
             String text = " ↓ [" + remaining + "] MORE ";
             int pad = Math.max(0, menuWidth - text.length());
             f.style(AttributedStyle.DEFAULT.background(23).foreground(231))
-                .append(text)
-                .append(" ".repeat(pad));
+                    .append(text)
+                    .append(" ".repeat(pad));
 
             // cột scrollbar cuối — cùng dòng, khác style
             f.style(STYLE_SCROLLBAR).append(" ");
@@ -410,11 +374,11 @@ public class MenuCompleter {
 
         return switch (t) {
             case "int", "int4", "int8", "numeric" ->
-                AttributedStyle.DEFAULT.background(30).foreground(220); // vàng
+                    AttributedStyle.DEFAULT.background(30).foreground(220); // vàng
             case "text", "varchar" ->
-                AttributedStyle.DEFAULT.background(30).foreground(114); // xanh lá
+                    AttributedStyle.DEFAULT.background(30).foreground(114); // xanh lá
             case "timestamp", "date" ->
-                AttributedStyle.DEFAULT.background(30).foreground(109); // cyan
+                    AttributedStyle.DEFAULT.background(30).foreground(109); // cyan
             case "bool" -> AttributedStyle.DEFAULT.background(30).foreground(141); // tím
             default -> AttributedStyle.DEFAULT.background(30).foreground(244);
         };
@@ -422,6 +386,7 @@ public class MenuCompleter {
 
     // ───────────────────────────────────────────────────
     private static void insert(LineReaderImpl reader, Suggest s, String prefix, boolean dot) {
+        CompletionHistory.record(s.getKey()); // ghi nhận lựa chọn - dùng để ưu tiên lần sau
         reader.getBuffer().move(-prefix.length());
         for (int i = 0; i < prefix.length(); i++) {
             reader.getBuffer().delete();
@@ -430,8 +395,8 @@ public class MenuCompleter {
         if (dot && prefix.contains(".")) {
             String alias = prefix.substring(0, prefix.lastIndexOf('.'));
             String col = s.getKey().contains(".")
-                ? s.getKey().substring(s.getKey().lastIndexOf('.') + 1)
-                : s.getKey();
+                    ? s.getKey().substring(s.getKey().lastIndexOf('.') + 1)
+                    : s.getKey();
             reader.getBuffer().write(alias + "." + col);
         } else {
             reader.getBuffer().write(s.getKey());
@@ -440,51 +405,24 @@ public class MenuCompleter {
 
     // ───────────────────────────────────────────────────
     private static void highlight(AttributedStringBuilder sb, String word, String match,
-        boolean dot) {
+                                  boolean dot) {
         if (match.isEmpty()) {
             sb.append(word);
             return;
         }
 
-        String m = dot && match.contains(".")
-            ? match.substring(match.lastIndexOf('.') + 1)
-            : match;
+        String m = SuggestFilter.matchPart(match, dot);
 
         int j = 0;
         for (int i = 0; i < word.length(); i++) {
             if (j < m.length() &&
-                Character.toLowerCase(word.charAt(i)) == Character.toLowerCase(m.charAt(j))) {
+                    Character.toLowerCase(word.charAt(i)) == Character.toLowerCase(m.charAt(j))) {
                 sb.style(STYLE_HIGHLIGHT).append(word.charAt(i));
                 j++;
             } else {
                 sb.style(STYLE_NORMAL).append(word.charAt(i));
             }
         }
-    }
-
-    private static boolean isIdentifier(char c) {
-        return Character.isLetterOrDigit(c) || c == '_' || c == '.';
-    }
-
-    private static String extractPrefix(String s, int cursor) {
-        int i = cursor - 1;
-        while (i >= 0 && isIdentifier(s.charAt(i))) {
-            i--;
-        }
-        return s.substring(i + 1, cursor);
-    }
-
-    static String extractCompletionPrefix(String input) {
-        if (input == null || input.isBlank()) {
-            return "";
-        }
-
-        // Chỉ 1 từ → không cần prefix
-        if (input.trim().split("\\s+").length == 1 && !input.endsWith(" ")) {
-            return "";
-        }
-
-        return input;
     }
 
     private static KeyMap<String> keymap(Terminal t) {
@@ -520,7 +458,7 @@ public class MenuCompleter {
         int columnTypeW = 0;
 
         for (Suggest s : items) {
-            valueW = Math.max(valueW, display(s.getKey(), dot).length());
+            valueW = Math.max(valueW, SuggestFilter.display(s.getKey(), dot).length());
             typeW = Math.max(typeW, s.getType().length());
 
             String colType = s.getColumnType() == null ? "" : s.getColumnType();
@@ -531,10 +469,10 @@ public class MenuCompleter {
     }
 
     private static AttributedStyle scrollbarStyle(
-        int row,
-        int visible,
-        int total,
-        int scroll
+            int row,
+            int visible,
+            int total,
+            int scroll
     ) {
         if (total <= visible) {
             return STYLE_NORMAL;
@@ -547,16 +485,13 @@ public class MenuCompleter {
         int thumbStart = Math.round(posRatio * visible);
 
         return (row >= thumbStart && row < thumbStart + thumbSize)
-            ? STYLE_SCROLL_THUMB
-            : STYLE_SCROLLBAR;
+                ? STYLE_SCROLL_THUMB
+                : STYLE_SCROLLBAR;
     }
 
     private static String buildGhost(String key, String prefix, boolean dot) {
-        String display = display(key, dot);
-
-        String match = dot && prefix.contains(".")
-            ? prefix.substring(prefix.lastIndexOf('.') + 1)
-            : prefix;
+        String display = SuggestFilter.display(key, dot);
+        String match = SuggestFilter.matchPart(prefix, dot);
 
         if (display.toLowerCase().startsWith(match.toLowerCase())) {
             return display.substring(match.length());
@@ -618,104 +553,6 @@ public class MenuCompleter {
 
     private static boolean isIdentifierChar(char c) {
         return Character.isLetterOrDigit(c) || c == '_' || c == '.';
-    }
-
-    // ───────────────────────────────────────────────────
-    public static List<Suggest> filter(List<Suggest> all, String prefix, boolean dot) {
-        String m = dot && prefix.contains(".")
-            ? prefix.substring(prefix.lastIndexOf('.') + 1)
-            : prefix;
-
-        // Lấy schema từ prefix: "public.d" → "public"
-        String schemaPrefix = dot && prefix.contains(".")
-            ? prefix.substring(0, prefix.lastIndexOf('.')).toLowerCase()
-            : null;
-
-        return all.stream()
-            .map(s -> new AbstractMap.SimpleEntry<>(s, display(s.getKey(), dot)))
-            .filter(e -> {
-                // Nếu có schema prefix → chỉ giữ item cùng schema
-                if (schemaPrefix != null) {
-                    String key = e.getKey().getKey().toLowerCase();
-                    if (!key.startsWith(schemaPrefix + ".")) {
-                        return false;
-                    }
-                }
-                return fuzzyMatch(e.getValue(), m);
-            })
-            .sorted(Comparator.comparingInt(e -> {
-                // thứ tự tiên equals -> prefix -> fuzzy
-                String w = e.getValue();
-                if (w.equalsIgnoreCase(m)) {
-                    return -1000;
-                }
-                if (w.toLowerCase().startsWith(m.toLowerCase())) {
-                    return -100;
-                }
-                return fuzzyScore(w, m);
-            }))
-            .map(Map.Entry::getKey)
-            .collect(Collectors.toList());
-    }
-
-    private static String display(String key, boolean dot) {
-        return (dot && key.contains(".")) ? key.substring(key.indexOf('.') + 1) : key;
-    }
-
-    static boolean fuzzyMatch(String word, String input) {
-        if (input == null || input.isEmpty()) {
-            return true;
-        }
-
-        word = word.toLowerCase();
-        input = input.toLowerCase();
-
-        int i = 0; // pointer word
-        int j = 0; // pointer input
-
-        while (i < word.length() && j < input.length()) {
-            if (word.charAt(i) == input.charAt(j)) {
-                j++;
-            }
-            i++;
-        }
-
-        return j == input.length();
-    }
-
-    static int fuzzyScore(String word, String input) {
-        if (input.isEmpty()) {
-            return 0;
-        }
-        word = word.toLowerCase();
-        input = input.toLowerCase();
-
-        // prefix thắng tất
-        if (word.startsWith(input)) {
-            return -input.length() * 10;
-        }
-
-        int score = 0;
-        int lastMatch = -1;
-
-        for (char c : input.toCharArray()) {
-            int idx = word.indexOf(c, lastMatch + 1);
-            if (idx == -1) {
-                return Integer.MAX_VALUE;
-            }
-
-            score += (idx - lastMatch - 1);   // phạt gap
-            if (idx == lastMatch + 1) {
-                score -= 3; // thưởng liên tiếp
-            }
-            if (idx == 0 || word.charAt(idx - 1) == '_') {
-                score -= 4; // thưởng word boundary
-            }
-
-            lastMatch = idx;
-        }
-
-        return score;
     }
 
     static String typeIcon(String type) {
