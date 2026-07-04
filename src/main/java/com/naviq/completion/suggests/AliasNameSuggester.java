@@ -112,7 +112,7 @@ public class AliasNameSuggester {
                 continue;
             }
 
-            if (t.getType() == PostgreSQLParser.ID) {
+            if (t.getType() == PostgreSQLParser.Identifier) {
                 if (sb.length() > 0) {
                     sb.insert(0, ".");
                 }

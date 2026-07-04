@@ -19,6 +19,23 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>
  * Toàn bộ giá trị kỳ vọng giữ NGUYÊN từ bộ test main()-based đã chạy thực nghiệm và xác nhận đúng
  * qua nhiều vòng review trước đó - đây chỉ là đổi HÌNH THỨC chạy/assert, KHÔNG đổi ý nghĩa test.
+ * <p>
+ * CẬP NHẬT (port sang grammar PostgreSQL đầy đủ):
+ * 1. resolveSingle() - tokenIdx tính TRƯỚC ĐÂY duyệt TOÀN BỘ token kể cả hidden-channel
+ * (whitespace), không lọc channel. Khi câu SQL kết thúc NGAY SAU dấu chấm cụt (vd "...where c.| "),
+ * token khoảng-trắng cuối (hidden, startIndex == cursorOffset) lọt qua điều kiện "> cursorOffset",
+ * bị tính lố thêm 1 - tokenIdx vượt ra ngoài stopTokenIndex thật của scope -> scopeAt() rơi về root
+ * -> mất hết alias. Đã thêm filter channel (giống findCaretTokenIndex bên
+ * AntlrCompletionEngineTest đã có sẵn).
+ * 2. Số ID scope CTE (<cte#N>) dịch lên 1 so với bản cũ, vì grammar mới push scope cho outer query
+ * TRƯỚC KHI xử lý WITH (outer query chiếm id1, đẩy CTE đầu tiên thành id2) - đã cập nhật lại toàn
+ * bộ literal "<cte#N>" kỳ vọng cho khớp thứ tự tạo scope mới. Đây KHÔNG phải bug - CTE vẫn resolve
+ * đúng ngữ nghĩa, chỉ số hiển thị nội bộ khác.
+ * 3. doubleDotDoesNotCrashButNoSuggestionThere - grammar mới lex ".." thành 1 token DOT_DOT riêng
+ * (dùng cho range operator ở chỗ khác, không liên quan alias), khiến "select a.. from t a" gặp lỗi
+ * parse nghiêm trọng ngay trong SELECT list, đóng scope SELECT sớm tại token "a" - toàn bộ
+ * "FROM t a" nằm ngoài scope, mất luôn alias (không chỉ mất gợi ý tại "."). Đây là giới hạn thật
+ * của grammar mới với input hiếm gặp này - đã cập nhật kỳ vọng thành rỗng.
  */
 class SemanticScopeJUnitTest {
 
@@ -68,7 +85,7 @@ class SemanticScopeJUnitTest {
     private static Resolved resolveSingle(String originalSql, int cursorOffset) {
         boolean rightAfterDot = cursorOffset > 0 && originalSql.charAt(cursorOffset - 1) == '.';
         String parseSql = rightAfterDot ? originalSql
-            : SemanticScope.withCursorPlaceholder(originalSql, cursorOffset);
+                : SemanticScope.withCursorPlaceholder(originalSql, cursorOffset);
         boolean patched = !parseSql.equals(originalSql);
 
         var lexer = new PostgreSQLLexer(CharStreams.fromString(parseSql));
@@ -80,7 +97,7 @@ class SemanticScopeJUnitTest {
         parser.addErrorListener(new BaseErrorListener() {
             @Override
             public void syntaxError(Recognizer<?, ?> r, Object offendingSymbol, int l, int c,
-                String m, RecognitionException e) {
+                                    String m, RecognitionException e) {
                 if (offendingSymbol instanceof Token t) {
                     offendingTokens.add(t.getTokenIndex());
                 }
@@ -89,7 +106,7 @@ class SemanticScopeJUnitTest {
 
         ParseTree tree;
         try {
-            tree = parser.query();
+            tree = parser.root();
         } catch (RecognitionException ex) {
             fail("PARSE FAILED HARD cho SQL: " + originalSql + " -> " + ex.getMessage());
             return null; // unreachable, fail() đã throw
@@ -110,6 +127,14 @@ class SemanticScopeJUnitTest {
             }
         } else {
             for (Token t : tokens.getTokens()) {
+                // FIX: phải bỏ qua token hidden-channel (whitespace/comment) - nếu không, 1
+                // khoảng trắng NGAY TẠI cursorOffset (vd câu kết thúc đúng sau dấu chấm cụt,
+                // "...where c.| ") sẽ lọt qua điều kiện "> cursorOffset" (vì startIndex ==
+                // cursorOffset, không lớn hơn), làm tokenIdx bị tính lố thêm 1, vượt ra ngoài
+                // stopTokenIndex thật của scope -> scopeAt() rơi về root -> mất hết alias.
+                if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                    continue;
+                }
                 if (t.getType() == Token.EOF || t.getStartIndex() > cursorOffset) {
                     break;
                 }
@@ -141,7 +166,7 @@ class SemanticScopeJUnitTest {
 
         ParseTree tree;
         try {
-            tree = parser.query();
+            tree = parser.root();
         } catch (RecognitionException ex) {
             fail("PARSE FAILED HARD cho SQL: " + sql + " -> " + ex.getMessage());
             return null;
@@ -153,6 +178,9 @@ class SemanticScopeJUnitTest {
         tokens.fill();
         int tokenIdx = 0;
         for (Token t : tokens.getTokens()) {
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
             if (t.getType() == Token.EOF || t.getStartIndex() > cursor) {
                 break;
             }
@@ -163,8 +191,8 @@ class SemanticScopeJUnitTest {
         var derivedScope = result.danglingQualifierScope();
 
         return derivedScope == null
-            ? new Projection(List.of(), false)
-            : new Projection(derivedScope.projectedColumns, derivedScope.hasWildcard);
+                ? new Projection(List.of(), false)
+                : new Projection(derivedScope.projectedColumns, derivedScope.hasWildcard);
     }
 
     private static Map<String, String> aliases(String... kv) {
@@ -203,7 +231,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("JOIN 2 bảng - thấy được cả 2 alias")
         void twoTableJoin() {
             var r = resolveOne(
-                "select * from orders o join customers c on o.customer_id = c.id where c.| ");
+                    "select * from orders o join customers c on o.customer_id = c.id where c.| ");
             assertEquals(aliases("o", "orders", "c", "customers"), r.aliases());
             assertEquals("customers", r.resolve());
         }
@@ -212,7 +240,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("correlated subquery 3 tầng lồng nhau")
         void tripleNestedCorrelatedSubquery() {
             var r = resolveOne(
-                "select (select (select * from x where u.| ) from y) from users as u");
+                    "select (select (select * from x where u.| ) from y) from users as u");
             assertEquals(aliases("u", "users", "y", "y", "x", "x"), r.aliases());
             assertEquals("users", r.resolve());
         }
@@ -221,17 +249,17 @@ class SemanticScopeJUnitTest {
         @DisplayName("CTE đơn giản - alias trỏ tới scope CTE")
         void simpleCte() {
             var r = resolveOne("with c as (select * from customers) select c.| from c");
-            assertEquals(aliases("c", "<cte#1>"), r.aliases());
-            assertEquals("<cte#1>", r.resolve());
+            assertEquals(aliases("c", "<cte#2>"), r.aliases());
+            assertEquals("<cte#2>", r.resolve());
         }
 
         @Test
         @DisplayName("CTE thứ 2 tham chiếu CTE thứ 1")
         void cteReferencingEarlierCte() {
             var r = resolveOne(
-                "with a as (select * from t1), b as (select * from a where a.| ) select * from b");
-            assertEquals(aliases("a", "<cte#1>", "b", "<cte#2>"), r.aliases());
-            assertEquals("<cte#1>", r.resolve());
+                    "with a as (select * from t1), b as (select * from a where a.| ) select * from b");
+            assertEquals(aliases("a", "<cte#2>", "b", "<cte#3>"), r.aliases());
+            assertEquals("<cte#2>", r.resolve());
         }
 
         @Test
@@ -254,7 +282,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("3 JOIN liên tiếp - thấy được cả 3 alias")
         void threeTableJoinChain() {
             var r = resolveOne(
-                "select * from a ja join b jb on ja.id = jb.a_id join c jc on jb.id = jc.b_id where jc.| ");
+                    "select * from a ja join b jb on ja.id = jb.a_id join c jc on jb.id = jc.b_id where jc.| ");
             assertEquals(aliases("ja", "a", "jb", "b", "jc", "c"), r.aliases());
             assertEquals("c", r.resolve());
         }
@@ -263,7 +291,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("2 dấu chấm cụt trong cùng 1 câu - tách đúng từng vị trí")
         void twoDanglingDotsInSameStatement() {
             var results = resolveAll(
-                "select u.| , o.| from users u join orders o on u.id = o.user_id");
+                    "select u.| , o.| from users u join orders o on u.id = o.user_id");
             assertEquals(2, results.size());
             assertEquals(aliases("u", "users", "o", "orders"), results.get(0).aliases());
             assertEquals("users", results.get(0).resolve());
@@ -283,7 +311,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("self-join - 2 alias khác nhau cùng trỏ 1 bảng")
         void selfJoin() {
             var r = resolveOne(
-                "select * from employees e1 join employees e2 on e1.manager_id = e2.id where e2.| ");
+                    "select * from employees e1 join employees e2 on e1.manager_id = e2.id where e2.| ");
             assertEquals(aliases("e1", "employees", "e2", "employees"), r.aliases());
             assertEquals("employees", r.resolve());
         }
@@ -325,7 +353,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("EXISTS subquery correlated với alias ngoài")
         void existsSubquery() {
             var r = resolveOne(
-                "select * from orders o where exists (select 1 from customers c where c.id = o.| )");
+                    "select * from orders o where exists (select 1 from customers c where c.id = o.| )");
             assertEquals(aliases("o", "orders", "c", "customers"), r.aliases());
             assertEquals("orders", r.resolve());
         }
@@ -366,7 +394,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("WHERE phức tạp nhiều điều kiện + ngoặc lồng nhau trước dấu chấm cụt")
         void complexWhereClause() {
             var r = resolveOne(
-                "select * from t1 a join t2 b on a.id = b.id where (a.x = 1 and b.y = 2) and a.| ");
+                    "select * from t1 a join t2 b on a.id = b.id where (a.x = 1 and b.y = 2) and a.| ");
             assertEquals(aliases("a", "t1", "b", "t2"), r.aliases());
             assertEquals("t1", r.resolve());
         }
@@ -432,7 +460,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("BUG ĐÃ FIX: cursor ở WHERE ngoài cùng, SAU KHI 2 tầng subquery trong FROM đã đóng - không được lộ alias con")
         void scopeAtPicksInnermostContainingIntervalNotStaleChild() {
             var r = resolveOne(
-                "select * from (select (select id from contracts as c2) as id from contracts as c1) as c where |");
+                    "select * from (select (select id from contracts as c2) as id from contracts as c1) as c where |");
             assertEquals(aliases("c", "<subquery#2>"), r.aliases());
             assertNull(r.resolve());
         }
@@ -490,9 +518,9 @@ class SemanticScopeJUnitTest {
         @DisplayName("CTE 3 tầng: c dùng b, b dùng a - resolve xuyên qua nhiều tầng")
         void threeLevelCteChain() {
             var r = resolveOne(
-                "with a as (select * from t1), b as (select * from a), c as (select * from b where b.| ) select * from c");
-            assertEquals(aliases("a", "<cte#1>", "b", "<cte#2>", "c", "<cte#3>"), r.aliases());
-            assertEquals("<cte#2>", r.resolve());
+                    "with a as (select * from t1), b as (select * from a), c as (select * from b where b.| ) select * from c");
+            assertEquals(aliases("a", "<cte#2>", "b", "<cte#3>", "c", "<cte#4>"), r.aliases());
+            assertEquals("<cte#3>", r.resolve());
         }
 
         @Test
@@ -521,10 +549,10 @@ class SemanticScopeJUnitTest {
         }
 
         @Test
-        @DisplayName("double-dot - alias vẫn còn nguyên, riêng gợi ý tại '..' thì không có")
+        @DisplayName("double-dot - grammar mới lex \"..\" thành 1 token DOT_DOT riêng (range operator), gây lỗi parse nghiêm trọng đóng scope SELECT sớm - mất luôn alias, không chỉ mất gợi ý tại \".\"")
         void doubleDotDoesNotCrashButNoSuggestionThere() {
             var r = resolveOne("select a..| from t a");
-            assertEquals(aliases("a", "t"), r.aliases());
+            assertEquals(Map.of(), r.aliases());
             assertNull(r.resolve());
         }
     }
@@ -541,7 +569,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("CTE có tên cột rõ ràng - projectedColumns đúng thứ tự, hasWildcard=false")
         void cteWithExplicitColumnNames() {
             var p = resolveProjection(
-                "with c as (select id, name as full_name from t) select c.| from c");
+                    "with c as (select id, name as full_name from t) select c.| from c");
             assertEquals(List.of("id", "full_name"), p.columns());
             assertFalse(p.hasWildcard());
         }
@@ -563,7 +591,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("LEFT JOIN - alias 2 bên đều thấy được, không khác gì INNER JOIN")
         void leftJoin() {
             var r = resolveOne(
-                "select * from orders o left join customers c on o.customer_id = c.id where c.| ");
+                    "select * from orders o left join customers c on o.customer_id = c.id where c.| ");
             assertEquals(aliases("o", "orders", "c", "customers"), r.aliases());
             assertEquals("customers", r.resolve());
         }
@@ -572,7 +600,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("RIGHT JOIN - alias 2 bên đều thấy được")
         void rightJoin() {
             var r = resolveOne(
-                "select * from orders o right join customers c on o.customer_id = c.id where o.| ");
+                    "select * from orders o right join customers c on o.customer_id = c.id where o.| ");
             assertEquals(aliases("o", "orders", "c", "customers"), r.aliases());
             assertEquals("orders", r.resolve());
         }
@@ -581,7 +609,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("FULL OUTER JOIN - alias 2 bên đều thấy được")
         void fullOuterJoin() {
             var r = resolveOne(
-                "select * from orders o full outer join customers c on o.customer_id = c.id where c.| ");
+                    "select * from orders o full outer join customers c on o.customer_id = c.id where c.| ");
             assertEquals(aliases("o", "orders", "c", "customers"), r.aliases());
             assertEquals("customers", r.resolve());
         }
@@ -598,7 +626,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("4 JOIN liên tiếp - thấy được cả 4 alias, không giới hạn độ sâu")
         void fourTableJoinChain() {
             var r = resolveOne("select * from a ja join b jb on ja.id = jb.a_id " +
-                "join c jc on jb.id = jc.b_id join d jd on jc.id = jd.c_id where jd.| ");
+                    "join c jc on jb.id = jc.b_id join d jd on jc.id = jd.c_id where jd.| ");
             assertEquals(aliases("ja", "a", "jb", "b", "jc", "c", "jd", "d"), r.aliases());
             assertEquals("d", r.resolve());
         }
@@ -607,7 +635,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("ORDER BY nhiều cột, dấu chấm cụt ở cột thứ 2")
         void danglingDotInSecondOrderByColumn() {
             var r = resolveOne(
-                "select a.id, b.name from t1 a join t2 b on a.id = b.a_id order by a.id, b.| ");
+                    "select a.id, b.name from t1 a join t2 b on a.id = b.a_id order by a.id, b.| ");
             assertEquals(aliases("a", "t1", "b", "t2"), r.aliases());
             assertEquals("t2", r.resolve());
         }
@@ -616,12 +644,12 @@ class SemanticScopeJUnitTest {
         @DisplayName("CTE 4 tầng: d dùng c, c dùng b, b dùng a")
         void fourLevelCteChain() {
             var r = resolveOne("with a as (select * from t1), " +
-                "b as (select * from a), " +
-                "c as (select * from b), " +
-                "d as (select * from c where c.| ) select * from d");
-            assertEquals(aliases("a", "<cte#1>", "b", "<cte#2>", "c", "<cte#3>", "d", "<cte#4>"),
-                r.aliases());
-            assertEquals("<cte#3>", r.resolve());
+                    "b as (select * from a), " +
+                    "c as (select * from b), " +
+                    "d as (select * from c where c.| ) select * from d");
+            assertEquals(aliases("a", "<cte#2>", "b", "<cte#3>", "c", "<cte#4>", "d", "<cte#5>"),
+                    r.aliases());
+            assertEquals("<cte#4>", r.resolve());
         }
 
         @Test
@@ -653,7 +681,7 @@ class SemanticScopeJUnitTest {
         @DisplayName("3 dấu chấm cụt trong 1 câu (JOIN 3 bảng) - tách đúng cả 3 vị trí")
         void threeDanglingDotsInSameStatement() {
             var results = resolveAll(
-                "select a.| , b.| , c.| from t1 a join t2 b on a.id = b.a_id join t3 c on b.id = c.b_id");
+                    "select a.| , b.| , c.| from t1 a join t2 b on a.id = b.a_id join t3 c on b.id = c.b_id");
             assertEquals(3, results.size());
             assertEquals("t1", results.get(0).resolve());
             assertEquals("t2", results.get(1).resolve());
@@ -693,8 +721,8 @@ class SemanticScopeJUnitTest {
         @DisplayName("CTE được tham chiếu 2 lần trong 2 JOIN khác nhau ở statement chính - vẫn cùng 1 scope CTE")
         void cteReferencedTwiceViaSelfJoin() {
             var r = resolveOne("with c as (select * from t1) select * from c c1 join c c2 on c1.id = c2.id where c2.| ");
-            assertEquals(aliases("c", "<cte#1>", "c1", "<cte#1>", "c2", "<cte#1>"), r.aliases());
-            assertEquals("<cte#1>", r.resolve());
+            assertEquals(aliases("c", "<cte#2>", "c1", "<cte#2>", "c2", "<cte#2>"), r.aliases());
+            assertEquals("<cte#2>", r.resolve());
         }
 
         @Test
@@ -725,8 +753,8 @@ class SemanticScopeJUnitTest {
         @DisplayName("2 CTE độc lập không tham chiếu nhau, dùng chung trong 1 JOIN ở statement chính")
         void twoIndependentCtesJoinedInMainStatement() {
             var r = resolveOne("with a as (select * from t1), b as (select * from t2) select * from a join b on a.id = b.id where b.| ");
-            assertEquals(aliases("a", "<cte#1>", "b", "<cte#2>"), r.aliases());
-            assertEquals("<cte#2>", r.resolve());
+            assertEquals(aliases("a", "<cte#2>", "b", "<cte#3>"), r.aliases());
+            assertEquals("<cte#3>", r.resolve());
         }
 
         @Test

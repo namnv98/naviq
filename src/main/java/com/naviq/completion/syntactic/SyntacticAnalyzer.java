@@ -15,6 +15,12 @@ import java.util.Map;
  * ignoredTokens/preferredRules, parse, collectCandidates) thành 1 điểm vào. Luôn
  * parse "sql" GỐC (không placeholder) - AntlrCompletionEngineFix dừng đúng tại
  * caretTokenIndex nên không cần patch gì cho vị trí trống, khác với SemanticAnalyzer.
+ * <p>
+ * GHI CHÚ SỬA THEO GRAMMAR MỚI: tên token/rule của grammar rút gọn cũ (ID, LPAREN,
+ * RPAREN, EQ, NEQ, NUMBER, STRING, RULE_tableName, RULE_columnName, RULE_dataTypeName,
+ * RULE_functionCall, RULE_tableAlias...) KHÔNG còn tồn tại trong grammar PostgreSQL đầy
+ * đủ mới (rule/token đặt tên kiểu Postgres gram.y). Đã map lại 1-1 sang tên tương ứng -
+ * xem chú thích cạnh từng dòng.
  */
 public class SyntacticAnalyzer {
 
@@ -40,39 +46,50 @@ public class SyntacticAnalyzer {
     private static Map<Integer, Boolean> buildIgnoredTokens() {
         Map<Integer, Boolean> m = new HashMap<>();
         m.put(Token.EOF, true);
-        m.put(PostgreSQLParser.ID, true);
-        m.put(PostgreSQLParser.LPAREN, true);
-        m.put(PostgreSQLParser.RPAREN, true);
+        m.put(PostgreSQLParser.Identifier, true);       // ID cũ -> Identifier (colid/identifier trần)
+        m.put(PostgreSQLParser.OPEN_PAREN, true);        // LPAREN cũ
+        m.put(PostgreSQLParser.CLOSE_PAREN, true);       // RPAREN cũ
         m.put(PostgreSQLParser.PLUS, true);
         m.put(PostgreSQLParser.MINUS, true);
         m.put(PostgreSQLParser.SLASH, true);
-        m.put(PostgreSQLParser.EQ, true);
-        m.put(PostgreSQLParser.NEQ, true);
+        m.put(PostgreSQLParser.EQUAL, true);             // EQ cũ -> EQUAL
+        m.put(PostgreSQLParser.NOT_EQUALS, true);        // NEQ cũ -> NOT_EQUALS (token "<>")
         m.put(PostgreSQLParser.LT, true);
         m.put(PostgreSQLParser.GT, true);
-        m.put(PostgreSQLParser.LTE, true);
-        m.put(PostgreSQLParser.GTE, true);
-        m.put(PostgreSQLParser.NUMBER, true);
-        m.put(PostgreSQLParser.STRING, true);
+        m.put(PostgreSQLParser.LESS_EQUALS, true);       // LTE cũ
+        m.put(PostgreSQLParser.GREATER_EQUALS, true);    // GTE cũ
+        m.put(PostgreSQLParser.Numeric, true);           // NUMBER cũ -> Numeric (số thực)
+        m.put(PostgreSQLParser.Integral, true);          // NUMBER cũ -> Integral (số nguyên) - grammar
+        // mới tách riêng 2 token cho hằng số, cả 2 đều cần bỏ qua
+        m.put(PostgreSQLParser.StringConstant, true);    // STRING cũ
         m.put(PostgreSQLParser.SEMI, true);
         return m;
     }
 
     private static Map<Integer, Boolean> buildPreferredRules() {
         Map<Integer, Boolean> m = new HashMap<>();
-        m.put(PostgreSQLParser.RULE_tableName, true);
-        m.put(PostgreSQLParser.RULE_columnName, true);
-        m.put(PostgreSQLParser.RULE_dataTypeName, true);
-        m.put(PostgreSQLParser.RULE_functionCall, true);
-        m.put(PostgreSQLParser.RULE_tableAlias, true);
+        m.put(PostgreSQLParser.RULE_qualified_name, true);  // tableName cũ - tên bảng/CTE (FROM,
+        // UPDATE/DELETE/ALTER TABLE/TRUNCATE - đều đi qua relation_expr -> qualified_name)
+        m.put(PostgreSQLParser.RULE_any_name, true);        // DROP TABLE/VIEW/INDEX/SEQUENCE/...
+        // dùng any_name_list -> any_name (KHÔNG phải qualified_name) cho tên đối tượng bị drop -
+        // đây là rule RIÊNG, cấu trúc giống qualified_name (colid + dotted path) nhưng khác rule
+        // index, nên phải thêm thủ công, không tự động có qua qualified_name.
+        m.put(PostgreSQLParser.RULE_columnref, true);       // columnName cũ - biểu thức cột (SELECT
+        // list/WHERE/...), tách riêng khỏi qualified_name ở grammar mới
+        m.put(PostgreSQLParser.RULE_typename, true);        // dataTypeName cũ
+        m.put(PostgreSQLParser.RULE_func_name, true);       // functionCall cũ - tên hàm (không phải
+        // toàn bộ lời gọi hàm kèm tham số)
+        m.put(PostgreSQLParser.RULE_table_alias, true);     // tableAlias cũ
         return m;
     }
 
     public record Result(
-        CommonTokenStream tokenStream,
-        int caretTokenIndex,
-        AntlrCompletionEngine.CandidatesCollection candidates
-    ) {}
+            CommonTokenStream tokenStream,
+            int caretTokenIndex,
+            AntlrCompletionEngine.CandidatesCollection candidates
+    ) {
+
+    }
 
     public static Result analyze(String sql, int cursorOffset) {
         CharStream input = CharStreams.fromString(sql);
@@ -81,11 +98,9 @@ public class SyntacticAnalyzer {
         PostgreSQLParser parser = new PostgreSQLParser(tokenStream);
         parser.removeErrorListeners();
         tokenStream.fill();
-
         int caretTokenIndex = TokenPositionUtil.findCaretTokenIndex(tokenStream, cursorOffset);
         AntlrCompletionEngine engine = new AntlrCompletionEngine(parser, IGNORED_TOKENS, PREFERRED_RULES, FOLLOW_SETS);
         var candidates = engine.collectCandidates(caretTokenIndex);
-
         return new Result(tokenStream, caretTokenIndex, candidates);
     }
 }

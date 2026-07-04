@@ -1,5 +1,5 @@
 # 🚀 NaviQ CLI
-
+https://github.com/bytebase/parser/tree/57b6ef7a2640481d8734cd63af0c7b781fa85f22/postgresql
 > A SQL autocomplete engine that asks the parser instead of guessing.
 
 Most SQL autocomplete tools work by prefix-matching against a list of known names. That's fast to build and mostly

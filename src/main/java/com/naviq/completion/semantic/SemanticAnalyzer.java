@@ -1,11 +1,9 @@
 package com.naviq.completion.semantic;
 
-import com.naviq.antlr4.*;
-import com.naviq.utils.TokenPositionUtil;
-import com.naviq.completion.suggests.DmlTargetResolver;
+import com.naviq.antlr4.PostgreSQLLexer;
+import com.naviq.antlr4.PostgreSQLParser;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.ParseTree;
-import org.antlr.v4.runtime.tree.ParseTreeListener;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
 
 import java.util.HashSet;
@@ -49,7 +47,7 @@ public class SemanticAnalyzer {
                     }
                 }
             });
-            ParseTree tree = parser.query();
+            ParseTree tree = parser.root();
 
             SemanticScope model = new SemanticScope();
             model.offendingTokenIndices.addAll(offendingTokens);

@@ -90,7 +90,18 @@ public class AntlrCompletionEngine {
         try {
             if (tokenIndex >= tokens.size() - 1) {   // at caret
                 collectAtCaret(followSets);
-                return Collections.emptySet();
+                // BUG FIX: nếu rule này CÓ THỂ hoàn thành RỖNG (nullable) ngay tại vị trí caret
+                // (followSets.combined chứa EPSILON), phải trả về 1 end-index KHÔNG RỖNG để caller
+                // (processTransition's RuleTransition handling) tiếp tục khám phá phần theo sau lời
+                // gọi rule này qua rt.followState - nếu trả về rỗng vô điều kiện như trước, mọi
+                // candidate nằm NGAY SAU 1 rule nullable sẽ bị bỏ sót hoàn toàn (vd "CREATE FUNCTION
+                // f() RETURNS int |" thiếu LANGUAGE/AS vì nhóm "(RETURNS ...)?" hoàn thành ngay tại
+                // caret, không có gì báo cho createfunctionstmt biết để tiếp tục sang
+                // createfunc_opt_list theo sau). "end index" ở đây = tokenIndex KHÔNG ĐỔI, vì rule
+                // hoàn thành mà không tiêu thụ thêm token nào.
+                return followSets.combined.contains(org.antlr.v4.runtime.Token.EPSILON)
+                        ? Collections.singleton(tokenIndex)
+                        : Collections.emptySet();
             }
 
             // Prune branches that can't match the current token
@@ -239,11 +250,31 @@ public class AntlrCompletionEngine {
 
     // ── Follow sets ───────────────────────────────────────────────────────────
 
+    /**
+     * BUG FIX (xem javadoc lớp): bản gốc gọi
+     * {@code collectFollowSets(parser, start, stop, out, seen, ruleStack, ignoredTokens)} với
+     * "stop" CỐ ĐỊNH = trạng thái dừng của rule NGOÀI CÙNG trong suốt đệ quy, kể cả khi đang đi sâu
+     * vào 1 rule con qua RuleTransition. Hệ quả: điều kiện dừng
+     * {@code s.getStateType() == ATNState.RULE_STOP} kích hoạt cho BẤT KỲ rule nào (kể cả rule
+     * con), không chỉ rule ngoài cùng - nên ngay khi rule con hoàn thành (đặc biệt nếu nó rỗng-được,
+     * vd đuôi {@code (...)*}/{@code (...)?}), code DỪNG LUÔN tại đó, KHÔNG bao giờ quay lại
+     * {@code rt.followState} để tiếp tục khám phá phần theo sau lời gọi rule đó trong rule NGOÀI.
+     * Kết quả quan sát được: thiếu candidate đúng ra phải có (vd "CREATE FUNCTION f() RETURNS int |"
+     * thiếu LANGUAGE/AS vì opt_array_bounds cuối typename hoàn thành rỗng rồi dừng luôn, không quay
+     * lại phần createfunc_opt_list theo sau), và thừa candidate (table_alias vẫn được báo hợp lệ dù
+     * alias đã gõ xong, do tablesample_clause? optional gây hiệu ứng tương tự).
+     * <p>
+     * FIX: mang theo 1 stack "returnStates" (điểm quay về cho mỗi lần dive vào rule con qua
+     * RuleTransition, tương tự cơ chế gọi hàm/return address thật). Khi gặp RULE_STOP: nếu
+     * returnStates còn phần tử, lấy ra 1 điểm quay về và TIẾP TỤC duyệt từ đó (rule con vừa xong,
+     * quay lại đúng chỗ trong rule gọi nó) - CHỈ khi returnStates rỗng (đã quay về hết, đang ở đúng
+     * rule ngoài cùng) mới thật sự dừng và ghi nhận "có thể kết thúc tại đây" (epsilon).
+     */
     static List<FollowSetWithPath> computeFollowSets(
             Parser parser, ATNState start, ATNState stop, Map<Integer, Boolean> ignoredTokens) {
         List<FollowSetWithPath> result = new ArrayList<>();
         collectFollowSets(parser, start, stop, result, new IdentityHashMap<>(),
-                new RuleCallStack(), ignoredTokens);
+                new RuleCallStack(), ignoredTokens, new ArrayDeque<>());
         return result;
     }
 
@@ -251,11 +282,23 @@ public class AntlrCompletionEngine {
                                           List<FollowSetWithPath> out,
                                           Map<ATNState, Boolean> seen,
                                           RuleCallStack ruleStack,
-                                          Map<Integer, Boolean> ignoredTokens) {
+                                          Map<Integer, Boolean> ignoredTokens,
+                                          Deque<ATNState> returnStates) {
         if (seen.containsKey(s)) return;
         seen.put(s, Boolean.TRUE);
 
         if (s == stop || s.getStateType() == ATNState.RULE_STOP) {
+            if (!returnStates.isEmpty()) {
+                // Rule con vừa hoàn thành - quay lại đúng vị trí trong rule gọi nó, KHÔNG dừng
+                // hẳn ở đây. Dùng "seen" MỚI cho phần tiếp theo (mirror cách RuleTransition vẫn
+                // dùng seen mới mỗi lần dive - resume cũng là bắt đầu khám phá 1 vùng ATN mới).
+                Deque<ATNState> rest = new ArrayDeque<>(returnStates);
+                ATNState resume = rest.pop();
+                collectFollowSets(parser, resume, stop, out, new IdentityHashMap<>(), ruleStack,
+                        ignoredTokens, rest);
+                return;
+            }
+            // Không còn điểm quay về nào - đây mới thật sự là rule NGOÀI CÙNG hoàn thành xong.
             IntervalSet eps = new IntervalSet();
             eps.add(org.antlr.v4.runtime.Token.EPSILON);
             out.add(new FollowSetWithPath(eps, ruleStack.copy(), Collections.emptyList()));
@@ -266,13 +309,15 @@ public class AntlrCompletionEngine {
             if (t instanceof RuleTransition rt) {
                 if (ruleStack.contains(rt.target.ruleIndex)) continue;
                 ruleStack.push(rt.target.ruleIndex, RuleFrame.NO_TOKEN);
+                Deque<ATNState> nextReturnStates = new ArrayDeque<>(returnStates);
+                nextReturnStates.push(rt.followState);
                 collectFollowSets(parser, t.target, stop, out, new IdentityHashMap<>(),
-                        ruleStack, ignoredTokens);
+                        ruleStack, ignoredTokens, nextReturnStates);
                 ruleStack.pop();
 
             } else if (t instanceof PredicateTransition pt) {
                 if (pt.getPredicate().eval(parser, ParserRuleContext.EMPTY))
-                    collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens);
+                    collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens, returnStates);
 
             } else if (t instanceof WildcardTransition) {
                 out.add(new FollowSetWithPath(
@@ -281,7 +326,7 @@ public class AntlrCompletionEngine {
                         ruleStack.copy(), Collections.emptyList()));
 
             } else if (t.isEpsilon()) {
-                collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens);
+                collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens, returnStates);
 
             } else {
                 IntervalSet label = t.label();

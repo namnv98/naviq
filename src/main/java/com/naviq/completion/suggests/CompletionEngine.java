@@ -27,6 +27,16 @@ import static java.util.Objects.isNull;
  * <p>
  * 2 tầng (Semantic/Syntactic) ĐỘC LẬP, không tầng nào thay được tầng kia - xem
  * javadoc gốc trong SemanticAnalyzer/SyntacticAnalyzer để biết lý do.
+ * <p>
+ * CẬP NHẬT (port sang grammar PostgreSQL đầy đủ): tên rule trong switch bên dưới đổi theo tên rule
+ * THẬT của grammar mới (kiểu Postgres gram.y), khác hẳn tên rule rút gọn cũ:
+ * - "columnName" cũ -> {@code columnref} (biểu thức cột trong SELECT list/WHERE/...)
+ * - "dataTypeName" cũ -> {@code typename}
+ * - "tableAlias" cũ -> {@code table_alias}
+ * - "tableName" cũ -> {@code qualified_name} (FROM/UPDATE/DELETE/ALTER TABLE/TRUNCATE - đi qua
+ * relation_expr) VÀ {@code any_name} (DROP TABLE/VIEW/INDEX/SEQUENCE/... - dùng any_name_list,
+ * KHÔNG phải qualified_name, xem object_type_any_name trong grammar) - cả 2 đều nên gợi ý tên
+ * bảng giống nhau nên cùng route vào addTableNameSuggestions().
  */
 public class CompletionEngine {
     public static List<Suggest> suggests(String sql, Integer cursorCharPos) {
@@ -46,10 +56,10 @@ public class CompletionEngine {
         for (Map.Entry<Integer, List<AntlrCompletionEngine.RuleFrame>> entry : syntacticResults.candidates().rules.entrySet()) {
             String ruleName = PostgreSQLParser.ruleNames[entry.getKey()];
             switch (ruleName) {
-                case "columnName" -> addColumnSuggestions(suggests, semanticResult);
-                case "dataTypeName" -> addDataTypeSuggestions(suggests);
-                case "tableAlias" -> addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
-                case "tableName" -> addTableNameSuggestions(suggests, syntacticResults);
+                case "columnref" -> addColumnSuggestions(suggests, semanticResult);
+                case "typename" -> addDataTypeSuggestions(suggests);
+                case "table_alias" -> addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
+                case "qualified_name", "any_name" -> addTableNameSuggestions(suggests, syntacticResults);
             }
         }
         return suggests;
@@ -107,7 +117,7 @@ public class CompletionEngine {
             Token tok = tokenStream.get(caretTokenIndex - 1);
             if (tok.getType() == PostgreSQLParser.DOT) {
                 Token prev = tokenStream.get(caretTokenIndex - 2);
-                if (prev.getType() == PostgreSQLParser.ID) {
+                if (prev.getType() == PostgreSQLParser.Identifier) {
                     String schema = prev.getText();
                     SchemaIndex.getTablesBySchema(schema).forEach(t -> suggests.add(Suggest.of(t.fullName(), t.kind())));
                     return;
