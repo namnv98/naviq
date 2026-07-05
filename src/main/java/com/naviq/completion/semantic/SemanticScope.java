@@ -410,6 +410,54 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         }
     }
 
+    // ---- CREATE/ALTER POLICY - "... ON qualified_name ... USING (a_expr) ... WITH
+    //      CHECK (a_expr)" - CÙNG lý do với các DDL/DML khác: cần bảng target trong
+    //      scope để columnref trong USING/WITH CHECK resolve được cột. Dùng chung 1
+    //      helper (không có alias riêng, colid trong grammar không có, chỉ có
+    //      qualified_name trần) - alias mặc định = lastPart(table).
+
+    @Override
+    public void enterCreatepolicystmt(PostgreSQLParser.CreatepolicystmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, ctx.qualified_name());
+    }
+
+    @Override
+    public void exitCreatepolicystmt(PostgreSQLParser.CreatepolicystmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    @Override
+    public void enterAlterpolicystmt(PostgreSQLParser.AlterpolicystmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, ctx.qualified_name());
+    }
+
+    @Override
+    public void exitAlterpolicystmt(PostgreSQLParser.AlterpolicystmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    private void registerQualifiedNameTarget(
+            Scope target,
+            PostgreSQLParser.Qualified_nameContext qualifiedNameCtx
+    ) {
+        if (target == null || qualifiedNameCtx == null || isUnreliable(qualifiedNameCtx)) {
+            return;
+        }
+        String table = qualifiedNameCtx.getText();
+        String alias = lastPart(table);
+        Scope cteScope = resolveAsExistingCte(table);
+        if (cteScope != null) {
+            target.aliases.put(alias, "<cte#" + cteScope.id + ">");
+            target.derivedScopeAliases.put(alias, cteScope);
+        } else {
+            target.aliases.put(alias, table);
+        }
+    }
+
     private void registerInsertTarget(
             Scope target,
             PostgreSQLParser.Insert_targetContext insertTargetCtx

@@ -125,7 +125,21 @@ public class AntlrCompletionEngine {
         for (FollowSetWithPath set : followSets.sets) {
             RuleCallStack fullPath = callStack.copy();
             fullPath.appendPath(set.path);
-            translateToRuleIndex(fullPath);
+            // BUG FIX: trước đây gọi translateToRuleIndex(fullPath) nhưng BỎ QUA kết quả
+            // trả về, nên dù đánh dấu 1 rule là "preferred" (vd unreserved_keyword,
+            // type_func_name_keyword...), token bên trong rule đó VẪN bị thêm thẳng vào
+            // candidates.tokens như thường - khiến việc đánh dấu preferred hoàn toàn vô
+            // tác dụng cho các token này. Nhánh XỬ LÝ TRANSITION THƯỜNG (processTransition,
+            // xem "if (!translateToRuleIndex(callStack))" ở chỗ khác trong file) đã làm
+            // ĐÚNG (chỉ thêm token khi KHÔNG match rule preferred nào) - collectAtCaret
+            // (nhánh xử lý RULE_STOP/epsilon-closure) lại thiếu chính xác điều kiện này.
+            // Giờ đồng bộ lại: nếu path này CÓ match 1 preferred rule, rule đó đã được
+            // ghi vào candidates.rules rồi - KHÔNG cần (và không nên) nổ thêm token riêng
+            // lẻ của rule đó ra candidates.tokens nữa.
+            boolean matchedPreferredRule = translateToRuleIndex(fullPath);
+            if (matchedPreferredRule) {
+                continue;
+            }
 
             for (int sym : set.intervals.toList()) {
                 if (ignoredTokens.containsKey(sym)) continue;

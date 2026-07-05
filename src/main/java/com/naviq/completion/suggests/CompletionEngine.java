@@ -1,13 +1,13 @@
 package com.naviq.completion.suggests;
 
-import com.naviq.antlr4.*;
-import com.naviq.datasource.SchemaIndex;
-import com.naviq.completion.syntactic.AntlrCompletionEngine;
+import com.naviq.antlr4.PostgreSQLParser;
 import com.naviq.completion.model.Suggest;
-import com.naviq.completion.semantic.*;
+import com.naviq.completion.semantic.SemanticAnalyzer;
+import com.naviq.completion.syntactic.AntlrCompletionEngine;
 import com.naviq.completion.syntactic.SyntacticAnalyzer;
-import org.antlr.v4.runtime.Token;
+import com.naviq.datasource.SchemaIndex;
 import com.naviq.util.LoggingConfig;
+import org.antlr.v4.runtime.Token;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,7 +47,6 @@ public class CompletionEngine {
             cursorCharPos = sql.length();
         }
         int cursorOffset = cursorCharPos;
-        boolean freshStatement = KeywordNoiseFilter.isFreshStatementPosition(sql, cursorOffset);
 
         SemanticAnalyzer.Result semanticResult = SemanticAnalyzer.analyze(sql, cursorOffset);
         // "-1" CẦN THIẾT cho completion kiểu prefix (vd "select * fr|" -> gợi ý "FROM") -
@@ -60,20 +59,12 @@ public class CompletionEngine {
         // với "-1" cho ra rule "qualified_name" (SAI - tưởng vẫn đang ở vị trí TRƯỚC dấu
         // "("), không có "-1" cho ra đúng "colid" (đang ở TRONG dấu ngoặc, chờ cột) - nên
         // "-1" phải áp CÓ ĐIỀU KIỆN, không phải lúc nào cũng trừ.
-        char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length())
-                ? sql.charAt(cursorOffset - 1) : ' ';
+        char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length()) ? sql.charAt(cursorOffset - 1) : ' ';
         boolean stillMidIdentifier = Character.isLetterOrDigit(charBeforeCursor) || charBeforeCursor == '_';
         int syntacticCursor = stillMidIdentifier ? cursorOffset - 1 : cursorOffset;
         SyntacticAnalyzer.Result syntacticResults = SyntacticAnalyzer.analyze(sql, syntacticCursor);
-        boolean hasRealColumns = KeywordNoiseFilter.hasColumnrefCandidate(syntacticResults);
 
         for (Map.Entry<Integer, List<Integer>> entry : syntacticResults.candidates().tokens.entrySet()) {
-            if (!freshStatement && KeywordNoiseFilter.STATEMENT_START_TOKENS.contains(entry.getKey())) {
-                continue;
-            }
-            if (hasRealColumns && KeywordNoiseFilter.IDENTIFIER_USABLE_KEYWORDS.contains(entry.getKey())) {
-                continue;
-            }
             addKeywordSuggestions(suggests, entry.getKey());
         }
 

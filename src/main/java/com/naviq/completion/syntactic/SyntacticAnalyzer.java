@@ -68,13 +68,20 @@ public class SyntacticAnalyzer {
 
     private static Map<Integer, Boolean> buildPreferredRules() {
         Map<Integer, Boolean> m = new HashMap<>();
-        m.put(PostgreSQLParser.RULE_qualified_name, true);  // tableName cũ - tên bảng/CTE (FROM,
+        m.put(PostgreSQLParser.RULE_qualified_name, true);  // tableName/CTE
         m.put(PostgreSQLParser.RULE_any_name, true);        // DROP TABLE/VIEW/INDEX/SEQUENCE/...
-        m.put(PostgreSQLParser.RULE_columnref, true);       // columnName cũ - biểu thức cột (SELECT
-        m.put(PostgreSQLParser.RULE_typename, true);        // dataTypeName cũ
-        m.put(PostgreSQLParser.RULE_func_name, true);       // functionCall cũ - tên hàm (không phải
-        m.put(PostgreSQLParser.RULE_table_alias, true);     // tableAlias cũ
+        m.put(PostgreSQLParser.RULE_columnref, true);       // columnName biểu thức cột (SELECT
+        m.put(PostgreSQLParser.RULE_typename, true);        // dataTypeName
+        m.put(PostgreSQLParser.RULE_func_name, true);       // tên hàm (không phải
+        m.put(PostgreSQLParser.RULE_table_alias, true);     // tableAlias
         m.put(PostgreSQLParser.RULE_colid, true);
+
+        m.put(PostgreSQLParser.RULE_reserved_keyword, true);
+        m.put(PostgreSQLParser.RULE_unreserved_keyword, true);
+        m.put(PostgreSQLParser.RULE_col_name_keyword, true);
+        m.put(PostgreSQLParser.RULE_type_func_name_keyword, true);
+        m.put(PostgreSQLParser.RULE_bare_label_keyword, true);
+        m.put(PostgreSQLParser.RULE_plsql_unreserved_keyword, true);
         return m;
     }
 

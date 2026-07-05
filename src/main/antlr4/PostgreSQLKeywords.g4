@@ -1025,3 +1025,96 @@ bare_label_keyword
    | YES_P
    | ZONE
    ;
+
+
+plsql_unreserved_keyword
+   : ABSOLUTE_P
+   | ALIAS
+   | AND
+   | ARRAY
+   | ASSERT
+   | BACKWARD
+   | CALL
+   | CHAIN
+   | CLOSE
+   | COLLATE
+   | COLUMN
+   //| COLUMN_NAME
+   | COMMIT
+   | CONSTANT
+   | CONSTRAINT
+   //| CONSTRAINT_NAME
+   | CONTINUE_P
+   | CURRENT_P
+   | CURSOR
+   //| DATATYPE
+   | DEBUG
+   | DEFAULT
+   //| DETAIL
+   | DIAGNOSTICS
+   | DO
+   | DUMP
+   | ELSIF
+   //| ERRCODE
+   | ERROR_P
+   | EXCEPTION
+   | EXIT
+   | FETCH
+   | FIRST_P
+   | FORWARD
+   | GET
+   //| HINT
+
+   //| IMPORT
+   | INFO
+   | INSERT
+   | IS
+   | LAST_P
+   | LOG
+   //| MESSAGE
+
+   //| MESSAGE_TEXT
+   | MOVE
+   | NEXT
+   | NO
+   | NOTICE
+   | OPEN
+   | OPTION
+   | PERFORM
+   //| PG_CONTEXT
+
+   //| PG_DATATYPE_NAME
+
+   //| PG_EXCEPTION_CONTEXT
+
+   //| PG_EXCEPTION_DETAIL
+
+   //| PG_EXCEPTION_HINT
+   | PRINT_STRICT_PARAMS
+   | PRIOR
+   | QUERY
+   | RAISE
+   | RELATIVE_P
+   | RESET
+   | RETURN
+   | REVERSE
+   //| RETURNED_SQLSTATE
+   | ROLLBACK
+   //| ROW_COUNT
+   | ROWTYPE
+   | SCHEMA
+   //| SCHEMA_NAME
+   | SCROLL
+   | SET
+   | SLICE
+   | SQLSTATE
+   | STACKED
+   | TABLE
+   //| TABLE_NAME
+   | TYPE_P
+   | USE_COLUMN
+   | USE_VARIABLE
+   | VARIABLE_CONFLICT
+   | WARNING
+   | OUTER_P
+   ;
