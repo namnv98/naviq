@@ -26,22 +26,17 @@ public class SemanticAnalyzer {
     public static Result analyze(String sql, int rawCursorOffset) {
         final int cursorOffset = Math.max(0, Math.min(rawCursorOffset, sql.length()));
 
-        boolean rightAfterDot = cursorOffset > 0 && sql.charAt(cursorOffset - 1) == '.';
-        String parseSql =
-            rightAfterDot ? sql : SemanticScope.withCursorPlaceholder(sql, cursorOffset);
-        boolean patched = !parseSql.equals(sql);
-
         try {
-            CharStream input = CharStreams.fromString(parseSql);
-            PostgreSQLLexer lexer = new PostgreSQLLexer(input);
-            CommonTokenStream tokens = new CommonTokenStream(lexer);
+            CursorTokenPatcher.PatchResult patch = CursorTokenPatcher.patch(sql, cursorOffset);
+            CommonTokenStream tokens = patch.tokenStream();
+
             PostgreSQLParser parser = new PostgreSQLParser(tokens);
             Set<Integer> offendingTokens = new HashSet<>();
             parser.removeErrorListeners();
             parser.addErrorListener(new BaseErrorListener() {
                 @Override
                 public void syntaxError(Recognizer<?, ?> r, Object offendingSymbol,
-                    int l, int c, String m, RecognitionException e) {
+                                        int l, int c, String m, RecognitionException e) {
                     if (offendingSymbol instanceof Token t) {
                         offendingTokens.add(t.getTokenIndex());
                     }
@@ -53,45 +48,22 @@ public class SemanticAnalyzer {
             model.offendingTokenIndices.addAll(offendingTokens);
             ParseTreeWalker.DEFAULT.walk(model, tree);
 
-            tokens.fill();
-            int tokenIdx = 0;
-            if (patched) {
-                for (Token t : tokens.getTokens()) {
-                    if (SemanticScope.CURSOR_PLACEHOLDER.equals(t.getText())) {
-                        tokenIdx = t.getTokenIndex();
-                        break;
-                    }
-                }
-            } else {
-                for (Token t : tokens.getTokens()) {
-                    if (t.getType() == Token.EOF || t.getStartIndex() > cursorOffset) {
-                        break;
-                    }
-                    tokenIdx = t.getTokenIndex();
-                }
-            }
-
-            var scope = model.scopeAt(tokenIdx);
+            // caretTokenIndex đã được CursorTokenPatcher tính SẴN, đúng cho cả 2 case
+            // (borrow token thật / chèn token giả) - không cần dò lại lần nữa ở đây.
+            var scope = model.scopeAt(patch.caretTokenIndex());
             var result = model.resolveAt(cursorOffset, scope);
             return new Result(
-                result.danglingQualifier(),
-                result.danglingQualifierResolvesTo(),
-                result.danglingQualifierScope(),
-                result.visibleAliases(),
-                result.visibleDerivedScopes()
+                    result.danglingQualifier(),
+                    result.danglingQualifierResolvesTo(),
+                    result.danglingQualifierScope(),
+                    result.visibleAliases(),
+                    result.visibleDerivedScopes()
             );
         } catch (Exception e) {
-            // defensive: SemanticScope KHÔNG ĐƯỢC làm sập toàn bộ completion - rơi về
-            // fallback token-scan thuần (DmlTargetResolver) trên chính "sql" gốc.
-//            CommonTokenStream fallbackTokens = new CommonTokenStream(new PostgreSQLLexer(CharStreams.fromString(sql)));
-//            fallbackTokens.fill();
-//            int fallbackCaret = TokenPositionUtil.findCaretTokenIndex(fallbackTokens, cursorOffset);
-//            String qualifier = DmlTargetResolver.extractQualifier(fallbackTokens, fallbackCaret);
-//            return new Result(qualifier, null, null, java.util.Map.of(), java.util.Map.of());
+            e.printStackTrace();
             return new Result(null, null, null, java.util.Map.of(), java.util.Map.of());
         }
     }
-
     public record Result(
         String qualifier,
         String qualifierResolvesTo,

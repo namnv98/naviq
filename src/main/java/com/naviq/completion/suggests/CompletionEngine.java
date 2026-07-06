@@ -1,17 +1,18 @@
 package com.naviq.completion.suggests;
 
-import com.naviq.antlr4.PostgreSQLParser;
-import com.naviq.completion.model.Suggest;
-import com.naviq.completion.semantic.SemanticAnalyzer;
-import com.naviq.completion.syntactic.AntlrCompletionEngine;
-import com.naviq.completion.syntactic.SyntacticAnalyzer;
+import com.naviq.antlr4.*;
 import com.naviq.datasource.SchemaIndex;
-import com.naviq.util.LoggingConfig;
+import com.naviq.completion.syntactic.AntlrCompletionEngine;
+import com.naviq.completion.model.Suggest;
+import com.naviq.completion.semantic.*;
+import com.naviq.completion.syntactic.SyntacticAnalyzer;
 import org.antlr.v4.runtime.Token;
+import com.naviq.util.LoggingConfig;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.logging.Logger;
 
 import static java.util.Objects.isNull;
@@ -22,16 +23,10 @@ import static java.util.Objects.isNull;
  * <p>
  * SchemaIndex          - biết schema có gì (bảng, cột, hàm, kiểu dữ liệu)
  * SemanticAnalyzer      - tầng ngữ nghĩa (SemanticScope: alias/scope/CTE/subquery)
- * SyntacticAnalyzer     - tầng cú pháp (AntlrCompletionEngineFix: token/rule hợp lệ)
- * DerivedColumnExpander - mở rộng cột của subquery/CTE (bao gồm case wildcard)
- * AliasNameSuggester    - đặt tên alias tự động + tìm tableName trước "AS"
- * KeywordNoiseFilter    - lọc "rác" keyword (statement-start lặp lại + identifier-usable
- * keyword khi đã có cột/alias/bảng thật) - xem javadoc trong file đó để biết chi tiết 2
- * loại nhiễu khác nhau đang được xử lý
- * DmlTargetResolver     - fallback token-scan cho INSERT/UPDATE/ALTER (dùng nội bộ bởi SemanticAnalyzer khi parse lỗi nặng)
+ * SyntacticAnalyzer     - tầng cú pháp (AntlrCompletionEngine: token/rule hợp lệ)
+ * KeywordNoiseFilter    - lọc noise (định danh đã đóng bằng khoảng trắng)
  * <p>
- * 2 tầng (Semantic/Syntactic) ĐỘC LẬP, không tầng nào thay được tầng kia - xem
- * javadoc gốc trong SemanticAnalyzer/SyntacticAnalyzer để biết lý do.
+ * 2 tầng (Semantic/Syntactic) ĐỘC LẬP, không tầng nào thay được tầng kia.
  */
 public class CompletionEngine {
     private static final Logger LOG = LoggingConfig.of(CompletionEngine.class);
@@ -47,36 +42,48 @@ public class CompletionEngine {
             cursorCharPos = sql.length();
         }
         int cursorOffset = cursorCharPos;
-
         SemanticAnalyzer.Result semanticResult = SemanticAnalyzer.analyze(sql, cursorOffset);
-        // "-1" CẦN THIẾT cho completion kiểu prefix (vd "select * fr|" -> gợi ý "FROM") -
-        // trỏ caretTokenIndex VÀO CHÍNH token đang gõ dở, để engine coi đây là "slot còn
-        // mở, có thể là bất kỳ từ nào khớp prefix" thay vì "đã chốt xong, xét tiếp theo
-        // là gì". NHƯNG chỉ đúng khi ký tự ngay trước cursor CÓ THỂ còn đang gõ dở (chữ/
-        // số/_ - 1 phần của identifier/keyword) - SAI khi ký tự đó là dấu câu cố định
-        // (vd "(", ",", ".") vì dấu câu LUÔN là 1 token ĐÃ HOÀN CHỈNH ngay khi gõ, không
-        // thể "gõ dở" thêm được nữa. Đã xác nhận bằng debug trực tiếp: "insert into t (|"
-        // với "-1" cho ra rule "qualified_name" (SAI - tưởng vẫn đang ở vị trí TRƯỚC dấu
-        // "("), không có "-1" cho ra đúng "colid" (đang ở TRONG dấu ngoặc, chờ cột) - nên
-        // "-1" phải áp CÓ ĐIỀU KIỆN, không phải lúc nào cũng trừ.
+
         char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length()) ? sql.charAt(cursorOffset - 1) : ' ';
         boolean stillMidIdentifier = Character.isLetterOrDigit(charBeforeCursor) || charBeforeCursor == '_';
         int syntacticCursor = stillMidIdentifier ? cursorOffset - 1 : cursorOffset;
         SyntacticAnalyzer.Result syntacticResults = SyntacticAnalyzer.analyze(sql, syntacticCursor);
 
-        for (Map.Entry<Integer, List<Integer>> entry : syntacticResults.candidates().tokens.entrySet()) {
+        for (var entry : syntacticResults.candidates().tokens.entrySet()) {
             addKeywordSuggestions(suggests, entry.getKey());
         }
 
-        for (Map.Entry<Integer, List<AntlrCompletionEngine.RuleFrame>> entry : syntacticResults.candidates().rules.entrySet()) {
-            String ruleName = PostgreSQLParser.ruleNames[entry.getKey()];
-            switch (ruleName) {
-                case "columnref", "colid" -> addColumnSuggestions(suggests, semanticResult);
-                case "typename" -> addDataTypeSuggestions(suggests);
-                case "table_alias" -> addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
-                case "qualified_name", "any_name" -> addTableNameSuggestions(suggests, syntacticResults);
-            }
+        boolean identifierClosedByGap = KeywordNoiseFilter.isIdentifierClosedByGap(sql, cursorOffset);
+
+        // BUG FIX: gom TÊN rule (không phải rule index) vào 1 Set TRƯỚC khi xử lý, thay vì
+        // switch trực tiếp trong vòng lặp entrySet() như trước. Nhiều rule index KHÁC
+        // NHAU (vd "colid" và "columnref") có thể CÙNG match tại 1 vị trí caret (ambiguous
+        // theo ATN - xem giải thích AntlrCompletionEngine: "where |" khớp cả 2 vì columnref
+        // : colid indirection? nên colid là điểm bắt đầu của chính columnref). Nếu switch
+        // chạy trực tiếp trong for-loop cũ, mỗi entry khớp case "columnref"/"colid" gọi lại
+        // addColumnSuggestions() 1 lần riêng -> add TRÙNG LẶP toàn bộ danh sách cột khi CẢ
+        // HAI cùng có mặt. Gom vào Set<String> trước rồi xử lý MỖI NHÓM HÀNH ĐỘNG đúng 1
+        // lần, bất kể có bao nhiêu rule index khác nhau cùng khớp vào nhóm đó.
+        Set<String> matchedRuleNames = new HashSet<>();
+        for (Integer ruleIndex : syntacticResults.candidates().rules.keySet()) {
+            matchedRuleNames.add(PostgreSQLParser.ruleNames[ruleIndex]);
         }
+
+        boolean blocked = KeywordNoiseFilter.shouldBlockIdentifierContinuation(identifierClosedByGap, matchedRuleNames);
+
+        if (!blocked && (matchedRuleNames.contains("columnref") || matchedRuleNames.contains("colid"))) {
+            addColumnSuggestions(suggests, semanticResult);
+        }
+        if (matchedRuleNames.contains("typename")) {
+            addDataTypeSuggestions(suggests);
+        }
+        if (matchedRuleNames.contains("table_alias")) {
+            addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
+        }
+        if (!blocked && (matchedRuleNames.contains("qualified_name") || matchedRuleNames.contains("any_name"))) {
+            addTableNameSuggestions(suggests, syntacticResults);
+        }
+
         return suggests;
     }
 
@@ -101,16 +108,13 @@ public class CompletionEngine {
         if (sem.qualifier() != null) {
             String qualifier = sem.qualifier();
             if (sem.qualifierDerivedScope() != null) {
-                // qualifier trỏ tới subquery/CTE - lấy cột TRỰC TIẾP từ SELECT list của nó, KHÔNG tra schema bằng tên giả "<cte#N>".
                 DerivedColumnExpander.addDerivedColumns(suggests, qualifier, sem.qualifierDerivedScope());
             } else if (sem.qualifierResolvesTo() != null) {
                 SchemaIndex.getColumnsOfTable(sem.qualifierResolvesTo()).forEach(c -> suggests.add(Suggest.of(qualifier + "." + c.name(), "column", c.dataType())));
             } else {
-                // alias lạ/gõ sai - thử tra thẳng bằng chính chuỗi qualifier (đoán còn hơn không gợi ý gì, người dùng có thể đang gõ tên bảng trực tiếp).
                 SchemaIndex.getColumnsOfTable(qualifier).forEach(c -> suggests.add(Suggest.of(qualifier + "." + c.name(), "column", c.dataType())));
             }
         } else if (!sem.visibleAliases().isEmpty()) {
-            // CHỈ liệt cột của bảng THẬT SỰ có trong câu - khác fallback toàn schema.
             sem.visibleAliases().forEach((alias, table) -> {
                 var derived = sem.visibleDerivedScopes().get(alias);
                 if (derived != null) {
@@ -119,9 +123,6 @@ public class CompletionEngine {
                     SchemaIndex.getColumnsOfTable(table).forEach(c -> suggests.add(Suggest.of(alias + "." + c.name(), "column", c.dataType())));
                 }
             });
-        } else {
-            // Không có FROM nào cả (hoặc SemanticAnalyzer rơi vào fallback) - fallback toàn schema, phương án cuối.
-//            SchemaIndex.SCHEMA_TABLE_INDEX.keySet().forEach(t -> SchemaIndex.getColumnsOfTable(t).forEach(c -> suggests.add(Suggest.of(c.fullName(), "column", c.dataType()))));
         }
     }
 

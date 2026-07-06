@@ -1,6 +1,7 @@
 package com.naviq.completion.semantic;
 
-import com.naviq.antlr4.*;
+import com.naviq.antlr4.PostgreSQLParser;
+import com.naviq.antlr4.PostgreSQLParserBaseListener;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ErrorNode;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -244,21 +245,14 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         return stop - s.startTokenIndex;
     }
 
-    // ---- select_no_parens = 1 scope (tương ứng "selectStmt" ở grammar cũ) ----
-    // Lưu ý: selectstmt = select_no_parens | select_with_parens, và select_with_parens lại bọc
-    // select_no_parens - nên dù "(((SELECT ...)))" bọc bao nhiêu lớp ngoặc, chỉ có ĐÚNG 1
-    // select_no_parens thật sự bên trong -> không lo bị double-push. UNION/INTERSECT/EXCEPT nhiều
-    // simple_select_pramary trong CÙNG 1 select_no_parens dùng CHUNG 1 scope (không tách riêng
-    // từng vế) - đơn giản hoá có chủ đích, giống cách selectStmt cũ xử lý.
-
     @Override
     public void enterSelect_no_parens(PostgreSQLParser.Select_no_parensContext ctx) {
-        pushScope(ctx.getStart());
+        pushScope(ctx.getStart()); // start là OPEN_PAREN
     }
 
     @Override
     public void exitSelect_no_parens(PostgreSQLParser.Select_no_parensContext ctx) {
-        popScope(ctx.getStop());
+        popScope(ctx.getStop());  // stop là CLOSE_PAREN
     }
 
     // ---- UPDATE / DELETE - grammar mới KHÔNG dùng table_ref cho 2 câu này mà dùng
@@ -497,7 +491,21 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
     private void popScope(Token stopToken) {
         if (stack.size() > 1) {
             Scope s = stack.pop(); // defensive: không pop root nếu lệch cặp
-            s.stopTokenIndex = stopToken != null ? stopToken.getTokenIndex() : Integer.MAX_VALUE;
+            int stopIdx = stopToken != null ? stopToken.getTokenIndex() : -1;
+            // BUG FIX: nếu token đóng kỳ vọng (vd CLOSE_PAREN của select_with_parens) bị
+            // THIẾU HẲN vì người dùng đang gõ dở (chưa gõ ")"), ANTLR error-recovery chèn 1
+            // token ẢO để phục hồi - token ảo này LUÔN có tokenIndex == -1 (xem
+            // isUnreliable() ở trên). Nếu dùng thẳng -1 làm stopTokenIndex, scope sẽ có
+            // khoảng [start, -1] - KHÔNG BAO GIỜ chứa tokenIndex thật nào (vì -1 < start
+            // luôn đúng) -> scope này coi như biến mất khỏi scopeAt(), cursor đang đứng
+            // BÊN TRONG nó (trước chỗ thiếu ")") bị văng hẳn lên scope cha, mất sạch alias
+            // của chính subquery/statement đó dù người dùng chỉ đơn giản CHƯA GÕ ")".
+            //
+            // Nếu phát hiện token đóng không hợp lệ (ảo, hoặc bất kỳ lý do gì khiến index
+            // nhỏ hơn cả điểm bắt đầu của chính scope này) -> coi scope VẪN ĐANG MỞ, kéo
+            // dài tới hết input (MAX_VALUE) thay vì đóng non - đúng tinh thần "gõ dở thì
+            // nới scope ra, không chốt sớm dựa trên dữ liệu không đáng tin".
+            s.stopTokenIndex = (stopIdx >= s.startTokenIndex) ? stopIdx : Integer.MAX_VALUE;
         }
     }
 
@@ -887,28 +895,15 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         return i < 0 ? q : q.substring(i + 1);
     }
 
-    // ---- Hỗ trợ vị trí cursor "trống hoàn toàn" (không đứng sau dấu chấm) ----
-
-    /**
-     * Text placeholder chèn vào SQL - chọn 1 chuỗi gần như không thể trùng input thật.
-     */
-    public static final String CURSOR_PLACEHOLDER = "zzzcursorzzz";
-
-    /**
-     * Chèn 1 identifier giả (CURSOR_PLACEHOLDER) NGAY TẠI cursorOffset, TRỪ KHI ký tự ngay trước
-     * cursor là dấu chấm - trường hợp đó để nguyên, vì patch DOT?? trong indirection_el đã xử lý
-     * đúng rồi (chèn thêm vào sẽ PHÁ cơ chế phát hiện "chấm cụt").
-     * <p>
-     * Lý do cần: những vị trí HOÀN TOÀN TRỐNG (vd "SELECT |FROM t", "WHERE |") không có gì để
-     * grammar "bám" vào - ANTLR error-recovery (single-token deletion) có thể đoán sai, xóa nhầm 1
-     * từ khóa CẤU TRÚC thật (vd FROM) thay vì hiểu đây là "người dùng đang gõ dở". Chèn 1
-     * identifier giả biến vị trí đó thành hợp lệ về cú pháp, loại bỏ hẳn tình huống gây đoán sai.
-     */
-    public static String withCursorPlaceholder(String sql, int cursorOffset) {
-        boolean rightAfterDot = cursorOffset > 0 && sql.charAt(cursorOffset - 1) == '.';
-        if (rightAfterDot) {
-            return sql; // DOT?? tự lo, không đụng vào
+    @Override
+    public void visitErrorNode(ErrorNode node) {
+        // Lưu lại thông tin lỗi
+        Token symbol = (Token) node.getSymbol();
+        if (symbol != null) {
+            offendingTokenIndices.add(symbol.getTokenIndex());
         }
-        return sql.substring(0, cursorOffset) + CURSOR_PLACEHOLDER + sql.substring(cursorOffset);
+
+        // TIẾP TỤC duyệt các node khác (không throw)
+        // ParseTreeWalker mặc định sẽ tiếp tục
     }
 }

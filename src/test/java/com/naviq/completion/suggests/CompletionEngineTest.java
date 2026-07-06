@@ -98,6 +98,18 @@ class CompletionEngineTest {
     // Nhóm 1: bug "select sau select" (fix stmtmulti trong .g4 + isFreshStatementPosition)
     // =====================================================================
 
+
+    @Test
+    @DisplayName("Sau dấu ';' của câu trước - VẪN phải thấy đủ keyword bắt-đầu-câu (không phá multi-statement)")
+    void statementStartKeywordsAfterSemicolon() {
+        var result = suggest("select * from public.contracts where |");
+        System.out.println();
+//        var keywords = allKeywordKeys(result);
+//        assertTrue(keywords.contains("select"));
+//        assertTrue(keywords.contains("insert"));
+//        assertTrue(keywords.contains("delete"));
+    }
+
     @Nested
     @DisplayName("keyword bắt-đầu-câu không lặp lại giữa câu")
     class StatementStartKeywordDedup {

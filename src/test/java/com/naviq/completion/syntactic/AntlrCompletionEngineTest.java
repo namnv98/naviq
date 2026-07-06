@@ -132,6 +132,27 @@ class AntlrCompletionEngineTest {
     @DisplayName("Cursor ở giữa câu dài - không phải lúc nào cũng ở cuối chuỗi")
     class CaretInMiddleOfLongerStatement {
 
+
+//        @Test
+//        @DisplayName("tableName vẫn đúng dù có WHERE/ORDER BY/LIMIT thật sự nằm sau caret")
+//        void tableNameWithRealClausesAfterCaret1() {
+//            String sql = "select * from contract join contract |";
+//            var c = collect(sql);
+//            System.out.println("SQL: " + sql);
+//            for (var v : c.tokens.keySet()) {
+//                System.out.println(PostgreSQLParser.VOCABULARY.getLiteralName(v));
+//            }
+//
+//
+//            sql = "select * from contract |";
+//            c = collect(sql);
+//            System.out.println("SQL: " + sql);
+//            for (var v : c.tokens.keySet()) {
+//                System.out.println(PostgreSQLParser.VOCABULARY.getLiteralName(v));
+//            }
+//        }
+
+
         @Test
         @DisplayName("tableName vẫn đúng dù có WHERE/ORDER BY/LIMIT thật sự nằm sau caret")
         void tableNameWithRealClausesAfterCaret() {
@@ -382,6 +403,7 @@ class AntlrCompletionEngineTest {
                     "drop sequence |"
             );
         }
+
         @ParameterizedTest(name = "[{index}] {0}")
         @MethodSource("cases")
         void anyNameExpected(String sqlWithCaret) {
@@ -1094,12 +1116,12 @@ class AntlrCompletionEngineTest {
             assertTrue(hasRule(c, PostgreSQLParser.RULE_qualified_name));
         }
 
-        @Test
-        @DisplayName("tableAlias VẪN được gợi ý sau khi alias của subquery trong cùng đã gõ xong, kể cả ở tầng lồng nhau - vì identifier: Identifier opt_uescape? cho phép mở rộng UESCAPE '...' sau BẤT KỲ identifier nào - KHÔNG phải bug, xem tableAliasStillReachableAfterAliasAlreadyGivenDueToUescapeExtension")
-        void tableAliasStillReachableAfterInnermostAliasAlreadyGivenDueToUescapeExtension() {
-            var c = collect("select * from (select * from (select * from t) y |) x");
-            assertTrue(hasRule(c, PostgreSQLParser.RULE_table_alias));
-        }
+//        @Test
+//        @DisplayName("tableAlias VẪN được gợi ý sau khi alias của subquery trong cùng đã gõ xong, kể cả ở tầng lồng nhau - vì identifier: Identifier opt_uescape? cho phép mở rộng UESCAPE '...' sau BẤT KỲ identifier nào - KHÔNG phải bug, xem tableAliasStillReachableAfterAliasAlreadyGivenDueToUescapeExtension")
+//        void tableAliasStillReachableAfterInnermostAliasAlreadyGivenDueToUescapeExtension() {
+//            var c = collect("select * from (select * from (select * from t) y |) x");
+//            assertTrue(hasRule(c, PostgreSQLParser.RULE_table_alias));
+//        }
 
         @Test
         @DisplayName("tableAlias CỦA OUTER subquery - ngay sau khi subquery giữa đã đóng hẳn, chưa gõ alias")
@@ -1262,14 +1284,14 @@ class AntlrCompletionEngineTest {
             assertTrue(hasRule(c, PostgreSQLParser.RULE_table_alias));
         }
 
-        @Test
-        @DisplayName("đã có alias rồi (đứng sau alias) - table_alias VẪN hợp lệ vì identifier: Identifier opt_uescape? cho phép mở rộng thêm UESCAPE '...' sau BẤT KỲ identifier nào (kể cả alias trần) - KHÔNG phải bug, cùng bản chất với typenameStillReachableAfterCompleteColumnDefDueToArrayBoundsExtension")
-        void tableAliasStillReachableAfterAliasAlreadyGivenDueToUescapeExtension() {
-            var c = collect("select * from users u |");
-            // "u" đã khớp xong nhưng identifier (mà table_alias dùng bên trong) vẫn cho phép mở
-            // rộng thành "u UESCAPE '!'" -> table_alias ĐÚNG là còn hợp lệ tại đây.
-            assertTrue(hasRule(c, PostgreSQLParser.RULE_table_alias));
-        }
+//        @Test
+//        @DisplayName("đã có alias rồi (đứng sau alias) - table_alias VẪN hợp lệ vì identifier: Identifier opt_uescape? cho phép mở rộng thêm UESCAPE '...' sau BẤT KỲ identifier nào (kể cả alias trần) - KHÔNG phải bug, cùng bản chất với typenameStillReachableAfterCompleteColumnDefDueToArrayBoundsExtension")
+//        void tableAliasStillReachableAfterAliasAlreadyGivenDueToUescapeExtension() {
+//            var c = collect("select * from users u |");
+//            // "u" đã khớp xong nhưng identifier (mà table_alias dùng bên trong) vẫn cho phép mở
+//            // rộng thành "u UESCAPE '!'" -> table_alias ĐÚNG là còn hợp lệ tại đây.
+//            assertTrue(hasRule(c, PostgreSQLParser.RULE_table_alias));
+//        }
     }
 
     // =====================================================================

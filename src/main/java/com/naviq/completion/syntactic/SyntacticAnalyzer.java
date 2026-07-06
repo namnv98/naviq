@@ -46,22 +46,21 @@ public class SyntacticAnalyzer {
     private static Map<Integer, Boolean> buildIgnoredTokens() {
         Map<Integer, Boolean> m = new HashMap<>();
         m.put(Token.EOF, true);
-        m.put(PostgreSQLParser.Identifier, true);       // ID cũ -> Identifier (colid/identifier trần)
-        m.put(PostgreSQLParser.OPEN_PAREN, true);        // LPAREN cũ
-        m.put(PostgreSQLParser.CLOSE_PAREN, true);       // RPAREN cũ
+        m.put(PostgreSQLParser.Identifier, true);
+        m.put(PostgreSQLParser.OPEN_PAREN, true);
+        m.put(PostgreSQLParser.CLOSE_PAREN, true);
         m.put(PostgreSQLParser.PLUS, true);
         m.put(PostgreSQLParser.MINUS, true);
         m.put(PostgreSQLParser.SLASH, true);
-        m.put(PostgreSQLParser.EQUAL, true);             // EQ cũ -> EQUAL
-        m.put(PostgreSQLParser.NOT_EQUALS, true);        // NEQ cũ -> NOT_EQUALS (token "<>")
+        m.put(PostgreSQLParser.EQUAL, true);
+        m.put(PostgreSQLParser.NOT_EQUALS, true);
         m.put(PostgreSQLParser.LT, true);
         m.put(PostgreSQLParser.GT, true);
-        m.put(PostgreSQLParser.LESS_EQUALS, true);       // LTE cũ
-        m.put(PostgreSQLParser.GREATER_EQUALS, true);    // GTE cũ
-        m.put(PostgreSQLParser.Numeric, true);           // NUMBER cũ -> Numeric (số thực)
-        m.put(PostgreSQLParser.Integral, true);          // NUMBER cũ -> Integral (số nguyên) - grammar
-        // mới tách riêng 2 token cho hằng số, cả 2 đều cần bỏ qua
-        m.put(PostgreSQLParser.StringConstant, true);    // STRING cũ
+        m.put(PostgreSQLParser.LESS_EQUALS, true);
+        m.put(PostgreSQLParser.GREATER_EQUALS, true);
+        m.put(PostgreSQLParser.Numeric, true);
+        m.put(PostgreSQLParser.Integral, true);
+        m.put(PostgreSQLParser.StringConstant, true);
         m.put(PostgreSQLParser.SEMI, true);
         return m;
     }

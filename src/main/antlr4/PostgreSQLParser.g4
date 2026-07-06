@@ -4206,9 +4206,9 @@ bare_col_label
    ;
 
 identifier
-   : Identifier opt_uescape?
+   : Identifier
    | QuotedIdentifier
-   | UnicodeQuotedIdentifier
+   | UnicodeQuotedIdentifier opt_uescape?
    | plsqlvariablename
    | plsqlidentifier
    | plsql_unreserved_keyword
