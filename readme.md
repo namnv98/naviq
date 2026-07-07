@@ -1,6 +1,52 @@
 # 🚀 NaviQ CLI
 https://github.com/bytebase/parser/tree/57b6ef7a2640481d8734cd63af0c7b781fa85f22/postgresql
 https://github.com/spring-projects/spring-tools/tree/46a3b356d75d4575c0345bdaf046ae37e3cb1510/headless-services/commons/jpql/grammars
+
+
+
+
+https://github.com/bytebase/omni/blob/f7991e553a27d880dcd70b6d5bcfb007981f3be8/pg/completion/resolve.go#L39
+
+
+
+
+https://github.com/bytebase/omni/blob/f7991e553a27d880dcd70b6d5bcfb007981f3be8/pg/completion/completion_test.go#L279
+
+func (c *Completer) determineQualifiedName() (string, ObjectFlags) {
+idx := c.caretTokenIndex
+
+    // Nếu token tại caret không phải identifier/ONLY, lùi lại
+    if idx < len(c.tokens) {
+        tt := c.tokens[idx].Type
+        if tt != pgparser.ONLY && !pgparser.IsIdentifierTokenType(tt) {
+            idx--
+        }
+    }
+
+    // ✅ "schema.|" - đang đứng SAU dấu chấm
+    // → qualified_name đã kết thúc (đang bắt đầu tên mới)
+    if idx >= 1 && c.tokens[idx].Type == '.' &&
+        pgparser.IsIdentifierTokenType(c.tokens[idx-1].Type) {
+        qualifier := normalizeIdentifier(c.tokens[idx-1].Str)
+        return qualifier, ObjectFlagsShowSecond
+    }
+
+    // ✅ "schema.table|" - đang gõ tên table (chưa có khoảng trắng)
+    // → qualified_name chưa kết thúc, nhưng đây là token cuối
+    if idx >= 2 && pgparser.IsIdentifierTokenType(c.tokens[idx].Type) &&
+        c.tokens[idx-1].Type == '.' &&
+        pgparser.IsIdentifierTokenType(c.tokens[idx-2].Type) {
+        qualifier := normalizeIdentifier(c.tokens[idx-2].Str)
+        return qualifier, ObjectFlagsShowSecond
+    }
+
+    // ✅ "schema.table |" - CÓ KHOẢNG TRẮNG
+    // → qualified_name đã kết thúc! KHÔNG gợi ý thêm . hay tên bảng
+    // Bytebase: trả về ObjectFlagsShowFirst | ObjectFlagsShowSecond
+    // → gợi ý schemas + tables (nhưng đã có khoảng trắng nên chỉ gợi ý từ khóa tiếp theo)
+    return "", ObjectFlagsShowFirst | ObjectFlagsShowSecond
+}
+
 > A SQL autocomplete engine that asks the parser instead of guessing.
 
 Most SQL autocomplete tools work by prefix-matching against a list of known names. That's fast to build and mostly
