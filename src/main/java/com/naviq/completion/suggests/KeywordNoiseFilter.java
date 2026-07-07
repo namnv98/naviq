@@ -36,33 +36,60 @@ final class KeywordNoiseFilter {
 
     private static Set<Integer> computeColidTerminalTokens() {
         Set<Integer> result = new HashSet<>();
-        Set<ATNState> visited = new HashSet<>();
-        Deque<ATNState> queue = new ArrayDeque<>();
-        queue.push(PostgreSQLParser._ATN.ruleToStartState[PostgreSQLParser.RULE_colid]);
 
-        while (!queue.isEmpty()) {
-            ATNState s = queue.pop();
-            if (!visited.add(s)) continue;
+        // CHỈ các token thực sự có thể là colid trong PostgreSQL
+        // Đây là các token mà lexer trả về khi gặp identifier (không phải keyword)
 
-            for (Transition t : s.getTransitions()) {
-                if (t instanceof RuleTransition rt) {
-                    // Lặn vào rule con (identifier/unreserved_keyword/...) để gom nhãn của
-                    // NÓ - không cần push rt.followState vì các rule này không có phần
-                    // "tiếp diễn" nào sau khi khớp xong (xem javadoc field ở trên).
-                    queue.push(rt.target);
-                } else if (t.isEpsilon()) {
-                    queue.push(t.target);
-                } else {
-                    IntervalSet label = t.label();
-                    if (label != null) {
-                        result.addAll(label.toList());
-                    }
-                    // KHÔNG push t.target tiếp - các rule này match ĐÚNG 1 token rồi dừng.
-                }
-            }
-        }
+        // 1. Identifier thông thường (không phải từ khóa)
+        result.add(PostgreSQLParser.Identifier); // 562
+
+        // 2. Identifier trong dấu ngoặc kép
+        result.add(PostgreSQLParser.QuotedIdentifier); // 563
+
+        // 3. Identifier Unicode trong dấu ngoặc kép
+        result.add(PostgreSQLParser.UnicodeQuotedIdentifier); // 567
+
+        // 4. PL/pgSQL identifiers
+        result.add(PostgreSQLParser.PLSQLVARIABLENAME); // 590
+        result.add(PostgreSQLParser.PLSQLIDENTIFIER); // 591
+
+        // 5. Một số từ khóa không bị ràng buộc mà PostgreSQL cho phép làm colid
+        // Ví dụ: "table" có thể là tên cột trong một số ngữ cảnh
+        // Nhưng KHÔNG phải tất cả từ khóa!
+
         return result;
     }
+
+
+//    private static Set<Integer> computeColidTerminalTokens() {
+//        Set<Integer> result = new HashSet<>();
+//        Set<ATNState> visited = new HashSet<>();
+//        Deque<ATNState> queue = new ArrayDeque<>();
+//        queue.push(PostgreSQLParser._ATN.ruleToStartState[PostgreSQLParser.RULE_colid]);
+//
+//        while (!queue.isEmpty()) {
+//            ATNState s = queue.pop();
+//            if (!visited.add(s)) continue;
+//
+//            for (Transition t : s.getTransitions()) {
+//                if (t instanceof RuleTransition rt) {
+//                    // Lặn vào rule con (identifier/unreserved_keyword/...) để gom nhãn của
+//                    // NÓ - không cần push rt.followState vì các rule này không có phần
+//                    // "tiếp diễn" nào sau khi khớp xong (xem javadoc field ở trên).
+//                    queue.push(rt.target);
+//                } else if (t.isEpsilon()) {
+//                    queue.push(t.target);
+//                } else {
+//                    IntervalSet label = t.label();
+//                    if (label != null) {
+//                        result.addAll(label.toList());
+//                    }
+//                    // KHÔNG push t.target tiếp - các rule này match ĐÚNG 1 token rồi dừng.
+//                }
+//            }
+//        }
+//        return result;
+//    }
 
     static boolean shouldBlockIdentifierContinuation(boolean identifierClosedByGap, Set<String> matchedRuleNames) {
         if (!identifierClosedByGap) {

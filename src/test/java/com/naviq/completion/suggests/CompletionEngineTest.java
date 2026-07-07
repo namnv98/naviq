@@ -102,7 +102,7 @@ class CompletionEngineTest {
     @Test
     @DisplayName("Sau dấu ';' của câu trước - VẪN phải thấy đủ keyword bắt-đầu-câu (không phá multi-statement)")
     void statementStartKeywordsAfterSemicolon() {
-        var result = suggest("select * from public.contracts where |");
+        var result = suggest("select * from public.contracts where (select * from |)");
         System.out.println();
 //        var keywords = allKeywordKeys(result);
 //        assertTrue(keywords.contains("select"));

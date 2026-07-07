@@ -55,15 +55,6 @@ public class CompletionEngine {
 
         boolean identifierClosedByGap = KeywordNoiseFilter.isIdentifierClosedByGap(sql, cursorOffset);
 
-        // BUG FIX: gom TÊN rule (không phải rule index) vào 1 Set TRƯỚC khi xử lý, thay vì
-        // switch trực tiếp trong vòng lặp entrySet() như trước. Nhiều rule index KHÁC
-        // NHAU (vd "colid" và "columnref") có thể CÙNG match tại 1 vị trí caret (ambiguous
-        // theo ATN - xem giải thích AntlrCompletionEngine: "where |" khớp cả 2 vì columnref
-        // : colid indirection? nên colid là điểm bắt đầu của chính columnref). Nếu switch
-        // chạy trực tiếp trong for-loop cũ, mỗi entry khớp case "columnref"/"colid" gọi lại
-        // addColumnSuggestions() 1 lần riêng -> add TRÙNG LẶP toàn bộ danh sách cột khi CẢ
-        // HAI cùng có mặt. Gom vào Set<String> trước rồi xử lý MỖI NHÓM HÀNH ĐỘNG đúng 1
-        // lần, bất kể có bao nhiêu rule index khác nhau cùng khớp vào nhóm đó.
         Set<String> matchedRuleNames = new HashSet<>();
         for (Integer ruleIndex : syntacticResults.candidates().rules.keySet()) {
             matchedRuleNames.add(PostgreSQLParser.ruleNames[ruleIndex]);
@@ -71,17 +62,28 @@ public class CompletionEngine {
 
         boolean blocked = KeywordNoiseFilter.shouldBlockIdentifierContinuation(identifierClosedByGap, matchedRuleNames);
 
-        if (!blocked && (matchedRuleNames.contains("columnref") || matchedRuleNames.contains("colid"))) {
-            addColumnSuggestions(suggests, semanticResult);
-        }
+
         if (matchedRuleNames.contains("typename")) {
             addDataTypeSuggestions(suggests);
         }
+
         if (matchedRuleNames.contains("table_alias")) {
             addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
         }
-        if (!blocked && (matchedRuleNames.contains("qualified_name") || matchedRuleNames.contains("any_name"))) {
+
+        if (matchedRuleNames.contains("any_name")) {
             addTableNameSuggestions(suggests, syntacticResults);
+            return suggests;
+        }
+
+        if (!blocked && (matchedRuleNames.contains("qualified_name"))) {
+            addTableNameSuggestions(suggests, syntacticResults);
+            return suggests;
+        }
+
+
+        if (!blocked && (matchedRuleNames.contains("columnref") || matchedRuleNames.contains("colid"))) {
+            addColumnSuggestions(suggests, semanticResult);
         }
 
         return suggests;
