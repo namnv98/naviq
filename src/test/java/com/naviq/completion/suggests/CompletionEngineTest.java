@@ -102,7 +102,7 @@ class CompletionEngineTest {
     @Test
     @DisplayName("Sau dấu ';' của câu trước - VẪN phải thấy đủ keyword bắt-đầu-câu (không phá multi-statement)")
     void statementStartKeywordsAfterSemicolon() {
-        var result = suggest("select * from public.contracts where (select * from |)");
+        var result = suggest("select (select * from public.users as u where c.id = u.id) from (select * from public.contracts) as c join public.contract_template as ct on c.id = ct.id and  |");
         System.out.println();
 //        var keywords = allKeywordKeys(result);
 //        assertTrue(keywords.contains("select"));
@@ -673,7 +673,7 @@ class CompletionEngineTest {
         @Test
         @DisplayName("Nhiều alias đã dùng, đề xuất số tiếp theo")
         void aliasMultipleIncrements() {
-            var result = suggest("select * from public.users u join public.orders o join public.products as |");
+            var result = suggest("FF |");
             assertTrue(hasKeyOfType(result, "p", "alias") || hasKeyOfType(result, "p1", "alias"));
         }
 

@@ -53,15 +53,8 @@ public class CompletionEngine {
             addKeywordSuggestions(suggests, entry.getKey());
         }
 
-        boolean identifierClosedByGap = KeywordNoiseFilter.isIdentifierClosedByGap(sql, cursorOffset);
 
-        Set<String> matchedRuleNames = new HashSet<>();
-        for (Integer ruleIndex : syntacticResults.candidates().rules.keySet()) {
-            matchedRuleNames.add(PostgreSQLParser.ruleNames[ruleIndex]);
-        }
-
-        boolean blocked = KeywordNoiseFilter.shouldBlockIdentifierContinuation(identifierClosedByGap, matchedRuleNames);
-
+        Set<String> matchedRuleNames = KeywordNoiseFilter.computeMatchedRuleNames(syntacticResults, syntacticCursor);
 
         if (matchedRuleNames.contains("typename")) {
             addDataTypeSuggestions(suggests);
@@ -73,16 +66,13 @@ public class CompletionEngine {
 
         if (matchedRuleNames.contains("any_name")) {
             addTableNameSuggestions(suggests, syntacticResults);
-            return suggests;
         }
 
-        if (!blocked && (matchedRuleNames.contains("qualified_name"))) {
+        if (matchedRuleNames.contains("qualified_name")) {
             addTableNameSuggestions(suggests, syntacticResults);
-            return suggests;
         }
 
-
-        if (!blocked && (matchedRuleNames.contains("columnref") || matchedRuleNames.contains("colid"))) {
+        if (matchedRuleNames.contains("columnref") || matchedRuleNames.contains("colid")) {
             addColumnSuggestions(suggests, semanticResult);
         }
 

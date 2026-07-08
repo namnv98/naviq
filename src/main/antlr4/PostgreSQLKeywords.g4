@@ -1030,7 +1030,7 @@ bare_label_keyword
 plsql_unreserved_keyword
    : ABSOLUTE_P
    | ALIAS
-   | AND
+//   | AND
    | ARRAY
    | ASSERT
    | BACKWARD

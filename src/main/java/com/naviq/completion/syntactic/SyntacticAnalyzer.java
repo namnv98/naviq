@@ -75,12 +75,6 @@ public class SyntacticAnalyzer {
         m.put(PostgreSQLParser.RULE_table_alias, true);     // tableAlias
         m.put(PostgreSQLParser.RULE_colid, true);
 
-        m.put(PostgreSQLParser.RULE_reserved_keyword, true);
-        m.put(PostgreSQLParser.RULE_unreserved_keyword, true);
-        m.put(PostgreSQLParser.RULE_col_name_keyword, true);
-        m.put(PostgreSQLParser.RULE_type_func_name_keyword, true);
-        m.put(PostgreSQLParser.RULE_bare_label_keyword, true);
-        m.put(PostgreSQLParser.RULE_plsql_unreserved_keyword, true);
         return m;
     }
 

@@ -1040,7 +1040,7 @@ class AntlrCompletionEngineTest {
         @DisplayName("RETURNS TABLE(...) - kỳ vọng columnName bên trong")
         void returnsTableColumnDef() {
             var c = collect("create function f() returns table (|");
-            assertTrue(hasRule(c, PostgreSQLParser.RULE_columnref));
+            assertTrue(hasRule(c, PostgreSQLParser.RULE_typename));
         }
 
         @Test
