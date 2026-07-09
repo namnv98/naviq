@@ -53,7 +53,6 @@ public class CompletionEngine {
             addKeywordSuggestions(suggests, entry.getKey());
         }
 
-
         Set<String> matchedRuleNames = KeywordNoiseFilter.computeMatchedRuleNames(syntacticResults, syntacticCursor);
 
         if (matchedRuleNames.contains("typename")) {
@@ -72,11 +71,37 @@ public class CompletionEngine {
             addTableNameSuggestions(suggests, syntacticResults);
         }
 
-        if (matchedRuleNames.contains("columnref") || matchedRuleNames.contains("colid")) {
+        if (matchedRuleNames.contains("columnref")) {
+            addColumnSuggestions(suggests, semanticResult);
+        }
+
+        boolean isColidAlias = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_relation_expr_opt_alias); // DELETE FROM ... (colid = alias)
+        boolean isColidDropTarget = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_alter_table_cmd);  // ALTER TABLE ... DROP COLUMN (colid = tên cột bị xoá)
+        boolean isColumnrefColumn = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_columnref);   // WHERE u.| (colid bên trong columnref)
+        boolean isColidIndexColumn = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_index_elem); // CREATE INDEX ... (col) (colid = cột lập index)
+        boolean isColidSetTarget = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_set_target); // UPDATE SET / INSERT ON CONFLICT DO UPDATE SET (colid = assignment-target)
+        boolean isColidUsingClauseColumn = isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_join_qual); // JOIN ... USING (col1, col2) (colid = cột chung 2 bảng)
+
+        if (matchedRuleNames.contains("colid") && (isColidDropTarget || isColumnrefColumn || isColidIndexColumn|| isColidSetTarget || isColidUsingClauseColumn)) {
             addColumnSuggestions(suggests, semanticResult);
         }
 
         return suggests;
+    }
+
+    private static boolean isRuleInContext(SyntacticAnalyzer.Result syn, int ruleId, int expectedParentRuleId) {
+        List<AntlrCompletionEngine.RuleFrame> path = syn.candidates().rules.get(ruleId);
+        if (path == null || path.isEmpty()) return false;
+        // Frame CUỐI CÙNG trong path (ancestor gần nhất) chính là rule cha
+        // trực tiếp đã dẫn tới rule này - đây là thứ quyết định ngữ nghĩa.
+        int immediateParent = path.get(path.size() - 1).ruleId();
+        return immediateParent == expectedParentRuleId;
+    }
+
+    private static boolean isRuleAncestorAnywhere(SyntacticAnalyzer.Result syn, int ruleId, int ancestorRuleIdToFind) {
+        List<AntlrCompletionEngine.RuleFrame> path = syn.candidates().rules.get(ruleId);
+        if (path == null) return false;
+        return path.stream().anyMatch(f -> f.ruleId() == ancestorRuleIdToFind);
     }
 
     private static void addKeywordSuggestions(List<Suggest> suggests, Integer key) {

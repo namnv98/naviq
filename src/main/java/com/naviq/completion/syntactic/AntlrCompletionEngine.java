@@ -157,13 +157,6 @@ public class AntlrCompletionEngine {
     private void processTransition(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue, Set<Integer> endIndices) {
         RuleCallStack stack = cur.stackSnapshot();
         if (t instanceof RuleTransition rt) {
-            if (rt.target.ruleIndex == PostgreSQLParser.RULE_table_alias
-                    || rt.target.ruleIndex == PostgreSQLParser.RULE_table_alias_clause
-                    || rt.target.ruleIndex == PostgreSQLParser.RULE_opt_alias_clause) {
-                System.out.println("DIVE into=" + parser.getRuleNames()[rt.target.ruleIndex]
-                        + " at tokenIndex=" + cur.tokenIndex()
-                        + " fromState=" + cur.state.stateNumber);
-            }
             for (int end : traverseATN(rt.target, cur.tokenIndex(), stack)) {
                 queue.push(new PipelineEntry(rt.followState, end, stack));
             }
