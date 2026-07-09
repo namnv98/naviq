@@ -345,43 +345,72 @@ public class AntlrCompletionEngine {
         public static final int NO_TOKEN = -1;
     }
 
-    public static class RuleCallStack {
-        private final List<RuleFrame> frameList = new ArrayList<>();
-        private final Map<Integer, Integer> refCount = new HashMap<>();
+    public static final class RuleCallStack {
+        private static final class Node {
+            final RuleFrame frame;
+            final Node parent;
+            Node(RuleFrame frame, Node parent) {
+                this.frame = frame;
+                this.parent = parent;
+            }
+        }
+
+        private Node head;
+        private int size;
+
+        public RuleCallStack() {
+            this.head = null;
+            this.size = 0;
+        }
+
+        private RuleCallStack(Node head, int size) {
+            this.head = head;
+            this.size = size;
+        }
 
         public void push(int ruleId, int tokenIndex) {
-            frameList.add(new RuleFrame(ruleId, tokenIndex));
-            refCount.merge(ruleId, 1, Integer::sum);
+            head = new Node(new RuleFrame(ruleId, tokenIndex), head);
+            size++;
         }
 
         public RuleFrame pop() {
-            RuleFrame f = frameList.remove(frameList.size() - 1);
-            int cnt = refCount.get(f.ruleId) - 1;
-            if (cnt <= 0) refCount.remove(f.ruleId);
-            else refCount.put(f.ruleId, cnt);
+            if (head == null) {
+                throw new NoSuchElementException("RuleCallStack is empty");
+            }
+            RuleFrame f = head.frame;
+            head = head.parent;
+            size--;
             return f;
         }
 
         public boolean contains(int ruleId) {
-            return refCount.getOrDefault(ruleId, 0) > 0;
+            for (Node n = head; n != null; n = n.parent) {
+                if (n.frame.ruleId() == ruleId) return true;
+            }
+            return false;
         }
 
         public int size() {
-            return frameList.size();
+            return size;
         }
 
         public List<RuleFrame> frames() {
-            return frameList;
+            RuleFrame[] arr = new RuleFrame[size];
+            int i = size - 1;
+            for (Node n = head; n != null; n = n.parent) {
+                arr[i--] = n.frame;
+            }
+            return Arrays.asList(arr);
         }
 
         public void appendPath(RuleCallStack other) {
-            for (RuleFrame f : other.frameList) push(f.ruleId, f.tokenIndex);
+            for (RuleFrame f : other.frames()) {
+                push(f.ruleId(), f.tokenIndex());
+            }
         }
 
         public RuleCallStack copy() {
-            RuleCallStack c = new RuleCallStack();
-            for (RuleFrame f : frameList) c.push(f.ruleId, f.tokenIndex);
-            return c;
+            return new RuleCallStack(head, size);
         }
     }
 
