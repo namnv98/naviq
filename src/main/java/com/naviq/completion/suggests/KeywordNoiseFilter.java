@@ -55,8 +55,9 @@ public class KeywordNoiseFilter {
         CommonTokenStream ts = syn.tokenStream();
         int caretTokenIndex = syn.caretTokenIndex();
 
-        int lastRealTokenIndex = computeLastRealTokenIndex(ts, caretTokenIndex);
-        Token lastReal = findLastRealToken(ts, caretTokenIndex);
+        LastRealInfo lastRealInfo = findLastReal(ts, caretTokenIndex);
+        int lastRealTokenIndex = lastRealInfo == null ? -1 : lastRealInfo.compactIndex();
+        Token lastReal = lastRealInfo == null ? null : lastRealInfo.token();
         boolean hasGapBeforeCaret = computeHasGapBeforeCaret(lastReal, cursorOffset);
         boolean rightAfterDot = lastReal != null && lastReal.getType() == PostgreSQLParser.DOT;
 
@@ -105,59 +106,25 @@ public class KeywordNoiseFilter {
         return result;
     }
 
-    // ── Token-stream helpers ─────────────────────────────────────────────────
-
-
-    /**
-     * BUG FIX: bản trước dùng trực tiếp {@code i} (raw index trong CommonTokenStream, TÍNH CẢ token
-     * whitespace nằm trên hidden channel - mỗi token WS vẫn chiếm 1 slot index riêng) làm
-     * "lastRealTokenIndex", rồi so sánh với {@code RuleFrame.tokenIndex()}/
-     * {@code ruleEntryTokenIndex} - nhưng 2 giá trị này KHÔNG CÙNG THANG ĐO:
-     * {@code AntlrCompletionEngine.readTokens} xây danh sách token nội bộ bằng
-     * {@code stream.LT(i)}, mà theo hành vi mặc định của ANTLR, LT() TỰ ĐỘNG BỎ QUA token
-     * hidden-channel - nên mọi {@code tokenIndex} dùng xuyên suốt
-     * {@code traverseATN}/{@code RuleFrame} là CHỈ SỐ NÉN (compact, chỉ đếm token thật: select=0,
-     * *=1, from=2, public=3, ...), KHÁC HẲN chỉ số thô của {@code ts.get(i)} (raw, đếm cả WS:
-     * select=0, WS=1, *=2, WS=3, ...). So sánh trực tiếp 2 con số từ 2 thang đo khác nhau (vd
-     * compact 7 vs raw 10) cho ra kết quả sai hoàn toàn, dù bản thân từng con số riêng lẻ đều
-     * "đúng" theo thang của nó.
-     * <p>
-     * FIX: đếm lại theo ĐÚNG cách readTokens/stream.LT đếm - chỉ tăng biến đếm khi gặp token
-     * on-channel, non-EOF - để cho ra cùng 1 thang đo với
-     * RuleFrame.tokenIndex()/ruleEntryTokenIndex.
-     */
-    private static int computeLastRealTokenIndex(CommonTokenStream ts, int caretRawTokenIndex) {
-        int compactIndex = -1;
-        for (int i = 0; i < caretRawTokenIndex; i++) {
-            Token t = ts.get(i);
-            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
-                continue;
-            }
-            if (t.getType() == Token.EOF) {
-                continue;
-            }
-            compactIndex++;
-        }
-        return compactIndex; // -1 nếu chưa gõ token thật nào
-    }
 
     /**
      * Trả về Token object của token thật cuối cùng trước caret (dùng để check type == DOT và
      * getStopIndex() cho gap-detection) - lấy bằng cách duyệt raw stream lùi từ caretRawTokenIndex,
      * KHÔNG cần quy đổi thang đo vì đây chỉ dùng token OBJECT, không dùng chỉ số của nó.
      */
-    private static Token findLastRealToken(CommonTokenStream ts, int caretRawTokenIndex) {
-        for (int i = caretRawTokenIndex - 1; i >= 0; i--) {
+    private record LastRealInfo(Token token, int compactIndex) {}
+
+    private static LastRealInfo findLastReal(CommonTokenStream ts, int caretRawTokenIndex) {
+        Token found = null;
+        int compactIndex = -1;
+        for (int i = 0; i < caretRawTokenIndex; i++) {
             Token t = ts.get(i);
-            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
-                continue;
-            }
-            if (t.getType() == Token.EOF) {
-                continue;
-            }
-            return t;
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) continue;
+            if (t.getType() == Token.EOF) continue;
+            found = t;
+            compactIndex++;
         }
-        return null;
+        return found == null ? null : new LastRealInfo(found, compactIndex);
     }
 
     /**
