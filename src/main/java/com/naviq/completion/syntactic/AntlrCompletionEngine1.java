@@ -1,7 +1,5 @@
 package com.naviq.completion.syntactic;
 
-import com.naviq.antlr4.PostgreSQLParser;
-import com.naviq.datasource.SchemaIndex;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
@@ -15,7 +13,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class AntlrCompletionEngine1 {
 
     public final Map<Integer, Boolean> ignoredTokens;
-    public final Map<Integer, Boolean> preferredRules;
+    private Map<Integer, Boolean> preferredRules;
 
     private final Parser parser;
     private final ATN atn;
@@ -24,6 +22,7 @@ public class AntlrCompletionEngine1 {
     // Per-call state
     private CandidatesCollection candidates;
     private List<InputToken> tokens;
+    private int tokenStartIndex;
     // Rule index -> token index -> set of end token indices already computed for that
     // (rule, tokenIndex) combination. This is what bounds the walk: ANTLR4 eliminates
     // left recursion when it builds the ATN, so a rule can never call back into itself
@@ -44,24 +43,38 @@ public class AntlrCompletionEngine1 {
         this.followSetsByState = Objects.requireNonNull(followSetsByState);
     }
 
+    public Map<Integer, Boolean> getPreferredRules() {
+        return Collections.unmodifiableMap(preferredRules);
+    }
+
+    public void setPreferredRules(Map<Integer, Boolean> preferredRules) {
+        this.preferredRules = new HashMap<>(Objects.requireNonNull(preferredRules));
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     public CandidatesCollection collectCandidates(int caretTokenIndex) {
+        return collectCandidates(caretTokenIndex, null);
+    }
+
+    public CandidatesCollection collectCandidates(int caretTokenIndex, ParserRuleContext context) {
         if (caretTokenIndex < 0)
             throw new IllegalArgumentException("caretTokenIndex must be >= 0");
         candidates = new CandidatesCollection();
         shortcutMap = new HashMap<>();
-        tokens = readTokens(parser.getTokenStream(), caretTokenIndex);
-        traverseATN(atn.ruleToStartState[0], 0, new RuleCallStack());
+        tokenStartIndex = context != null ? context.start.getTokenIndex() : 0;
+        int startRuleIndex = context != null ? context.getRuleIndex() : 0;
+        tokens = readTokens(parser.getTokenStream(), tokenStartIndex, caretTokenIndex);
+        traverseATN(atn.ruleToStartState[startRuleIndex], 0, new RuleCallStack());
         computeRulePositions();
         return candidates;
     }
 
     // ── Token stream ──────────────────────────────────────────────────────────
 
-    private static List<InputToken> readTokens(TokenStream stream, int caretTokenIndex) {
+    private static List<InputToken> readTokens(TokenStream stream, int tokenStartIndex, int caretTokenIndex) {
         int saved = stream.index();
-        stream.seek(0);
+        stream.seek(tokenStartIndex);
         List<InputToken> result = new ArrayList<>();
         for (int i = 1; ; i++) {
             var t = stream.LT(i);
