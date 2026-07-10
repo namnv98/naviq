@@ -2,32 +2,26 @@ package com.naviq;
 
 import com.naviq.antlr4.PostgreSQLLexer;
 import com.naviq.antlr4.PostgreSQLParser;
+import com.naviq.antlr4.PostgreSQLTestParser;
 import com.naviq.completion.syntactic.AntlrCompletionEngine;
+import com.naviq.completion.syntactic.AtnDotExporter;
 import com.naviq.completion.syntactic.SyntacticAnalyzer;
 import com.vmware.antlr4c3.CodeCompletionCore;
 import org.antlr.v4.runtime.*;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.*;
 
 public class Main {
 
     public static void main(String[] args) {
-
-        String sql = "alter table public.users drop column ";
-
-        // ===================== My Engine =====================
-
-        SyntacticAnalyzer.Result my = SyntacticAnalyzer.analyze(sql, sql.length());
-
-        // ===================== ANTLR4-C3 =====================
-
+        String sql = "select * from ";
         CharStream input = CharStreams.fromString(sql);
-
         PostgreSQLLexer lexer = new PostgreSQLLexer(input);
         CommonTokenStream tokenStream = new CommonTokenStream(lexer);
-
         PostgreSQLParser parser = new PostgreSQLParser(tokenStream);
-        parser.removeErrorListeners();
+        Vocabulary vocabulary = parser.getVocabulary();
 
         PostgreSQLParser.RootContext root;
         try {
@@ -61,39 +55,13 @@ public class Main {
         Map<Integer, Boolean> m = new HashMap<>();
 
 
-        CodeCompletionCore core = new CodeCompletionCore(
-                parser,
-                preferredRules,
-                m.keySet()
-        );
+        CodeCompletionCore core = new CodeCompletionCore(parser, preferredRules, m.keySet());
 
         var c3 = core.collectCandidates(caretTokenIndex, root);
 
-        Vocabulary vocabulary = parser.getVocabulary();
-
-        // ============================================================
-        // RULES
-        // ============================================================
-
-        Set<Integer> myRules = new TreeSet<>(my.candidates().rules.keySet());
-        Set<Integer> c3Rules = new TreeSet<>(c3.rules.keySet());
-
-        printRules("My Rules", my.candidates().rules, parser);
         printC3Rules("ANTLR4-C3 Rules", c3.rules, parser);
-
-        compareRules(myRules, c3Rules, parser);
-
-        // ============================================================
-        // TOKENS
-        // ============================================================
-
-        Set<Integer> myTokens = new TreeSet<>(my.candidates().tokens.keySet());
-        Set<Integer> c3Tokens = new TreeSet<>(c3.tokens.keySet());
-
-        printTokens("My Tokens", my.candidates().tokens, vocabulary);
         printC3Tokens("ANTLR4-C3 Tokens", c3.tokens, vocabulary);
 
-        compareTokens(myTokens, c3Tokens, vocabulary);
     }
 
     // ============================================================

@@ -1,4 +1,4 @@
-grammar PostgreSQL;
+grammar PostgreSQLTest;
 
 @header {
 package com.naviq.antlr4;

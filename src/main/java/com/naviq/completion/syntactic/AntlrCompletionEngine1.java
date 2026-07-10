@@ -4,40 +4,63 @@ import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.TokenStream;
+import org.antlr.v4.runtime.Vocabulary;
 import org.antlr.v4.runtime.atn.*;
 import org.antlr.v4.runtime.misc.IntervalSet;
 
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
 
 public class AntlrCompletionEngine1 {
+
+    public boolean showResult = false;
+    public boolean showDebugOutput = false;
+    public boolean debugOutputWithTransitions = false;
+    public boolean showRuleStack = false;
+
+    private static final String[] ATN_STATE_TYPE_MAP = {
+            "invalid",
+            "basic",
+            "rule start",
+            "block start",
+            "plus block start",
+            "star block start",
+            "token start",
+            "rule stop",
+            "block end",
+            "star loop back",
+            "star loop entry",
+            "plus loop back",
+            "loop end"
+    };
+
+    private int statesProcessed = 0;
 
     public final Map<Integer, Boolean> ignoredTokens;
     private Map<Integer, Boolean> preferredRules;
 
     private final Parser parser;
     private final ATN atn;
+    private final Vocabulary vocabulary;
+    private final String[] ruleNames;
     private final FollowSetsByState followSetsByState;
 
     // Per-call state
     private CandidatesCollection candidates;
     private List<InputToken> tokens;
     private int tokenStartIndex;
-    // Rule index -> token index -> set of end token indices already computed for that
-    // (rule, tokenIndex) combination. This is what bounds the walk: ANTLR4 eliminates
-    // left recursion when it builds the ATN, so a rule can never call back into itself
-    // (directly or through other rules) at the same token position without consuming
-    // at least one token first. That means a rule can only be re-entered at strictly
-    // increasing token positions, which are finite (bounded by tokens.size()) — so this
-    // shortcut cache alone is enough to guarantee termination, no depth counter needed.
+
     private Map<Integer, Map<Integer, Set<Integer>>> shortcutMap;
 
     public AntlrCompletionEngine1(Parser parser,
-                                 Map<Integer, Boolean> ignoredTokens,
-                                 Map<Integer, Boolean> preferredRules,
-                                 FollowSetsByState followSetsByState) {
+                                  Map<Integer, Boolean> ignoredTokens,
+                                  Map<Integer, Boolean> preferredRules,
+                                  FollowSetsByState followSetsByState) {
         this.parser = Objects.requireNonNull(parser);
         this.atn = parser.getATN();
+        this.vocabulary = parser.getVocabulary();
+        this.ruleNames = parser.getRuleNames();
         this.ignoredTokens = Objects.requireNonNull(ignoredTokens);
         this.preferredRules = Objects.requireNonNull(preferredRules);
         this.followSetsByState = Objects.requireNonNull(followSetsByState);
@@ -62,12 +85,45 @@ public class AntlrCompletionEngine1 {
             throw new IllegalArgumentException("caretTokenIndex must be >= 0");
         candidates = new CandidatesCollection();
         shortcutMap = new HashMap<>();
+        statesProcessed = 0;
         tokenStartIndex = context != null ? context.start.getTokenIndex() : 0;
         int startRuleIndex = context != null ? context.getRuleIndex() : 0;
         tokens = readTokens(parser.getTokenStream(), tokenStartIndex, caretTokenIndex);
-        traverseATN(atn.ruleToStartState[startRuleIndex], 0, new RuleCallStack());
+        traverseATN(atn.ruleToStartState[startRuleIndex], 0, new RuleCallStack(), 0);
         computeRulePositions();
+
+        if (showResult) {
+            printResult();
+        }
+
         return candidates;
+    }
+
+    private void printResult() {
+        System.out.println("States processed: " + statesProcessed);
+
+        System.out.println("\n\nCollected rules:\n");
+        for (Map.Entry<Integer, List<RuleFrame>> entry : candidates.rules.entrySet()) {
+            String path = entry.getValue().stream()
+                    .map(frame -> ruleNames[frame.ruleId()])
+                    .collect(Collectors.joining(" "));
+            System.out.println(ruleNames[entry.getKey()] + ", path: " + path);
+        }
+
+        Set<String> sortedTokens = new TreeSet<>();
+        for (Map.Entry<Integer, List<Integer>> entry : candidates.tokens.entrySet()) {
+            StringBuilder value = new StringBuilder(vocabulary.getDisplayName(entry.getKey()));
+            for (int following : entry.getValue()) {
+                value.append(" ").append(vocabulary.getDisplayName(following));
+            }
+            sortedTokens.add(value.toString());
+        }
+
+        System.out.println("\n\nCollected tokens:\n");
+        for (String symbol : sortedTokens) {
+            System.out.println(symbol);
+        }
+        System.out.println("\n\n");
     }
 
     // ── Token stream ──────────────────────────────────────────────────────────
@@ -88,12 +144,6 @@ public class AntlrCompletionEngine1 {
     }
 
     // ── Rule start/end offset post-processing ──────────────────────────────────
-
-    /**
-     * For every preferred rule that was actually hit during the walk, find its
-     * right-most occurrence in shortcutMap and translate the (start token, end
-     * token) pair into character offsets into the original input.
-     */
     private void computeRulePositions() {
         for (int ruleId : preferredRules.keySet()) {
             Map<Integer, Set<Integer>> positionMap = shortcutMap.get(ruleId);
@@ -124,10 +174,15 @@ public class AntlrCompletionEngine1 {
 
     /**
      * Returns token indices where this rule can end (so caller can follow).
+     * indentation: chỉ dùng cho mục đích in log debug theo cây thụt lề (giống c3),
+     * không ảnh hưởng logic.
      */
-    private Set<Integer> traverseATN(ATNState start, int tokenIndex, RuleCallStack stack) {
+    private Set<Integer> traverseATN(ATNState start, int tokenIndex, RuleCallStack stack, int indentation) {
         Map<Integer, Set<Integer>> positionMap = shortcutMap.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
         if (positionMap.containsKey(tokenIndex)) {
+            if (showDebugOutput) {
+                System.out.println("=====> shortcut");
+            }
             return positionMap.get(tokenIndex);
         }
 
@@ -155,7 +210,7 @@ public class AntlrCompletionEngine1 {
             return result;
         }
 
-        result = runBFS(start, tokenIndex, entered);
+        result = runBFS(start, tokenIndex, entered, indentation);
         positionMap.put(tokenIndex, result);
         return result;
     }
@@ -191,7 +246,7 @@ public class AntlrCompletionEngine1 {
     /**
      * BFS over ATN transitions.
      */
-    private Set<Integer> runBFS(ATNState start, int startTokenIndex, RuleCallStack stack) {
+    private Set<Integer> runBFS(ATNState start, int startTokenIndex, RuleCallStack stack, int indentation) {
         Set<Integer> endIndices = new HashSet<>();
         Set<String> visited = new HashSet<>();
         Deque<PipelineEntry> queue = new ArrayDeque<>();
@@ -202,8 +257,16 @@ public class AntlrCompletionEngine1 {
             if (!visited.add(cur.state.stateNumber + ":" + cur.tokenIndex())) {
                 continue;
             }
+            statesProcessed++;
 
             boolean atCaret = cur.tokenIndex() >= tokens.size() - 1;
+
+            if (showDebugOutput) {
+                printDescription(indentation, cur.state(), generateBaseDescription(cur.state()), cur.tokenIndex());
+                if (showRuleStack) {
+                    printRuleState(cur.stackSnapshot());
+                }
+            }
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
                 endIndices.add(cur.tokenIndex());
@@ -213,16 +276,16 @@ public class AntlrCompletionEngine1 {
                 candidates.caretStates.add(cur.state());
             }
             for (Transition t : cur.state().getTransitions()) {
-                processTransition(t, cur, atCaret, queue, endIndices);
+                processTransition(t, cur, atCaret, queue, endIndices, indentation);
             }
         }
         return endIndices;
     }
 
-    private void processTransition(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue, Set<Integer> endIndices) {
+    private void processTransition(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue, Set<Integer> endIndices, int indentation) {
         RuleCallStack stack = cur.stackSnapshot();
         if (t instanceof RuleTransition rt) {
-            for (int end : traverseATN(rt.target, cur.tokenIndex(), stack)) {
+            for (int end : traverseATN(rt.target, cur.tokenIndex(), stack, indentation + 1)) {
                 queue.push(new PipelineEntry(rt.followState, end, stack));
             }
         } else if (t instanceof PredicateTransition pt) {
@@ -291,28 +354,15 @@ public class AntlrCompletionEngine1 {
             if (isMoreRelevant(frame.tokenIndex(), existingEntryIndex)) {
                 candidates.rules.put(frame.ruleId, path);
                 candidates.ruleEntryTokenIndex.put(frame.ruleId, frame.tokenIndex()); // ← lưu tokenIndex CHÍNH rule này
+                if (showDebugOutput) {
+                    System.out.println("=====> collected: " + ruleNames[frame.ruleId]);
+                }
             }
             return true;   // stop at the first (outermost) match
         }
         return false;
     }
 
-    /**
-     * Decides whether a newly-found occurrence of a preferred rule should replace whatever
-     * occurrence is already recorded for it.
-     * <p>
-     * A rule can genuinely be reached through several different ATN paths at the same
-     * caret: e.g. a keyword that also happens to be a valid unreserved identifier (so the
-     * SAME rule gets entered once via real traversal, having "eaten" that keyword as if it
-     * were the identifier), AND separately via the static follow-set closure showing the
-     * rule is ALSO reachable with zero further consumption from here (sentinel
-     * {@link RuleFrame#NO_TOKEN}). The sentinel occurrence is always the most relevant one
-     * for completion purposes - it means "this rule is exactly what should be typed right
-     * now" - so it must always win over any real, already-consumed occurrence, no matter
-     * how large that occurrence's own tokenIndex is. Among two REAL occurrences, the one
-     * closer to the caret (larger tokenIndex) wins, since it reflects the most current
-     * parse state.
-     */
     private static boolean isMoreRelevant(int candidateTokenIndex, Integer existingTokenIndex) {
         if (existingTokenIndex == null) {
             return true;
@@ -416,6 +466,68 @@ public class AntlrCompletionEngine1 {
 
     private boolean checkPredicate(PredicateTransition t) {
         return t.getPredicate().eval(parser, ParserRuleContext.EMPTY);
+    }
+
+    // ── Debug printing (giống c3) ────────────────────────────────────────────────
+
+    private String generateBaseDescription(ATNState state) {
+        String stateValue = state.stateNumber == ATNState.INVALID_STATE_NUMBER ? "Invalid" : String.valueOf(state.stateNumber);
+        String typeName = ATN_STATE_TYPE_MAP[state.getStateType()];
+        return "[" + stateValue + " " + typeName + "] in " + ruleNames[state.ruleIndex];
+    }
+
+    private void printDescription(int indentation, ATNState state, String baseDescription, int tokenIndex) {
+        String indent = String.join("", Collections.nCopies(indentation, "  "));
+        StringBuilder output = new StringBuilder(indent);
+
+        StringBuilder transitionDescription = new StringBuilder();
+        if (debugOutputWithTransitions) {
+            for (Transition transition : state.getTransitions()) {
+                StringBuilder labels = new StringBuilder();
+                IntervalSet label = transition.label();
+                List<Integer> symbols = label != null ? label.toList() : Collections.emptyList();
+
+                if (symbols.size() > 2) {
+                    labels.append(vocabulary.getDisplayName(symbols.get(0)))
+                            .append(" .. ")
+                            .append(vocabulary.getDisplayName(symbols.get(symbols.size() - 1)));
+                } else {
+                    for (int symbol : symbols) {
+                        if (labels.length() > 0) {
+                            labels.append(", ");
+                        }
+                        labels.append(vocabulary.getDisplayName(symbol));
+                    }
+                }
+
+                if (labels.length() == 0) {
+                    labels.append("ε");
+                }
+
+                String typeName = ATN_STATE_TYPE_MAP[transition.target.getStateType()];
+                transitionDescription.append("\n").append(indent).append("\t(").append(labels)
+                        .append(") [").append(transition.target.stateNumber).append(" ")
+                        .append(typeName).append("] in ").append(ruleNames[transition.target.ruleIndex]);
+            }
+        }
+
+        if (tokenIndex >= tokens.size() - 1) {
+            output.append("<<").append(tokenStartIndex + tokenIndex).append(">> ");
+        } else {
+            output.append("<").append(tokenStartIndex + tokenIndex).append("> ");
+        }
+        System.out.println(output + "Current state: " + baseDescription + transitionDescription);
+    }
+
+    private void printRuleState(RuleCallStack stack) {
+        List<RuleFrame> frames = stack.frames();
+        if (frames.isEmpty()) {
+            System.out.println("<empty stack>");
+            return;
+        }
+        for (RuleFrame frame : frames) {
+            System.out.println(ruleNames[frame.ruleId()]);
+        }
     }
 
     // ── Data types ────────────────────────────────────────────────────────────
