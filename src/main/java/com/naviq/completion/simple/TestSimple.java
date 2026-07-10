@@ -12,7 +12,7 @@ import java.util.Set;
 
 public class TestSimple {
     public static void main(String[] args) {
-        String sql = "select * from ";
+        String sql = "select * from demo where";
 
         CharStream input = CharStreams.fromString(sql);
         PostgreSQLLexer lexer = new PostgreSQLLexer(input);
@@ -56,11 +56,9 @@ public class TestSimple {
                         buildIgnoredTokens(),
                         buildPreferredRules());
 
-        Set<Integer> simpleTokens =
-                engine.collectCandidates(caretTokenIndex);
+        Set<Integer> simpleTokens = engine.collectCandidates(caretTokenIndex);
 
-        Set<Integer> simpleRules =
-                engine.getSuggestedRules();
+        Set<Integer> simpleRules = engine.getSuggestedRules();
 
         // =====================================================
         // Print C3

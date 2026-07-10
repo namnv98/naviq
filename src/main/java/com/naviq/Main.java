@@ -2,7 +2,6 @@ package com.naviq;
 
 import com.naviq.antlr4.PostgreSQLLexer;
 import com.naviq.antlr4.PostgreSQLParser;
-import com.naviq.antlr4.PostgreSQLTestParser;
 import com.naviq.completion.syntactic.AntlrCompletionEngine;
 import com.naviq.completion.syntactic.AtnDotExporter;
 import com.naviq.completion.syntactic.SyntacticAnalyzer;
