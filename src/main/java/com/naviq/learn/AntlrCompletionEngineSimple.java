@@ -1,4 +1,4 @@
-package com.naviq.completion.simple;
+package com.naviq.learn;
 
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
@@ -254,26 +254,36 @@ public class AntlrCompletionEngineSimple {
                 // (chỉ chặn trùng CÙNG 1 phòng — 2 phòng khác nhau cùng tokenIndex
                 // vẫn được coi là 2 entry riêng, không bị gộp lại ở đây)
             }
-            boolean atCaret = isAtCaret(cur.tokenIndex);
 
             if (cur.state.getStateType() == ATNState.RULE_STOP) {
-                if (atCaret && preferredRules.containsKey(start.ruleIndex)) {
+                // MỚI: nếu đúng lúc "hết mê cung" này cũng là lúc hết lời để nói
+                // (caret), VÀ chính mê cung này (start.ruleIndex — không đổi
+                // suốt cả hàm, vì BFS không bao giờ trôi sang rule khác) là 1
+                // rule đặc biệt, phải ghi nhận NGAY TẠI ĐÂY. Không thể chờ tới
+                // enterRule() xử lý vì lần "hoàn thành" này có thể xảy ra GIỮA
+                // CHỪNG 1 lời gọi walkRuleBody đang chạy dở (ví dụ resume từ 1
+                // mê cung con optional vừa thoát), không đi qua enterRule() lần
+                // nào nữa cả.
+                if (isAtCaret(cur.tokenIndex) && preferredRules.containsKey(start.ruleIndex)) {
                     suggestedRules.add(start.ruleIndex);
                 }
-                ruleExits.add(cur.tokenIndex);
+                ruleExits.add(cur.tokenIndex); // "hết mê cung" -> ghi nhận đây là 1 điểm thoát ra được
                 continue;
             }
 
+            boolean atCaret = isAtCaret(cur.tokenIndex);
             for (Transition t : cur.state.getTransitions()) {
                 if (t instanceof RuleTransition rt) {
-                    handleRuleDoor(rt, cur, queue); // Cửa vào mê cung con
+                    handleRuleDoor(rt, cur, queue);
                 } else if (t instanceof PredicateTransition pt) {
-                    handleFreeDoorWithCondition(pt, cur, queue); // Cửa miễn phí có kèm điều kiện
+                    handleFreeDoorWithCondition(pt, cur, queue);
+                } else if (t instanceof WildcardTransition wt) {
+                    handleWildcardDoor(wt, cur, atCaret, start.ruleIndex, queue);
                 } else if (t.isEpsilon()) {
-                    handleFreeDoor(t, cur, queue); //  Cửa miễn phí bình thường
+                    handleFreeDoor(t, cur, queue);
                 } else {
-                    //Cửa cần mật khẩu mọi loại còn lại (ATOM, SET, NOT_SET, RANGE, WILDCARD, PRECEDENCE...) đều là cửa cần mật khẩu
-                    handlePasswordDoor(t, cur, atCaret, queue);
+                    // Mọi loại còn lại (ATOM, SET, NOT_SET, RANGE, PRECEDENCE...) đều là cửa cần mật khẩu
+                    handlePasswordDoor(t, cur, atCaret, start.ruleIndex, queue);
                 }
             }
         }
@@ -312,13 +322,22 @@ public class AntlrCompletionEngineSimple {
     }
 
     /**
-     * Cửa cần mật khẩu (Atom / Set / NotSet / Wildcard) — nơi thật sự sinh ra
-     * gợi ý. Nếu đã hết lời để nói (tại caret), tên mật khẩu trên cửa này CHÍNH
-     * LÀ gợi ý (trừ khi nó nằm trong ignoredTokens). Nếu còn lời, ta so xem lời
-     * tiếp theo có đúng mật khẩu không: đúng thì bước qua và tốn 1 lời, sai thì
-     * im lặng — coi như ngõ cụt, không đi tiếp được từ đây.
+     * Cửa cần mật khẩu (Atom / Set / NotSet) — nơi thật sự sinh ra gợi ý. Nếu
+     * đã hết lời để nói (tại caret): trước tiên kiểm tra xem chính mê cung
+     * đang chạy ({@code runningRuleIndex}) có phải mê cung đặc biệt không —
+     * nếu có, chốt luôn tên mê cung đó (kể cả khi caret đang ở GIỮA thân rule,
+     * không phải lúc vừa vào hay vừa thoát), KHÔNG liệt kê token trần trụi
+     * nữa. Nếu không đặc biệt, tên mật khẩu trên cửa này CHÍNH LÀ gợi ý (trừ
+     * khi nó nằm trong ignoredTokens). Nếu còn lời, so xem lời tiếp theo có
+     * đúng mật khẩu không: đúng thì bước qua và tốn 1 lời, sai thì im lặng —
+     * coi như ngõ cụt, không đi tiếp được từ đây.
+     * <p>
+     * LƯU Ý: chỉ biết {@code runningRuleIndex} là mê cung hiện tại, không biết
+     * toàn bộ đường đi lồng nhau outer->inner (khác bản đầy đủ có RuleCallStack)
+     * — nên nếu có 2 mê cung đặc biệt lồng nhau, đây không đảm bảo luôn chọn
+     * đúng cái ngoài cùng nhất trong mọi trường hợp.
      */
-    private void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
+    private void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, int runningRuleIndex, Deque<PipelineEntry> queue) {
         IntervalSet label = t.label();
         if (label == null || label.size() == 0) return;
         if (t instanceof NotSetTransition) {
@@ -326,6 +345,10 @@ public class AntlrCompletionEngineSimple {
         }
 
         if (atCaret) {
+            if (preferredRules.containsKey(runningRuleIndex)) {
+                suggestedRules.add(runningRuleIndex);
+                return; // đã quy về mê cung đặc biệt -> khỏi liệt kê token trần trụi
+            }
             for (int sym : label.toList()) {
                 if (!ignoredTokens.containsKey(sym)) {
                     suggestedTokens.add(sym);
@@ -335,6 +358,32 @@ public class AntlrCompletionEngineSimple {
             queue.push(new PipelineEntry(t.target, cur.tokenIndex + 1));
         }
         // Sai mật khẩu -> không push gì cả -> nhánh này chết ở đây, không đi tiếp được.
+    }
+
+    /**
+     * Cửa "gõ gì cũng được" (dấu {@code .} trong grammar) — {@code label()}
+     * của nó luôn null, nên KHÔNG được rơi vào handlePasswordDoor (dòng đầu
+     * hàm đó sẽ return ngay vì label null, coi như ngõ cụt sai — đây từng là
+     * 1 lỗ hổng thật của bản trước khi tách riêng handler này). Nếu còn lời,
+     * bất kỳ token nào cũng khớp được, cứ ăn và đi tiếp. Nếu hết lời (caret),
+     * kiểm tra mê cung đặc biệt giống hệt handlePasswordDoor; nếu không đặc
+     * biệt thì gợi ý TOÀN BỘ token type đang tồn tại (vì "gõ gì cũng được").
+     */
+    private void handleWildcardDoor(WildcardTransition t, PipelineEntry cur, boolean atCaret, int runningRuleIndex, Deque<PipelineEntry> queue) {
+        if (!atCaret) {
+            queue.push(new PipelineEntry(t.target, cur.tokenIndex + 1));
+            return;
+        }
+        if (preferredRules.containsKey(runningRuleIndex)) {
+            suggestedRules.add(runningRuleIndex);
+            return;
+        }
+        IntervalSet all = IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
+        for (int sym : all.toList()) {
+            if (!ignoredTokens.containsKey(sym)) {
+                suggestedTokens.add(sym);
+            }
+        }
     }
 
     /**

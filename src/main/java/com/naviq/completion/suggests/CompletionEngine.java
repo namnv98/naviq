@@ -1,11 +1,11 @@
 package com.naviq.completion.suggests;
 
 import com.naviq.antlr4.PostgreSQLParser;
-import com.naviq.completion.syntactic.v1.RuleCallStack;
+import com.naviq.completion.syntactic.antlr.feature.RuleCallStack;
 import com.naviq.datasource.SchemaIndex;
 import com.naviq.completion.model.Suggest;
 import com.naviq.completion.semantic.*;
-import com.naviq.completion.syntactic.SyntacticAnalyzer;
+import com.naviq.completion.syntactic.PostgreSQLSyntacticAnalyzer;
 import org.antlr.v4.runtime.Token;
 import com.naviq.util.LoggingConfig;
 
@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import static java.util.Objects.isNull;
 
@@ -46,10 +47,12 @@ public class CompletionEngine {
         char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length()) ? sql.charAt(cursorOffset - 1) : ' ';
         boolean stillMidIdentifier = Character.isLetterOrDigit(charBeforeCursor) || charBeforeCursor == '_';
         int syntacticCursor = stillMidIdentifier ? cursorOffset - 1 : cursorOffset;
-        SyntacticAnalyzer.Result syntacticResults = SyntacticAnalyzer.analyze(sql, syntacticCursor);
+        PostgreSQLSyntacticAnalyzer.Result syntacticResults = PostgreSQLSyntacticAnalyzer.analyze(sql, syntacticCursor);
 
         for (var entry : syntacticResults.candidates().tokens.entrySet()) {
-            addKeywordSuggestions(suggests, entry.getKey());
+            int tokenType = entry.getKey();
+            List<Integer> following = entry.getValue();   // <-- đây, chuỗi mật khẩu chắc chắn theo sau
+            addKeywordSuggestions(suggests, tokenType, following);
         }
 
         Set<String> matchedRuleNames = KeywordNoiseFilter.computeMatchedRuleNames(syntacticResults, syntacticCursor);
@@ -88,7 +91,7 @@ public class CompletionEngine {
         return suggests;
     }
 
-    private static boolean isRuleInContext(SyntacticAnalyzer.Result syn, int ruleId, int expectedParentRuleId) {
+    private static boolean isRuleInContext(PostgreSQLSyntacticAnalyzer.Result syn, int ruleId, int expectedParentRuleId) {
         List<RuleCallStack.RuleFrame> path = syn.candidates().rules.get(ruleId);
         if (path == null || path.isEmpty()) return false;
         // Frame CUỐI CÙNG trong path (ancestor gần nhất) chính là rule cha
@@ -97,21 +100,30 @@ public class CompletionEngine {
         return immediateParent == expectedParentRuleId;
     }
 
-    private static boolean isRuleAncestorAnywhere(SyntacticAnalyzer.Result syn, int ruleId, int ancestorRuleIdToFind) {
+    private static boolean isRuleAncestorAnywhere(PostgreSQLSyntacticAnalyzer.Result syn, int ruleId, int ancestorRuleIdToFind) {
         List<RuleCallStack.RuleFrame> path = syn.candidates().rules.get(ruleId);
         if (path == null) return false;
         return path.stream().anyMatch(f -> f.ruleId() == ancestorRuleIdToFind);
     }
 
-    private static void addKeywordSuggestions(List<Suggest> suggests, Integer key) {
-        suggests.add(Suggest.of(PostgreSQLParser.VOCABULARY.getDisplayName(key).toLowerCase().replace("'", ""), "keyword"));
+    private static void addKeywordSuggestions(List<Suggest> suggests, Integer key, List<Integer> following) {
+        String text = PostgreSQLParser.VOCABULARY.getDisplayName(key).toLowerCase().replace("'", "");
+
+        if (following != null && !following.isEmpty()) {
+            text += " " + following.stream()
+                    .map(f -> PostgreSQLParser.VOCABULARY.getDisplayName(f).toLowerCase().replace("'", ""))
+                    .collect(Collectors.joining(" "));
+            // ví dụ: key=NOT, following=[EXISTS] -> text = "not exists"
+        }
+
+        suggests.add(Suggest.of(text, "keyword"));
     }
 
     private static void addDataTypeSuggestions(List<Suggest> suggests) {
         SchemaIndex.DATA_TYPES.forEach(t -> suggests.add(Suggest.of(t, "datatype", t)));
     }
 
-    private static void addTableAliasSuggestions(List<Suggest> suggests, SyntacticAnalyzer.Result syn, SemanticAnalyzer.Result sem) {
+    private static void addTableAliasSuggestions(List<Suggest> suggests, PostgreSQLSyntacticAnalyzer.Result syn, SemanticAnalyzer.Result sem) {
         var tableName = AliasNameSuggester.extractTableBeforeAs(syn.tokenStream(), syn.caretTokenIndex());
         if (tableName != null) {
             String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
@@ -142,7 +154,7 @@ public class CompletionEngine {
         }
     }
 
-    private static void addTableNameSuggestions(List<Suggest> suggests, SyntacticAnalyzer.Result syn) {
+    private static void addTableNameSuggestions(List<Suggest> suggests, PostgreSQLSyntacticAnalyzer.Result syn) {
         int caretTokenIndex = syn.caretTokenIndex();
         var tokenStream = syn.tokenStream();
         if (caretTokenIndex >= 2) {

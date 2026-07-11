@@ -1,5 +1,8 @@
-package com.naviq.completion.syntactic.v1;
+package com.naviq.completion.syntactic.antlr;
 
+import com.naviq.completion.syntactic.antlr.feature.*;
+import com.naviq.completion.syntactic.antlr.model.CandidatesResult;
+import com.naviq.completion.syntactic.antlr.model.InputToken;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
@@ -15,7 +18,10 @@ import java.util.*;
  * RA chúng ở đúng vài điểm nối, không tự cài logic của chúng vào giữa:
  * <p>
  * - FollowSetsByState   : tính trước "từ phòng này, token nào có thể gặp",
- * cache thread-safe, dùng để cắt sớm trước khi dò cửa sống.
+ * cache thread-safe, dùng để cắt sớm trước khi dò cửa sống
+ * — VÀ khi caret rơi đúng lúc vừa vào 1 mê cung, dùng
+ * thẳng luôn để sinh gợi ý (generateSuggestionsFromFollowSets),
+ * core không cần biết cấu trúc dữ liệu follow-set là gì cả.
  * - PreferredRuleResolver: gộp gợi ý về mê cung đặc biệt NGOÀI CÙNG nếu lồng nhau.
  * - RuleTextRangeResolver: đổi vị trí mê cung đặc biệt thành offset ký tự.
  * - RuleCallStack       : ngăn xếp "đang lồng trong mê cung nào" — dữ liệu
@@ -24,25 +30,21 @@ import java.util.*;
  * Đọc file này là đủ để hiểu đúng LÕI thuật toán completion. 4 file kia chỉ
  * cần đọc khi bạn quan tâm tới đúng phần tối ưu/tiện ích tương ứng.
  */
-public class AntlrCompletionEngineSimpleV3 {
+public abstract class CompletionEngineBase {
 
-    private final Parser parser;
-    private final ATN atn;
+    protected final Parser parser;
+    protected final ATN atn;
 
-    private final Map<Integer, Boolean> ignoredTokens;
-    private final Map<Integer, Boolean> preferredRules;
+    protected final Map<Integer, Boolean> ignoredTokens;
+    protected final Map<Integer, Boolean> preferredRules;
 
-    private List<InputToken> tokens;
-    private int tokenStartIndex;
+    protected List<InputToken> tokens;
+    protected int tokenStartIndex;
 
-    private CandidatesResult result;
-    private final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
+    protected CandidatesResult result;
+    protected final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
 
-    // FEATURE — xem FollowSetsByState.java. Field này chỉ là 1 "tay cầm" gọi
-    // ra feature đó; engine core không quan tâm nó tính follow-set thế nào.
-    private final FollowSetsByState followSetsByState = new FollowSetsByState();
-
-    public AntlrCompletionEngineSimpleV3(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
+    public CompletionEngineBase(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         this.parser = parser;
         this.atn = parser.getATN();
         this.ignoredTokens = ignoredTokens;
@@ -72,7 +74,7 @@ public class AntlrCompletionEngineSimpleV3 {
         return result;
     }
 
-    private boolean isAtCaret(int tokenIndex) {
+    protected boolean isAtCaret(int tokenIndex) {
         return tokenIndex >= tokens.size() - 1;
     }
 
@@ -80,80 +82,23 @@ public class AntlrCompletionEngineSimpleV3 {
     // BƯỚC 1 — Bước vào 1 mê cung, tại 1 vị trí lời nói cho trước
     // ════════════════════════════════════════════════════════════════
 
-    private Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack) {
-        Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
-        Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
-        if (cached != null) {
-            return cached;
-        }
-        exitsByEntryToken.put(tokenIndex, Collections.emptySet());
-
-        // FEATURE: tra (và tính nếu chưa có) follow-set của phòng này.
-        followSetsByState.ensureComputed(parser, start, ignoredTokens);
-        FollowSetsByState.FollowSetsHolder followSets = followSetsByState.get(start.stateNumber, ignoredTokens);
-
-        RuleCallStack entered = stack.copy();
-        entered.push(start.ruleIndex, tokenIndex);
-
-        Set<Integer> exits;
-        if (isAtCaret(tokenIndex)) {
-            handleReachedCaretInsideRule(start.ruleIndex, entered, followSets);
-            // Nullable đọc thẳng từ follow-set đã tính (chứa cờ EPSILON nếu có
-            // đường ra khỏi mê cung mà không cần token nào) — không cần dò lại.
-            exits = followSets.combined().contains(Token.EPSILON)
-                    ? Collections.singleton(tokenIndex)
-                    : Collections.emptySet();
-        } else {
-            boolean mayMatch = followSets.combined().contains(Token.EPSILON)
-                    || followSets.combined().contains(tokens.get(tokenIndex).type());
-            exits = mayMatch ? walkRuleBody(start, tokenIndex, entered) : Collections.emptySet();
-        }
-
-        exitsByEntryToken.put(tokenIndex, exits);
-        return exits;
-    }
-
     /**
-     * Caret rơi ĐÚNG NGAY khi vừa bước vào mê cung {@code ruleIndex} — dùng
-     * thẳng follow-set đã tính sẵn để sinh gợi ý, KHÔNG cần dò cửa sống.
+     * Rẽ nhánh theo {@code useFollowSets} — 2 CHẾ ĐỘ HOÀN TOÀN TÁCH BIỆT, mỗi
+     * chế độ tự lo cả trường hợp còn lời lẫn tại caret bên trong nó. Lặp lại
+     * vài dòng (push stack, đọc/ghi cache) giữa 2 hàm, đổi lại mỗi hàm đọc
+     * trọn vẹn từ trên xuống dưới cho đúng 1 chế độ, không phải nhảy qua lại.
      */
-    private void handleReachedCaretInsideRule(int ruleIndex, RuleCallStack stack, FollowSetsByState.FollowSetsHolder followSets) {
-        if (preferredRules.containsKey(ruleIndex)) {
-            // FEATURE: gộp về đúng mê cung đặc biệt ngoài cùng (nếu lồng nhau).
-            PreferredRuleResolver.resolve(stack, preferredRules, result);
-            return;
-        }
-        for (FollowSetsByState.FollowSetWithPath set : followSets.sets()) {
-            RuleCallStack fullPath = stack.copy();
-            fullPath.appendPath(set.path());
-            if (PreferredRuleResolver.resolve(fullPath, preferredRules, result)) {
-                continue; // nhánh này quy về 1 mê cung đặc biệt rồi -> khỏi liệt kê token trần trụi
-            }
-            addTokenSuggestions(set);
-        }
-    }
-
-    private void addTokenSuggestions(FollowSetsByState.FollowSetWithPath set) {
-        for (int sym : set.intervals().toList()) {
-            if (ignoredTokens.containsKey(sym)) continue;
-            if (!result.tokens.containsKey(sym)) {
-                result.tokens.put(sym, new ArrayList<>(set.following()));
-            } else if (!result.tokens.get(sym).equals(set.following())) {
-                result.tokens.put(sym, Collections.emptyList());
-            }
-        }
-    }
+    protected abstract Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack);
 
     // ════════════════════════════════════════════════════════════════
     // BƯỚC 2 — Dò từng cửa trong 1 phòng: BFS trên các transition của ATN
     // ════════════════════════════════════════════════════════════════
 
-    private Set<Integer> walkRuleBody(ATNState start, int startTokenIndex, RuleCallStack stack) {
+    protected Set<Integer> walkRuleBody(ATNState start, int startTokenIndex, RuleCallStack stack) {
         Set<Integer> ruleExits = new HashSet<>();
         Set<String> visited = new HashSet<>();
         Deque<PipelineEntry> queue = new ArrayDeque<>();
         queue.push(new PipelineEntry(start, startTokenIndex, stack));
-
         while (!queue.isEmpty()) {
             PipelineEntry cur = queue.pop();
             if (!visited.add(cur.state().stateNumber + ":" + cur.tokenIndex())) {
@@ -161,17 +106,6 @@ public class AntlrCompletionEngineSimpleV3 {
             }
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
-                // MỚI: caret có thể chạm ĐÚNG lúc "hết mê cung" này xảy ra GIỮA
-                // CHỪNG 1 lượt walkRuleBody đang chạy dở (ví dụ vừa thoát 1 mê
-                // cung con optional, resume ngay vào rule cha rồi rule cha đó
-                // cũng hết luôn tại đúng caret) — trường hợp này KHÔNG đi qua
-                // enterRule() lần nào nữa, nên handleReachedCaretInsideRule()
-                // không có cơ hội chạy. Phải tự check ngay tại đây.
-                //
-                // Dùng thẳng cur.stack() (đã có sẵn đầy đủ đường đi outer->inner
-                // tại đúng thời điểm này) thay vì chỉ check start.ruleIndex —
-                // nhờ vậy nếu có nhiều mê cung đặc biệt lồng nhau, vẫn tự động
-                // chọn đúng cái NGOÀI CÙNG, giống hệt logic ở handlePasswordDoor.
                 if (isAtCaret(cur.tokenIndex())) {
                     PreferredRuleResolver.resolve(cur.stack(), preferredRules, result);
                 }
@@ -185,8 +119,8 @@ public class AntlrCompletionEngineSimpleV3 {
                     handleRuleDoor(rt, cur, queue);
                 } else if (t instanceof PredicateTransition pt) {
                     handleFreeDoorWithCondition(pt, cur, queue);
-                } else if (t instanceof WildcardTransition) {
-                    handleWildcardDoor(cur, atCaret, queue);
+                } else if (t instanceof WildcardTransition wt) {
+                    handleWildcardDoor(wt, cur, atCaret, queue);
                 } else if (t.isEpsilon()) {
                     handleFreeDoor(t, cur, queue);
                 } else {
@@ -197,19 +131,19 @@ public class AntlrCompletionEngineSimpleV3 {
         return ruleExits;
     }
 
-    private void handleRuleDoor(RuleTransition rt, PipelineEntry cur, Deque<PipelineEntry> queue) {
+    protected void handleRuleDoor(RuleTransition rt, PipelineEntry cur, Deque<PipelineEntry> queue) {
         for (int exitTok : enterRule(rt.target, cur.tokenIndex(), cur.stack())) {
             queue.push(new PipelineEntry(rt.followState, exitTok, cur.stack()));
         }
     }
 
-    private void handleFreeDoorWithCondition(PredicateTransition pt, PipelineEntry cur, Deque<PipelineEntry> queue) {
+    protected void handleFreeDoorWithCondition(PredicateTransition pt, PipelineEntry cur, Deque<PipelineEntry> queue) {
         if (pt.getPredicate().eval(parser, ParserRuleContext.EMPTY)) {
             queue.push(new PipelineEntry(pt.target, cur.tokenIndex(), cur.stack()));
         }
     }
 
-    private void handleFreeDoor(Transition t, PipelineEntry cur, Deque<PipelineEntry> queue) {
+    protected void handleFreeDoor(Transition t, PipelineEntry cur, Deque<PipelineEntry> queue) {
         queue.push(new PipelineEntry(t.target, cur.tokenIndex(), cur.stack()));
     }
 
@@ -217,9 +151,9 @@ public class AntlrCompletionEngineSimpleV3 {
      * Cửa "gõ gì cũng được" (dấu `.` trong grammar) — label() của nó luôn null,
      * nên cần xử lý riêng thay vì rơi vào handlePasswordDoor.
      */
-    private void handleWildcardDoor(PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
+    protected void handleWildcardDoor(WildcardTransition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
         if (!atCaret) {
-            queue.push(new PipelineEntry(cur.state().getTransitions()[0].target, cur.tokenIndex() + 1, cur.stack()));
+            queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
             return;
         }
         if (PreferredRuleResolver.resolve(cur.stack(), preferredRules, result)) return;
@@ -231,23 +165,29 @@ public class AntlrCompletionEngineSimpleV3 {
         }
     }
 
-    private void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
+    protected void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
         IntervalSet label = t.label();
-        if (label == null || label.size() == 0) return;
+        if (label == null || label.size() == 0) {
+            return;
+        }
         if (t instanceof NotSetTransition) {
             label = label.complement(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
         }
 
         if (atCaret) {
-            if (PreferredRuleResolver.resolve(cur.stack(), preferredRules, result)) return;
+            if (PreferredRuleResolver.resolve(cur.stack(), preferredRules, result)) {
+                return;
+            }
             List<Integer> syms = label.toList();
-            // FEATURE: chỉ đúng 1 lựa chọn -> dò chuỗi mật khẩu chắc chắn theo sau.
-            List<Integer> following = syms.size() == 1
-                    ? FollowSetsByState.getFollowingTokens(t, ignoredTokens)
-                    : Collections.emptyList();
+            List<Integer> following = syms.size() == 1 ? FollowingTokensFinder.getFollowingTokens(t, ignoredTokens) : Collections.emptyList();
             for (int sym : syms) {
-                if (!ignoredTokens.containsKey(sym)) {
+                if (ignoredTokens.containsKey(sym)) {
+                    continue;
+                }
+                if (!result.tokens.containsKey(sym)) {
                     result.tokens.put(sym, following);
+                } else if (!result.tokens.get(sym).equals(following)) {
+                    result.tokens.put(sym, Collections.emptyList());
                 }
             }
         } else if (label.contains(tokens.get(cur.tokenIndex()).type())) {
@@ -258,8 +198,7 @@ public class AntlrCompletionEngineSimpleV3 {
     // ════════════════════════════════════════════════════════════════
     // Đọc trước "những lời đã nói" — token từ tokenStartIndex tới caret
     // ════════════════════════════════════════════════════════════════
-
-    private static List<InputToken> readTokens(TokenStream stream, int tokenStartIndex, int caretTokenIndex) {
+    protected static List<InputToken> readTokens(TokenStream stream, int tokenStartIndex, int caretTokenIndex) {
         int saved = stream.index();
         stream.seek(tokenStartIndex);
         List<InputToken> result = new ArrayList<>();
@@ -272,6 +211,6 @@ public class AntlrCompletionEngineSimpleV3 {
         return result;
     }
 
-    private record PipelineEntry(ATNState state, int tokenIndex, RuleCallStack stack) {
+    protected record PipelineEntry(ATNState state, int tokenIndex, RuleCallStack stack) {
     }
 }

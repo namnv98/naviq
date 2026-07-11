@@ -1,4 +1,6 @@
-package com.naviq.completion.syntactic.v1;
+package com.naviq.completion.syntactic.antlr.model;
+
+import com.naviq.completion.syntactic.antlr.feature.RuleCallStack;
 
 import java.util.*;
 

@@ -1,4 +1,4 @@
-package com.naviq.completion.syntactic.v1;
+package com.naviq.completion.syntactic.antlr.model;
 
 /**
  * 1 token đã đọc, kèm offset ký tự thật trong văn bản gốc (startPosition,

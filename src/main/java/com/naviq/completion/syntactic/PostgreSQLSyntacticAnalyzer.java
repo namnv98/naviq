@@ -1,8 +1,9 @@
 package com.naviq.completion.syntactic;
 
 import com.naviq.antlr4.*;
-import com.naviq.completion.syntactic.v1.AntlrCompletionEngineSimpleV3;
-import com.naviq.completion.syntactic.v1.CandidatesResult;
+import com.naviq.completion.syntactic.antlr.CompletionEngine;
+import com.naviq.completion.syntactic.antlr.feature.FollowSetsByState;
+import com.naviq.completion.syntactic.antlr.model.CandidatesResult;
 import com.naviq.utils.TokenPositionUtil;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
@@ -24,7 +25,7 @@ import java.util.Map;
  * đủ mới (rule/token đặt tên kiểu Postgres gram.y). Đã map lại 1-1 sang tên tương ứng -
  * xem chú thích cạnh từng dòng.
  */
-public class SyntacticAnalyzer {
+public class PostgreSQLSyntacticAnalyzer {
 
     /**
      * PHẢI dùng chung (static), KHÔNG tạo mới mỗi lần gọi analyze() - chính
@@ -33,7 +34,7 @@ public class SyntacticAnalyzer {
      * làm mất hoàn toàn tác dụng cache (mỗi completion request tính lại follow set
      * từ đầu dù ATN state giống hệt lần trước).
      */
-    private static final AntlrCompletionEngine.FollowSetsByState FOLLOW_SETS = new AntlrCompletionEngine.FollowSetsByState();
+    private static final FollowSetsByState FOLLOW_SETS = new FollowSetsByState();
 
     /**
      * PHẢI dùng chung (static) CÙNG VỚI FOLLOW_SETS ở trên - FollowSetsByState cache
@@ -95,7 +96,7 @@ public class SyntacticAnalyzer {
         parser.removeErrorListeners();
         tokenStream.fill();
         int caretTokenIndex = TokenPositionUtil.findCaretTokenIndex(tokenStream, cursorOffset);
-        AntlrCompletionEngineSimpleV3 engine = new AntlrCompletionEngineSimpleV3(parser, IGNORED_TOKENS, PREFERRED_RULES);
+        CompletionEngine engine = new CompletionEngine(parser, IGNORED_TOKENS, PREFERRED_RULES);
         var candidates = engine.collectCandidates(caretTokenIndex);
         return new Result(tokenStream, caretTokenIndex, candidates);
     }

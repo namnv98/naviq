@@ -1,9 +1,8 @@
 package com.naviq.completion.suggests;
 
 import com.naviq.antlr4.PostgreSQLParser;
-import com.naviq.completion.syntactic.v1.RuleCallStack;
-import com.naviq.completion.syntactic.AntlrCompletionEngine.RuleFrame;
-import com.naviq.completion.syntactic.SyntacticAnalyzer;
+import com.naviq.completion.syntactic.antlr.feature.RuleCallStack;
+import com.naviq.completion.syntactic.PostgreSQLSyntacticAnalyzer;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 
@@ -48,7 +47,7 @@ public class KeywordNoiseFilter {
      *                     để lại token nào (kể cả hidden channel) để phát hiện gap chỉ bằng
      *                     tokenIndex.
      */
-    public static Set<String> computeMatchedRuleNames(SyntacticAnalyzer.Result syn, int cursorOffset) {
+    public static Set<String> computeMatchedRuleNames(PostgreSQLSyntacticAnalyzer.Result syn, int cursorOffset) {
         var candidates = syn.candidates();
         Map<Integer, List<RuleCallStack.RuleFrame>> rulesMatched = candidates.rules;
         Map<Integer, Integer> ruleEntryTokenIndex = candidates.ruleEntryTokenIndex;
@@ -183,7 +182,7 @@ public class KeywordNoiseFilter {
 
         int tokenA = pathA.get(lcp).tokenIndex();
         int tokenB = pathB.get(lcp).tokenIndex();
-        if (tokenA == RuleFrame.NO_TOKEN || tokenB == RuleFrame.NO_TOKEN) {
+        if (tokenA == RuleCallStack.RuleFrame.NO_TOKEN || tokenB == RuleCallStack.RuleFrame.NO_TOKEN) {
             return null;
         }
         if (tokenA == tokenB) {
@@ -226,7 +225,7 @@ public class KeywordNoiseFilter {
         if (enteredAt == null) {
             return false;
         }
-        if (enteredAt == RuleFrame.NO_TOKEN) {
+        if (enteredAt == RuleCallStack.RuleFrame.NO_TOKEN) {
             return false; // sentinel, không phải entry thật
         }
         return enteredAt <= lastRealTokenIndex;

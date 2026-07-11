@@ -1,5 +1,7 @@
-package com.naviq.completion.syntactic.v1;
+package com.naviq.completion.syntactic.antlr.feature;
 
+import com.naviq.completion.syntactic.antlr.model.CandidatesResult;
+import com.naviq.completion.syntactic.antlr.model.InputToken;
 import org.antlr.v4.runtime.Token;
 
 import java.util.*;

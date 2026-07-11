@@ -1,4 +1,6 @@
-package com.naviq.completion.syntactic.v1;
+package com.naviq.completion.syntactic.antlr.feature;
+
+import lombok.Getter;
 
 import java.util.*;
 
@@ -12,6 +14,7 @@ import java.util.*;
  * lời nói nào". Dùng linked-list chia sẻ (structural sharing) qua copy(): push()
  * ở nhánh này không ảnh hưởng nhánh khác.
  */
+@Getter
 public final class RuleCallStack {
 
     public record RuleFrame(int ruleId, int tokenIndex) {

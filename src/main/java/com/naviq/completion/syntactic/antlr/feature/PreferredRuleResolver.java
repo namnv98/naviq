@@ -1,4 +1,6 @@
-package com.naviq.completion.syntactic.v1;
+package com.naviq.completion.syntactic.antlr.feature;
+
+import com.naviq.completion.syntactic.antlr.model.CandidatesResult;
 
 import java.util.*;
 

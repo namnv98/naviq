@@ -1,4 +1,4 @@
-package com.naviq.completion.simple;
+package com.naviq.learn;
 
 import com.naviq.antlr4.PostgreSQLParser;
 import com.naviq.antlr4.PostgreSQLLexer;

@@ -2,7 +2,7 @@
 //
 //import com.naviq.antlr4.PostgreSQLLexer;
 //import com.naviq.antlr4.PostgreSQLParser;
-//import com.naviq.completion.syntactic.AntlrCompletionEngine;
+//import com.naviq.completion.draft.AntlrCompletionEngine;
 //import com.naviq.completion.syntactic.SyntacticAnalyzer;
 //import org.antlr.v4.runtime.CharStreams;
 //import org.antlr.v4.runtime.CommonTokenStream;
