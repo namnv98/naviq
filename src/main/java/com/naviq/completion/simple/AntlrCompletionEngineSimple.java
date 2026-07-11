@@ -45,7 +45,8 @@ public class AntlrCompletionEngineSimple {
     private final Parser parser;
     private final ATN atn;
 
-    // Những token không bao giờ được đưa vào gợi ý, kể cả khi khớp đúng tại caret (ví dụ Identifier, dấu ngoặc, số... — những thứ gợi ý ra cũng vô nghĩa).
+    // Những token không bao giờ được đưa vào gợi ý, kể cả khi khớp đúng tại caret
+    // (ví dụ Identifier, dấu ngoặc, số... — những thứ gợi ý ra cũng vô nghĩa).
     private final Map<Integer, Boolean> ignoredTokens;
 
     // Những rule được coi là "có ý nghĩa nghiệp vụ" (ví dụ columnref, qualified_name).
@@ -54,7 +55,8 @@ public class AntlrCompletionEngineSimple {
     // trần trụi (ví dụ Identifier) — vốn thường đã nằm trong ignoredTokens rồi.
     private final Map<Integer, Boolean> preferredRules;
 
-    // Toàn bộ token đã đọc trước, từ đầu câu tới caret — nói nôm na là "những lời người dùng đã gõ ra cho tới bây giờ".
+    // Toàn bộ token đã đọc trước, từ đầu câu tới caret — nói nôm na là "những lời
+    // người dùng đã gõ ra cho tới bây giờ".
     private List<Token> tokens;
 
     // KẾT QUẢ 1: các token-type được gợi ý (đã loại trừ ignoredTokens). Đây chính
@@ -116,7 +118,7 @@ public class AntlrCompletionEngineSimple {
      */
     private Set<Integer> enterRule(ATNState start, int tokenIndex) {
         // Đã từng đi vào đúng (mê cung, vị trí) này chưa?
-        // Nếu rồi thì khỏi tính lại —> trả thẳng kết quả đã lưu (kể cả khi kết quả đó chỉ là placeholder rỗng đang tính dở).
+        // Nếu rồi thì khỏi tính lại -> trả thẳng kết quả đã lưu (kể cả khi kết quả đó chỉ là placeholder rỗng đang tính dở).
         Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
         Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
         if (cached != null) {
@@ -159,8 +161,8 @@ public class AntlrCompletionEngineSimple {
 
             // Mê cung cha chỉ được coi là "mê cung con này đã xong việc" nếu mê cung con CÓ THỂ kết thúc ngay tại đây mà không cần nói thêm gì nữa.
             // Nếu không, nó còn nợ ít nhất 1 lời bên trong — mê cung cha KHÔNG được phép sinh gợi ý cho phần đứng ngay sau lời gọi rule đó.
-            var canExitWithoutConsumingToken = canExitWithoutConsumingToken(start);
-            if (canExitWithoutConsumingToken) {
+            var nullable = canExitWithoutConsumingToken(start);
+            if (nullable) {
                 return Collections.singleton(tokenIndex);
             } else {
                 return Collections.emptySet();
@@ -229,6 +231,15 @@ public class AntlrCompletionEngineSimple {
      * xét hết các cửa của nó, mỗi loại cửa giao cho đúng 1 người xử lý riêng bên
      * dưới (handleRuleDoor / handleFreeDoorWithCondition / handleFreeDoor /
      * handlePasswordDoor) — hàm này chỉ lo việc điều phối, không tự làm gì cả.
+     * <p>
+     * LƯU Ý: queue có thể chứa nhiều PipelineEntry CÙNG tokenIndex nhưng KHÁC
+     * state (ví dụ khi 1 phòng có nhiều cửa miễn phí dẫn tới nhiều phòng khác
+     * nhau cùng lúc — kiểu grammar có dấu "?" hoặc "|"). Mỗi entry được xử lý
+     * hoàn toàn độc lập, không biết gì về entry khác. Nếu 2 phòng khác nhau đó
+     * tình cờ cùng cần đúng 1 mật khẩu ở đúng tokenIndex đó, CẢ HAI đều qua cửa
+     * được — không có cơ chế nào ở đây chọn ra "1 nhánh thắng" cả. Đây chính là
+     * lý do đôi khi 1 từ có thể khớp được nhiều cửa cùng lúc, tại nhiều phòng
+     * khác nhau (visited chỉ chặn trùng lặp CÙNG 1 phòng, không gộp theo tokenIndex).
      */
     private Set<Integer> walkRuleBody(ATNState start, int startTokenIndex) {
         Set<Integer> ruleExits = new HashSet<>();
@@ -240,6 +251,8 @@ public class AntlrCompletionEngineSimple {
             PipelineEntry cur = queue.pop();
             if (!visited.add(cur.state.stateNumber + ":" + cur.tokenIndex)) {
                 continue; // (phòng, vị trí lời nói) này dò rồi, khỏi lặp lại
+                // (chỉ chặn trùng CÙNG 1 phòng — 2 phòng khác nhau cùng tokenIndex
+                // vẫn được coi là 2 entry riêng, không bị gộp lại ở đây)
             }
 
             if (cur.state.getStateType() == ATNState.RULE_STOP) {
@@ -250,13 +263,13 @@ public class AntlrCompletionEngineSimple {
             boolean atCaret = isAtCaret(cur.tokenIndex);
             for (Transition t : cur.state.getTransitions()) {
                 if (t instanceof RuleTransition rt) {
-                    handleRuleDoor(rt, cur, queue);
+                    handleRuleDoor(rt, cur, queue); // Cửa vào mê cung con
                 } else if (t instanceof PredicateTransition pt) {
-                    handleFreeDoorWithCondition(pt, cur, queue);
+                    handleFreeDoorWithCondition(pt, cur, queue); // Cửa miễn phí có kèm điều kiện
                 } else if (t.isEpsilon()) {
-                    handleFreeDoor(t, cur, queue);
+                    handleFreeDoor(t, cur, queue); //  Cửa miễn phí bình thường
                 } else {
-                    // Mọi loại còn lại (ATOM, SET, NOT_SET, RANGE, WILDCARD, PRECEDENCE...) đều là cửa cần mật khẩu
+                    //Cửa cần mật khẩu mọi loại còn lại (ATOM, SET, NOT_SET, RANGE, WILDCARD, PRECEDENCE...) đều là cửa cần mật khẩu
                     handlePasswordDoor(t, cur, atCaret, queue);
                 }
             }

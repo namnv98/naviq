@@ -101,6 +101,78 @@ lại mãi (đây là lý do bản gốc có cache `FollowSetsByState`) — như
 không có token đó, code không push đi tiếp đâu cả — ngõ cụt, không phòng nào đạt tới, không có gợi ý (đúng như kỳ vọng:
 câu sai thì không nên gợi ý bừa).
 
+## Ví dụ mở rộng: nhiều nhánh hơn (vòng lặp + rẽ nhánh WHERE tuỳ chọn)
+
+Grammar đầy đủ hơn: `select_stmt : SELECT columnref (COMMA columnref)* FROM qualified_name (WHERE bool_expr)? ;`
+
+```mermaid
+flowchart LR
+    A([Bắt đầu]) -->|SELECT<br/>mật khẩu| B([Phòng 1])
+    B -->|vào mê cung con| C1([Điểm vào])
+
+    subgraph M1[" Mê cung con: columnref (cột) "]
+        C1 -->|Identifier<br/>mật khẩu| D1([Hết mê cung con])
+    end
+
+    D1 -->|quay lại mê cung chính| E{Ngã rẽ 1<br/>hết từ?}
+    E -->|COMMA<br/>mật khẩu, lặp lại| C1
+    E -->|FROM<br/>miễn phí| G([Phòng sau FROM])
+    G -->|vào mê cung con| H([Điểm vào])
+    subgraph M2[" Mê cung con: qualified_name (tên bảng) "]
+        H -->|Identifier<br/>mật khẩu| I([Hết mê cung con])
+    end
+
+    I -->|quay lại mê cung chính| J{Ngã rẽ 2<br/>hết từ?}
+    J -->|WHERE<br/>mật khẩu| K([Phòng sau WHERE])
+    J -->|miễn phí| L[/Kết thúc câu/]
+    K -->|vào mê cung con| P([Điểm vào])
+    subgraph M3[" Mê cung con: bool_expr (điều kiện) "]
+        P -->|columnref, = , giá trị| Q([Hết mê cung con])
+    end
+    Q -->|quay lại mê cung chính| R[/Kết thúc câu/]
+    E -.->|gợi ý tại Ngã rẽ 1| S1[/suggestedTokens = COMMA, FROM/]
+    J -.->|gợi ý tại Ngã rẽ 2| S2[/suggestedTokens = WHERE, EOF/]
+```
+
+### Đi từng bước qua sơ đồ trên
+
+**Bước 1 — `Bắt đầu → Phòng 1`**: nói `SELECT` (cửa mật khẩu), tốn 1 lời, bước qua.
+
+**Bước 2 — `Phòng 1 → Điểm vào (columnref)`**: gặp cửa vào mê cung con — `enterRule()` được gọi đệ quy, đi vào mê cung
+`columnref`.
+
+**Bước 3 — bên trong `M1`**: nói `Identifier` (tên cột đầu tiên), tốn 1 lời, chạm `Hết mê cung con` (`RULE_STOP` của
+`columnref`).
+
+**Bước 4 — `quay lại mê cung chính`**: thoát mê cung con, code nhảy đúng tới `rt.followState` — chính là **Ngã rẽ 1**.
+
+**Bước 5 — tại Ngã rẽ 1, nếu hết từ**: nhìn quanh thấy 2 cửa mở — `COMMA` và `FROM` → `suggestedTokens = {COMMA, FROM}`.
+
+**Bước 6a — nếu người dùng gõ tiếp `,`**: đi theo cửa `COMMA`, quay ngược lại đúng `Điểm vào (columnref)` — vòng lặp
+`(COMMA columnref)*` lặp thêm 1 vòng, quay lại Bước 2.
+
+**Bước 6b — nếu gõ tiếp `FROM`**: cửa mật khẩu bình thường (không dẫn vào mê cung con) — sang `Phòng sau FROM`.
+
+**Bước 7 — `Phòng sau FROM → Điểm vào (qualified_name)`**: lại 1 cửa vào mê cung con khác — đệ quy `enterRule()` lần
+nữa, lần này vào mê cung `qualified_name`.
+
+**Bước 8 — bên trong `M2`**: nói `Identifier` (tên bảng), chạm `Hết mê cung con`.
+
+**Bước 9 — `quay lại mê cung chính`**: thoát mê cung con lần 2, nhảy tới `followState` mới — đây chính là **Ngã rẽ 2**,
+hoàn toàn khác Ngã rẽ 1 dù cùng "vừa nói xong 1 Identifier, hết từ".
+
+**Bước 10 — tại Ngã rẽ 2, nếu hết từ**: nhìn quanh thấy 2 cửa — `WHERE` và "kết thúc câu" (`EOF`/miễn phí) →
+`suggestedTokens = {WHERE, EOF}`.
+
+**Bước 11a — nếu gõ tiếp `WHERE`**: sang `Phòng sau WHERE`, lại gặp cửa vào mê cung con `bool_expr`, lặp lại đúng cơ
+chế "vào mê cung con → quay lại mê cung chính" lần thứ 3, rồi tới `Kết thúc câu`.
+
+**Bước 11b — nếu không gõ `WHERE`**: đi thẳng cửa miễn phí, câu kết thúc luôn tại Ngã rẽ 2.
+
+**Điểm mấu chốt xuyên suốt cả 11 bước**: mỗi lần "vào mê cung con → quay lại mê cung chính" đều dùng đúng 1 cơ chế duy
+nhất trong code — `handleRuleDoor` gọi đệ quy `enterRule()`, rồi resume tại `rt.followState`. Số lượng mê cung con lồng
+nhau (ở đây là 3) không làm code phức tạp hơn, vì đó chỉ là cùng 1 đoạn code chạy lặp lại nhiều lần.
+
 ## Ghép thẳng vào tên biến trong code
 
 | Ẩn dụ                                        | Tên thật trong code                                                                          |
@@ -126,6 +198,72 @@ coi như xong luôn (không phải cửa nào cũng bắt buộc phải mở), n
 `canExitWithoutConsumingToken()` — nó chỉ đi theo cửa miễn phí (và cửa vào mê cung con khác, vì cửa đó cũng không tốn
 lời) để dò xem có lối nào ra ngoài mà không cần mở cửa mật khẩu nào không. Nếu KHÔNG có lối như vậy, thì mê cung cha
 phải hiểu là "còn nợ ít nhất 1 lời nữa bên trong", và không được phép coi như xong.
+
+## Engine không duyệt hết mọi cửa — nó lọc theo đúng từ kế tiếp
+
+Một câu hỏi hay: *"nó có duyệt hết mọi nhánh của ATN không, hay chỉ đi theo đúng từ kế tiếp?"*
+
+Câu trả lời: **còn từ để nói thì lọc chặt, chỉ hết từ (tại caret) mới buộc phải liệt kê hết**.
+
+Nhìn `handlePasswordDoor`:
+
+```java
+}else if(label.contains(tokens.get(cur.tokenIndex).
+
+getType())){
+        // Còn lời để nói: đúng mật khẩu thì bước qua, tốn 1 lời.
+        queue.
+
+push(new PipelineEntry(t.target, cur.tokenIndex +1));
+        }
+// Sai mật khẩu -> không push gì cả -> nhánh này chết ở đây.
+```
+
+Với 1 phòng có nhiều cửa mật khẩu khác nhau, chỉ cửa nào trùng đúng tên với từ kế tiếp mới được push tiếp — cửa còn lại
+bị lờ đi ngay, không vào hàng đợi BFS nữa. Ngược lại, 2 loại cửa còn lại thì **luôn đi, không cần kiểm tra gì**, vì
+chúng không tốn lời:
+
+```java
+}else if(t.isEpsilon()){
+        queue.
+
+push(new PipelineEntry(t.target, cur.tokenIndex));  // luôn đi
+        }
+```
+
+Chỉ khi hết từ hẳn (đúng tại caret), engine mới hết cách lọc — lúc đó nó buộc phải liệt kê **toàn bộ** cửa mật khẩu còn
+lại trong hàng đợi làm gợi ý, vì không còn từ nào để so sánh nữa.
+
+| Giai đoạn          | Cửa mật khẩu                               | Cửa miễn phí / vào mê cung con           |
+|--------------------|--------------------------------------------|------------------------------------------|
+| Còn từ để nói      | Lọc chặt — chỉ đi đúng cửa khớp từ kế tiếp | Luôn đi, không cần lọc                   |
+| Hết từ (tại caret) | Liệt kê hết, không lọc (đây là gợi ý)      | Luôn đi (không tạo gợi ý, chỉ dẫn đường) |
+
+### Nhưng vẫn có lúc 1 từ khớp được nhiều cửa cùng lúc
+
+Vì cửa miễn phí luôn đi vô điều kiện, có những lúc BFS đang "sống" ở **nhiều phòng khác nhau cùng lúc**, và nếu 2 phòng
+đó tình cờ cùng cần đúng 1 mật khẩu, cả 2 đều qua cửa được — không phải chỉ 1 nhánh thắng.
+
+Ví dụ điển hình: `qualified_name : Identifier (DOT Identifier)? ;` — dấu `?` tạo ra 1 cửa miễn phí dẫn tới 2 phòng khác
+nhau ngay từ đầu:
+
+```
+S0 --epsilon--> S1 --Identifier--> RULE_STOP                      (nhánh: KHÔNG có schema)
+S0 --epsilon--> S2 --Identifier--> S3 --DOT--> S4 --Identifier--> RULE_STOP   (nhánh: CÓ schema)
+```
+
+BFS đứng ở cả `S1` lẫn `S2` cùng lúc (do 2 cửa miễn phí từ `S0`, luôn đi vô điều kiện). Gõ `public` (1 `Identifier`): *
+*cả 2 phòng đều khớp**, cả 2 cùng được push tiếp:
+
+| Nhánh | Đang ở đâu sau khi gõ `public` | Diễn giải                                                  |
+|-------|--------------------------------|------------------------------------------------------------|
+| A     | `RULE_STOP`                    | `public` được hiểu là **tên bảng**                         |
+| B     | `S3` (chờ `DOT`)               | `public` được hiểu là **tên schema**, đang chờ `.tên_bảng` |
+
+Nếu caret dừng ngay đây, `suggestedTokens` sẽ gộp cả gợi ý từ nhánh A (những gì hợp lệ sau khi `qualified_name` đã xong,
+vd `WHERE`/`EOF`) **lẫn** gợi ý từ nhánh B (`DOT`) — cả 2 xuất hiện cùng lúc, vì code không có khái niệm "chỉ 1 nhánh
+được thắng", nó chỉ đơn giản là **mỗi nhánh đang sống tự lọc theo từ kế tiếp cho riêng nó** — và nếu nhiều nhánh cùng
+sống, cùng khớp, thì tất cả cùng tiếp tục.
 
 Không có gì thần bí cả — cả file `AntlrCompletionEngineSimple.java` chỉ đang làm đúng 1 việc: **đi theo đúng những từ
 bạn đã gõ trong tấm bản đồ đó, rồi khi hết từ để đi, nhìn quanh xem còn cửa nào mở** — tên mật khẩu trên các cửa đó
