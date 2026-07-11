@@ -1,6 +1,8 @@
 package com.naviq.completion.syntactic;
 
 import com.naviq.antlr4.*;
+import com.naviq.completion.syntactic.v1.AntlrCompletionEngineSimpleV3;
+import com.naviq.completion.syntactic.v1.CandidatesResult;
 import com.naviq.utils.TokenPositionUtil;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
@@ -81,8 +83,7 @@ public class SyntacticAnalyzer {
     public record Result(
             CommonTokenStream tokenStream,
             int caretTokenIndex,
-            AntlrCompletionEngine.CandidatesCollection candidates
-    ) {
+            CandidatesResult candidates) {
 
     }
 
@@ -94,7 +95,7 @@ public class SyntacticAnalyzer {
         parser.removeErrorListeners();
         tokenStream.fill();
         int caretTokenIndex = TokenPositionUtil.findCaretTokenIndex(tokenStream, cursorOffset);
-        AntlrCompletionEngine engine = new AntlrCompletionEngine(parser, IGNORED_TOKENS, PREFERRED_RULES, FOLLOW_SETS);
+        AntlrCompletionEngineSimpleV3 engine = new AntlrCompletionEngineSimpleV3(parser, IGNORED_TOKENS, PREFERRED_RULES);
         var candidates = engine.collectCandidates(caretTokenIndex);
         return new Result(tokenStream, caretTokenIndex, candidates);
     }

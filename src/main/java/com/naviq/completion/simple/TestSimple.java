@@ -5,14 +5,11 @@ import com.naviq.antlr4.PostgreSQLLexer;
 import com.vmware.antlr4c3.CodeCompletionCore;
 import org.antlr.v4.runtime.*;
 
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class TestSimple {
     public static void main(String[] args) {
-        String sql = "select * from demo where";
+        String sql = "CREATE SCHEMA IF ";
 
         CharStream input = CharStreams.fromString(sql);
         PostgreSQLLexer lexer = new PostgreSQLLexer(input);
@@ -74,7 +71,7 @@ public class TestSimple {
 
         System.out.println("Tokens:");
         c3Result.tokens.keySet().stream()
-                .sorted(Comparator.comparing(vocabulary::getSymbolicName))
+                .filter(Objects::nonNull)
                 .forEach(t ->
                         System.out.println("  " + vocabulary.getSymbolicName(t)));
 
@@ -161,22 +158,6 @@ public class TestSimple {
     private static Map<Integer, Boolean> buildIgnoredTokens() {
         Map<Integer, Boolean> m = new HashMap<>();
         m.put(Token.EOF, true);
-        m.put(PostgreSQLParser.Identifier, true);
-        m.put(PostgreSQLParser.OPEN_PAREN, true);
-        m.put(PostgreSQLParser.CLOSE_PAREN, true);
-        m.put(PostgreSQLParser.PLUS, true);
-        m.put(PostgreSQLParser.MINUS, true);
-        m.put(PostgreSQLParser.SLASH, true);
-        m.put(PostgreSQLParser.EQUAL, true);
-        m.put(PostgreSQLParser.NOT_EQUALS, true);
-        m.put(PostgreSQLParser.LT, true);
-        m.put(PostgreSQLParser.GT, true);
-        m.put(PostgreSQLParser.LESS_EQUALS, true);
-        m.put(PostgreSQLParser.GREATER_EQUALS, true);
-        m.put(PostgreSQLParser.Numeric, true);
-        m.put(PostgreSQLParser.Integral, true);
-        m.put(PostgreSQLParser.StringConstant, true);
-        m.put(PostgreSQLParser.SEMI, true);
         return m;
     }
 

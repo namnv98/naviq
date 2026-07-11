@@ -1,7 +1,7 @@
 package com.naviq.completion.suggests;
 
 import com.naviq.antlr4.PostgreSQLParser;
-import com.naviq.completion.syntactic.AntlrCompletionEngine;
+import com.naviq.completion.syntactic.v1.RuleCallStack;
 import com.naviq.completion.syntactic.SyntacticAnalyzer;
 
 import java.util.*;
@@ -50,7 +50,7 @@ public class CompletionRegressionTest {
     );
 
     private static boolean isRuleInContext(SyntacticAnalyzer.Result syn, int ruleId, int expectedParentRuleId) {
-        List<AntlrCompletionEngine.RuleFrame> path = syn.candidates().rules.get(ruleId);
+        List<RuleCallStack.RuleFrame> path = syn.candidates().rules.get(ruleId);
         if (path == null || path.isEmpty()) return false;
         // Frame CUỐI CÙNG trong path (ancestor gần nhất) chính là rule cha
         // trực tiếp đã dẫn tới rule này - đây là thứ quyết định ngữ nghĩa.
@@ -76,7 +76,7 @@ public class CompletionRegressionTest {
         }
     }
     private static boolean isRuleAncestorAnywhere(SyntacticAnalyzer.Result syn, int ruleId, int ancestorRuleIdToFind) {
-        List<AntlrCompletionEngine.RuleFrame> path = syn.candidates().rules.get(ruleId);
+        List<RuleCallStack.RuleFrame> path = syn.candidates().rules.get(ruleId);
         if (path == null) return false;
         return path.stream().anyMatch(f -> f.ruleId() == ancestorRuleIdToFind);
     }

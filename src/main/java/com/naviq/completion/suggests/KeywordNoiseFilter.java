@@ -1,6 +1,7 @@
 package com.naviq.completion.suggests;
 
 import com.naviq.antlr4.PostgreSQLParser;
+import com.naviq.completion.syntactic.v1.RuleCallStack;
 import com.naviq.completion.syntactic.AntlrCompletionEngine.RuleFrame;
 import com.naviq.completion.syntactic.SyntacticAnalyzer;
 import org.antlr.v4.runtime.CommonTokenStream;
@@ -49,7 +50,7 @@ public class KeywordNoiseFilter {
      */
     public static Set<String> computeMatchedRuleNames(SyntacticAnalyzer.Result syn, int cursorOffset) {
         var candidates = syn.candidates();
-        Map<Integer, List<RuleFrame>> rulesMatched = candidates.rules;
+        Map<Integer, List<RuleCallStack.RuleFrame>> rulesMatched = candidates.rules;
         Map<Integer, Integer> ruleEntryTokenIndex = candidates.ruleEntryTokenIndex;
 
         CommonTokenStream ts = syn.tokenStream();
@@ -143,9 +144,9 @@ public class KeywordNoiseFilter {
     // ── 1. Sibling-branch suppression ───────────────────────────────────────
 
     private static Set<Integer> computeSuppressedBySiblingBranch(
-        Map<Integer, List<RuleFrame>> rules) {
+        Map<Integer, List<RuleCallStack.RuleFrame>> rules) {
         Set<Integer> suppressed = new HashSet<>();
-        List<Map.Entry<Integer, List<RuleFrame>>> entries = new ArrayList<>(rules.entrySet());
+        List<Map.Entry<Integer, List<RuleCallStack.RuleFrame>>> entries = new ArrayList<>(rules.entrySet());
         for (int i = 0; i < entries.size(); i++) {
             for (int j = i + 1; j < entries.size(); j++) {
                 var a = entries.get(i);
@@ -170,7 +171,7 @@ public class KeywordNoiseFilter {
      * 2 path không thực sự rẽ nhánh, hoặc tokenIndex bằng nhau / là sentinel NO_TOKEN (không đủ rõ
      * ràng để quyết định).
      */
-    private static Integer laterBranchWins(List<RuleFrame> pathA, List<RuleFrame> pathB) {
+    private static Integer laterBranchWins(List<RuleCallStack.RuleFrame> pathA, List<RuleCallStack.RuleFrame> pathB) {
         int lcp = 0;
         int minLen = Math.min(pathA.size(), pathB.size());
         while (lcp < minLen && pathA.get(lcp).ruleId() == pathB.get(lcp).ruleId()) {

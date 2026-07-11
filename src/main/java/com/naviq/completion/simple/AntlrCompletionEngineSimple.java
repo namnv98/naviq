@@ -254,13 +254,16 @@ public class AntlrCompletionEngineSimple {
                 // (chỉ chặn trùng CÙNG 1 phòng — 2 phòng khác nhau cùng tokenIndex
                 // vẫn được coi là 2 entry riêng, không bị gộp lại ở đây)
             }
+            boolean atCaret = isAtCaret(cur.tokenIndex);
 
             if (cur.state.getStateType() == ATNState.RULE_STOP) {
-                ruleExits.add(cur.tokenIndex); // "hết mê cung" -> ghi nhận đây là 1 điểm thoát ra được
+                if (atCaret && preferredRules.containsKey(start.ruleIndex)) {
+                    suggestedRules.add(start.ruleIndex);
+                }
+                ruleExits.add(cur.tokenIndex);
                 continue;
             }
 
-            boolean atCaret = isAtCaret(cur.tokenIndex);
             for (Transition t : cur.state.getTransitions()) {
                 if (t instanceof RuleTransition rt) {
                     handleRuleDoor(rt, cur, queue); // Cửa vào mê cung con
