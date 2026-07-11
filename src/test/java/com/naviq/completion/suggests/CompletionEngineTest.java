@@ -98,6 +98,15 @@ class CompletionEngineTest {
     // Nhóm 1: bug "select sau select" (fix stmtmulti trong .g4 + isFreshStatementPosition)
     // =====================================================================
 
+    @Test
+    void noStatementStartKeywordsMidSelect() {
+        var result = suggest("CREATE SCHEMA IF |");
+        var keywords = allKeywordKeys(result);
+        assertFalse(keywords.contains("select"));
+        assertFalse(keywords.contains("insert"));
+        assertFalse(keywords.contains("with"));
+        assertFalse(keywords.contains("create"));
+    }
 
     @Test
     @DisplayName("Sau dấu ';' của câu trước - VẪN phải thấy đủ keyword bắt-đầu-câu (không phá multi-statement)")
