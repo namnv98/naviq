@@ -70,12 +70,16 @@ public class FollowSetsByState {
      * Đệ quy lặn xuyên qua mọi cửa miễn phí / cửa vào mê cung con, ghi nhận
      * mỗi lần chạm 1 cửa mật khẩu thật kèm theo "đường đi" (path) đã lặn qua.
      * <p>
-     * LƯU Ý QUẢN LÝ {@code ruleStack}: đây là 1 instance MUTABLE dùng chung
-     * xuyên suốt cả cây đệ quy — mỗi lần vào 1 mê cung con phải push() TRƯỚC
-     * khi đệ quy, rồi pop() NGAY SAU KHI đệ quy đó quay về (để state đúng cho
-     * các transition anh em còn lại của cùng 1 phòng). Từng có bug thật ở
-     * đúng dòng pop() này (quên mất khi tách file) — sửa hàm này cần đặc biệt
-     * cẩn thận, nên có test riêng bao case rule gọi rule con nhiều tầng.
+     * GỌN LẠI: {@code ruleStack} giờ dùng đúng kiểu COPY-TRƯỚC-KHI-ĐỆ-QUY,
+     * giống hệt cách {@code returnStates} đã làm — KHÔNG còn mutate + push()
+     * rồi phải nhớ pop() sau khi đệ quy quay về nữa. Bản trước dùng 1 instance
+     * {@code ruleStack} mutable dùng chung, đòi hỏi kỷ luật "push() trước khi
+     * đệ quy, pop() ngay sau khi đệ quy quay về" — và đã từng có bug thật vì
+     * quên đúng dòng pop() đó khi tách file. Copy-style loại bỏ hẳn lớp bug
+     * này: mỗi lời gọi đệ quy nhận 1 bản sao riêng ({@code nextStack}), không
+     * đụng gì tới {@code ruleStack} của tầng gọi — nên các transition anh em
+     * còn lại của cùng 1 phòng {@code s} luôn thấy đúng {@code ruleStack} gốc,
+     * không cần "hoàn tác" thủ công gì cả.
      */
     private static void collectFollowSets(Parser parser, ATNState s, ATNState stop,
                                           List<FollowSetWithPath> out,
@@ -99,27 +103,32 @@ public class FollowSetsByState {
             return;
         }
 
+        ATN atn = parser.getATN(); // gọi 1 lần, dùng lại cho cả WILDCARD lẫn NOT_SET bên dưới
         for (Transition t : s.getTransitions()) {
             if (t instanceof RuleTransition rt) {
                 if (ruleStack.contains(rt.target.ruleIndex)) continue; // left-recursion -> cắt nhánh
-                ruleStack.push(rt.target.ruleIndex, RuleCallStack.RuleFrame.NO_TOKEN);
+
+                RuleCallStack nextStack = ruleStack.copy();
+                nextStack.push(rt.target.ruleIndex, RuleCallStack.RuleFrame.NO_TOKEN);
                 Deque<ATNState> nextReturnStates = new ArrayDeque<>(returnStates);
                 nextReturnStates.push(rt.followState);
-                collectFollowSets(parser, t.target, stop, out, new IdentityHashMap<>(), ruleStack, ignoredTokens, nextReturnStates);
-                ruleStack.pop(); // BẮT BUỘC — quay lại đúng trạng thái stack trước khi vào rule con, để xét tiếp các transition anh em còn lại của state s
+
+                collectFollowSets(parser, t.target, stop, out, new IdentityHashMap<>(), nextStack, ignoredTokens, nextReturnStates);
+                // Không cần pop gì cả: ruleStack gốc chưa hề bị đụng tới, nextStack
+                // chỉ sống trong đúng lời gọi đệ quy này rồi bị vứt bỏ khi quay về.
             } else if (t instanceof PredicateTransition pt) {
                 if (pt.getPredicate().eval(parser, ParserRuleContext.EMPTY)) {
                     collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens, returnStates);
                 }
             } else if (t instanceof WildcardTransition) {
-                out.add(new FollowSetWithPath(IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, parser.getATN().maxTokenType), ruleStack.copy(), Collections.emptyList()));
+                out.add(new FollowSetWithPath(IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType), ruleStack.copy(), Collections.emptyList()));
             } else if (t.isEpsilon()) {
                 collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens, returnStates);
             } else {
                 IntervalSet label = t.label();
                 if (label == null || label.size() == 0) continue;
                 if (t instanceof NotSetTransition) {
-                    label = label.complement(Token.MIN_USER_TOKEN_TYPE, parser.getATN().maxTokenType);
+                    label = label.complement(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
                 }
                 out.add(new FollowSetWithPath(label, ruleStack.copy(), FollowingTokensFinder.getFollowingTokens(t, ignoredTokens)));
             }
@@ -134,10 +143,6 @@ public class FollowSetsByState {
      * trong follow-set, trước tiên thử gộp về mê cung đặc biệt ngoài cùng nếu
      * path đó có đi xuyên qua 1 mê cung đặc biệt nào; nếu không, mới thêm các
      * token của path đó vào gợi ý.
-     * <p>
-     * Chuyển từ core sang đây vì đây thuần là cách "đọc" dữ liệu follow-set —
-     * core chỉ cần gọi hàm này, không cần biết cấu trúc
-     * {@code FollowSetWithPath}/{@code set.path()}/{@code set.following()} là gì cả.
      */
     public static void generateSuggestionsFromFollowSets(RuleCallStack stack,
                                                          FollowSetsHolder followSets,

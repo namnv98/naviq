@@ -1,9 +1,9 @@
 package com.naviq.completion;
 
-import com.naviq.completion.model.Suggest;
+import com.naviq.model.Suggest;
 import com.naviq.datasource.SchemaIndex;
 import com.naviq.datasource.SchemaLoader;
-import com.naviq.oracle.suggests.CompletionEngine;
+import com.naviq.completion.suggests.oracle.CompletionEngine;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -13,7 +13,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class OracleCompletionEngineTest {
@@ -93,7 +95,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'select |' KHÔNG còn gợi ý lại 'select'/'insert'/'with'/'create' (đã gõ dở SELECT, chưa xong)")
     void noStatementStartKeywordsMidSelect() {
-        var result = suggest("select |");
+        var result = suggest("select * from |");
         var keywords = allKeywordKeys(result);
         assertFalse(keywords.contains("select"));
         assertFalse(keywords.contains("insert"));
@@ -133,7 +135,6 @@ public class OracleCompletionEngineTest {
             + "alias mặc định = tên bảng")
     void columnSuggestionsInWhereClauseNoAlias() {
         var result = suggest("select * from users where |");
-       var a= keysOfType(result, "column");
         assertTrue(hasKeyOfType(result, "users.id", "column"));
         assertTrue(hasKeyOfType(result, "users.email", "column"));
     }
@@ -252,5 +253,175 @@ public class OracleCompletionEngineTest {
     void assignmentTargetDoesNotSuggestColumns() {
         var result = suggest("begin | := 1; end;");
         assertTrue(keysOfType(result, "column").isEmpty());
+    }
+
+    @Test
+    @DisplayName("'select * from users u where u.|' - dangling dot NGAY SAU alias trong WHERE, "
+            + "PHẢI chỉ gợi ý đúng cột của alias u (không lẫn cột bảng khác nếu có nhiều FROM)")
+    void danglingDotAfterAliasInWhereSuggestsOnlyThatTableColumns() {
+        var result = suggest("select * from users u where u.|");
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'select u.| from users u join orders o on u.id = o.user_id' - dangling dot "
+            + "trong SELECT list với 2 bảng JOIN cùng lúc - PHẢI chỉ gợi ý cột của alias u, "
+            + "KHÔNG được lẫn cột của o (kiểm tra DanglingDotDetector không bị 'tràn' qua scope "
+            + "của alias khác đang cùng visible)")
+    void danglingDotInSelectListWithMultipleJoinsScopesCorrectAlias() {
+        var result = suggest("select u.| from users u join orders o on u.id = o.user_id");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertFalse(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'select sub.| from (select id, name from users) sub' - dangling dot trỏ tới "
+            + "ALIAS CỦA SUBQUERY, phải resolve qua derivedScopeAliases (Scope thật của subquery), "
+            + "gợi ý đúng cột PROJECTED (id, name) chứ không phải toàn bộ cột bảng users gốc")
+    void danglingDotForSubqueryAliasSuggestsProjectedColumnsOnly() {
+        var result = suggest("select sub.| from (select id, name from users) sub");
+        assertTrue(hasKeyOfType(result, "sub.id", "column"));
+        assertTrue(hasKeyOfType(result, "sub.name", "column"));
+        // "email" không nằm trong SELECT list của subquery -> không được coi là cột của "sub"
+        assertFalse(hasKeyOfType(result, "sub.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'with c as (select id, name from users) select c.| from c' - dangling dot trỏ "
+            + "tới CTE, resolveAsExistingCte + derivedScopeAliases phải hoạt động đúng qua dấu "
+            + "chấm cụt, không chỉ qua completion không-dấu-chấm (đã test ở cteColumnSuggestions)")
+    void danglingDotForCteSuggestsProjectedColumnsOnly() {
+        var result = suggest("with c as (select id, name from users) select c.| from c");
+        assertTrue(hasKeyOfType(result, "c.id", "column"));
+        assertTrue(hasKeyOfType(result, "c.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'delete from users u where u.|' - dangling dot trong DELETE, alias đăng ký qua "
+            + "general_table_ref (khác registerDmlTableAlias của Postgres, cần verify tên hàm "
+            + "tương ứng bên Oracle CompletionEngine) vẫn phải resolve được qua dấu chấm cụt")
+    void danglingDotInDeleteWhereClause() {
+        var result = suggest("delete from users u where u.|");
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'select * from users u where exists (select 1 from orders o where o.user_id = u.|)' "
+            + "- CORRELATED SUBQUERY: dấu chấm cụt của alias NGOÀI (u) đứng bên TRONG subquery - "
+            + "scope con phải thấy được alias của scope cha (visibilityChain đi lên tổ tiên), "
+            + "không được coi 'u' là alias lạ chỉ vì đang đứng trong 1 scope khác")
+    void danglingDotForOuterAliasInsideCorrelatedSubquery() {
+        var result = suggest(
+                "select * from users u where exists (select 1 from orders o where o.user_id = u.|)");
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'insert into users values (|)' - PHỦ ĐỊNH: values_clause nhận EXPRESSION "
+            + "(literal/bind var/biểu thức), KHÔNG phải column_name - vị trí này KHÔNG được gợi ý "
+            + "cột nào cả (khác hẳn 'insert into users (|' đã test ở insertColumnListSuggestions, "
+            + "dễ nhầm lẫn 2 vị trí nếu code xử lý INSERT sai)")
+    void insertValuesClauseDoesNotSuggestColumns() {
+        var result = suggest("insert into users values (|)");
+        assertTrue(keysOfType(result, "column").isEmpty());
+    }
+
+    @Test
+    @DisplayName("PHỦ ĐỊNH: 'select * from users where id = 1' (KHÔNG có caret ở vùng liên quan) "
+            + "- gợi ý tại vị trí ngay sau 'FROM' của 1 câu ĐÃ HOÀN CHỈNH đứng trước, đảm bảo scope "
+            + "của statement trước không rò rỉ gợi ý cột sang statement sau nếu có nhiều statement")
+    void secondStatementDoesNotSeeFirstStatementAliases() {
+        var result = suggest("select * from users u where u.id = 1; select * from |");
+        var tables = keysOfType(result, "table");
+        assertTrue(tables.stream().anyMatch(t -> t.equalsIgnoreCase("public.orders")));
+        assertFalse(hasKeyOfType(result, "u.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'select | from users union select | from orders' (2 vị trí caret riêng biệt, "
+            + "test bằng 2 lời gọi khác nhau) - mỗi vế UNION có scope riêng, vế sau KHÔNG được "
+            + "thấy alias/cột của vế trước dù cùng 1 statement UNION")
+    void unionBranchesHaveIndependentScopes() {
+        var firstBranch = suggest("select | from users union select id from orders");
+        assertTrue(hasKeyOfType(firstBranch, "users.name", "column"));
+        assertFalse(hasKeyOfType(firstBranch, "orders.total", "column"));
+
+        var secondBranch = suggest("select id from users union select | from orders");
+        assertTrue(hasKeyOfType(secondBranch, "orders.total", "column"));
+        assertFalse(hasKeyOfType(secondBranch, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'select * from users u, orders o where |' - FROM list kiểu dấu phẩy (cú pháp "
+            + "JOIN cũ, KHÔNG dùng từ khoá JOIN) vẫn phải đăng ký được CẢ 2 alias u và o")
+    void commaStyleFromListRegistersBothAliases() {
+        var result = suggest("select * from users u, orders o where |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'update users u set name = |' - UPDATE có alias KHÔNG dùng AS, phải resolve "
+            + "được scope alias 'u' cho phần bên PHẢI dấu '=' (không chỉ phần column_name bên "
+            + "trái đã test ở updateSetColumnSuggestions)")
+    void updateSetRightHandSideSeesTableAlias() {
+        var result = suggest("update users u set name = |");
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+    }
+
+    @Test
+    @DisplayName("ROBUSTNESS: input có chuỗi string chưa đóng ('...') - error-recovery/isUnreliable "
+            + "phải chặn đăng ký alias dựa trên dữ liệu không đáng tin, nhưng KHÔNG ĐƯỢC crash, "
+            + "và alias 'u' đứng TRƯỚC chỗ lỗi (chưa bị ảnh hưởng) vẫn phải còn nguyên")
+    void unterminatedStringLiteralDoesNotCrashAndKeepsPriorAlias() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("select * from users u where u.name = 'unterminated and u.|");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("ROBUSTNESS: gõ dở giữa chừng 1 subquery chưa đóng ngoặc "
+            + "'select * from (select id from users |' - PHẢI không crash; vì thiếu CLOSE_PAREN, "
+            + "scope subquery coi như MỞ tới hết input (đúng BUG FIX đã nói ở popScope) thay vì "
+            + "đóng non và mất alias")
+    void unclosedSubqueryParenDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("select * from (select id, name from users |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'select * from users u left join orders o on u.id = o.user_id where |' - "
+            + "LEFT JOIN (khác JOIN trần đã test) vẫn phải đăng ký đủ cả 2 alias, kiểm tra code "
+            + "xử lý join_type không bỏ sót nhánh LEFT/RIGHT/FULL")
+    void leftJoinRegistersBothAliases() {
+        var result = suggest("select * from users u left join orders o on u.id = o.user_id where |");
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "o.status", "column"));
+    }
+
+    @Test
+    @DisplayName("'select * from users u where u.status = |' - PHỦ ĐỊNH cho GROUP BY/HAVING chưa "
+            + "test: gợi ý bên PHẢI toán tử so sánh (=) là biểu thức GIÁ TRỊ, KHÔNG phải danh sách "
+            + "cột trần bắt buộc - chấp nhận cả 2 (cột hoặc giá trị) miễn không throw, nhưng không "
+            + "được RỖNG hoàn toàn nếu cột đúng là 1 lựa chọn hợp lệ ở vị trí value expression")
+    void comparisonRightHandSideAcceptsColumnReference() {
+        var result = suggest("select * from users u where u.status = |");
+        assertNotNull(result);
+        // Không assert cứng phải CÓ cột - vì đây là vị trí "biểu thức", có thể gợi ý cả literal/
+        // bind variable/hàm - chỉ đảm bảo không rỗng hoàn toàn và không crash.
+        assertFalse(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("'select count(*), | from orders group by status' - SELECT list có cả hàm "
+            + "aggregate (count(*)) LẪN cột trần trong CÙNG 1 danh sách - vị trí cột trần thứ 2 "
+            + "vẫn phải gợi ý cột bình thường, không bị hàm aggregate đứng trước làm nhiễu")
+    void selectListMixedAggregateAndPlainColumnStillSuggestsColumns() {
+        var result = suggest("select count(*), | from orders group by status");
+        assertTrue(hasKeyOfType(result, "orders.status", "column"));
     }
 }

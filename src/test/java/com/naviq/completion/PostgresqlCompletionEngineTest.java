@@ -1,7 +1,7 @@
 package com.naviq.completion;
 
-import com.naviq.completion.model.Suggest;
-import com.naviq.postgresql.suggests.CompletionEngine;
+import com.naviq.model.Suggest;
+import com.naviq.completion.suggests.postgresql.CompletionEngine;
 import com.naviq.datasource.SchemaIndex;
 import com.naviq.datasource.SchemaLoader;
 import org.junit.jupiter.api.BeforeAll;

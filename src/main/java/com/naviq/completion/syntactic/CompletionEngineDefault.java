@@ -1,6 +1,8 @@
 package com.naviq.completion.syntactic;
 
+import com.naviq.completion.syntactic.feature.PreferredRuleResolver;
 import com.naviq.completion.syntactic.feature.RuleCallStack;
+import com.naviq.completion.syntactic.model.CandidatesResult;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.atn.ATNState;
 
@@ -45,4 +47,9 @@ public class CompletionEngineDefault extends CompletionEngineBase {
         return walkRuleBody(start, tokenIndex, entered);
     }
 
+    // Có thể override hook nếu muốn xử lý preferred rules
+    @Override
+    protected boolean handlePreferredRules(RuleCallStack stack, CandidatesResult result) {
+        return PreferredRuleResolver.resolve(stack, preferredRules, result);
+    }
 }

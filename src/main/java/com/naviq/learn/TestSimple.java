@@ -3,7 +3,6 @@ package com.naviq.learn;
 
 import com.naviq.antlr4.oracle.PlSqlLexer;
 import com.naviq.antlr4.oracle.PlSqlParser;
-import com.naviq.oracle.OracleSQLSyntacticAnalyzer;
 import org.antlr.v4.runtime.*;
 import com.vmware.antlr4c3.CodeCompletionCore;
 
@@ -41,7 +40,7 @@ public class TestSimple {
         m.put(PlSqlParser.RULE_identifier, true);
 
         m.put(PlSqlParser.RULE_id_expression, true);
-        m.put(PlSqlParser.RULE_regular_id, true);
+//        m.put(PlSqlParser.RULE_regular_id, true);
 
         // C3
         CodeCompletionCore c3 = new CodeCompletionCore(parser, m.keySet(), Set.of());

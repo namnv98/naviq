@@ -1,7 +1,7 @@
 package com.naviq;
 
-import com.naviq.completion.model.Suggest;
-import com.naviq.oracle.suggests.CompletionEngine;
+import com.naviq.model.Suggest;
+import com.naviq.completion.suggests.oracle.CompletionEngine;
 
 import java.util.List;
 

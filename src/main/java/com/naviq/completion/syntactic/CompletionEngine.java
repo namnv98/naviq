@@ -10,7 +10,7 @@ public class CompletionEngine {
     private final CompletionEngineBase antlrCompletionEngineBase;
 
     public CompletionEngine(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
-        this.antlrCompletionEngineBase = new CompletionEngineDefault(parser, ignoredTokens, preferredRules);
+        this.antlrCompletionEngineBase = new CompletionEngineWithFlowSet(parser, ignoredTokens, preferredRules);
     }
 
     public CandidatesResult collectCandidates(int caretTokenIndex) {

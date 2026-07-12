@@ -4,10 +4,9 @@ package com.naviq;
 import com.naviq.antlr4.oracle.PlSqlLexer;
 import com.naviq.antlr4.oracle.PlSqlParser;
 import com.naviq.completion.syntactic.feature.RuleCallStack;
-import com.naviq.oracle.OracleSQLSyntacticAnalyzer;
+import com.naviq.completion.syntactic.OracleSQLSyntacticAnalyzer;
 import com.vmware.antlr4c3.CodeCompletionCore;
 import org.antlr.v4.runtime.*;
-import org.antlr.v4.runtime.tree.ParseTree;
 
 import java.util.*;
 

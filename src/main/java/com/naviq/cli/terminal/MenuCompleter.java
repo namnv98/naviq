@@ -1,12 +1,12 @@
 package com.naviq.cli.terminal;
 
-import com.naviq.postgresql.suggests.CompletionEngine;
-import com.naviq.completion.model.Suggest;
+import com.naviq.completion.suggests.postgresql.CompletionEngine;
+import com.naviq.model.Suggest;
 import com.naviq.cli.anchor.AnchorStrategyUtil;
 import com.naviq.cli.layout.TerminalMenu;
-import com.naviq.postgresql.suggests.CompletionHistory;
-import com.naviq.postgresql.suggests.CompletionInputPreparer;
-import com.naviq.postgresql.suggests.SuggestFilter;
+import com.naviq.completion.suggests.postgresql.CompletionHistory;
+import com.naviq.completion.suggests.postgresql.CompletionInputPreparer;
+import com.naviq.completion.suggests.postgresql.SuggestFilter;
 import org.jline.keymap.BindingReader;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.Binding;
@@ -23,7 +23,7 @@ import org.jline.utils.InfoCmp.Capability;
 import java.io.IOError;
 import java.io.PrintWriter;
 import java.util.*;
-import com.naviq.postgresql.suggests.CompletionInputPreparer.PrepareCompletionInput;
+import com.naviq.completion.suggests.postgresql.CompletionInputPreparer.PrepareCompletionInput;
 /**
  * CẬP NHẬT: logic lọc/xếp hạng fuzzy (filter/display/fuzzyMatch/fuzzyScore) đã tách sang
  * {@link SuggestFilter} (thuần, không đụng LineReader/Terminal) - xem javadoc bên đó cho

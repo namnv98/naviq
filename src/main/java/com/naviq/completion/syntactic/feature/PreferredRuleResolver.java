@@ -26,9 +26,7 @@ public class PreferredRuleResolver {
      *
      * @return true nếu đã tìm thấy và ghi nhận 1 mê cung đặc biệt trên đường đi.
      */
-    public static boolean resolve(RuleCallStack stack,
-                                  Map<Integer, Boolean> preferredRules,
-                                  CandidatesResult result) {
+    public static boolean resolve(RuleCallStack stack, Map<Integer, Boolean> preferredRules, CandidatesResult result) {
         if (preferredRules.isEmpty()) {
             return false;
         }
@@ -56,8 +54,7 @@ public class PreferredRuleResolver {
         recordIfMoreRelevant(ruleId, pathToRule, tokenIndex, result);
     }
 
-    private static void recordIfMoreRelevant(int ruleId, List<RuleCallStack.RuleFrame> pathToRule,
-                                             int tokenIndex, CandidatesResult result) {
+    private static void recordIfMoreRelevant(int ruleId, List<RuleCallStack.RuleFrame> pathToRule, int tokenIndex, CandidatesResult result) {
         Integer existingEntryIndex = result.ruleEntryTokenIndex.get(ruleId);
         if (isMoreRelevant(tokenIndex, existingEntryIndex)) {
             result.rules.put(ruleId, pathToRule);
@@ -70,9 +67,15 @@ public class PreferredRuleResolver {
      * đè nếu lần này "liên quan hơn" — ví dụ vào rule ở vị trí token muộn hơn.
      */
     private static boolean isMoreRelevant(int candidateTokenIndex, Integer existingTokenIndex) {
-        if (existingTokenIndex == null) return true;
-        if (candidateTokenIndex == RuleCallStack.RuleFrame.NO_TOKEN) return existingTokenIndex != RuleCallStack.RuleFrame.NO_TOKEN;
-        if (existingTokenIndex == RuleCallStack.RuleFrame.NO_TOKEN) return false;
-        return candidateTokenIndex > existingTokenIndex;
+        if (existingTokenIndex == null) {
+            return true;
+        }
+        if (candidateTokenIndex == RuleCallStack.RuleFrame.NO_TOKEN) {
+            return existingTokenIndex != RuleCallStack.RuleFrame.NO_TOKEN;
+        }
+        if (existingTokenIndex == RuleCallStack.RuleFrame.NO_TOKEN) {
+            return false;
+        }
+        return candidateTokenIndex > existingTokenIndex; // ưu tiên tokenIndex MUỘN HƠN
     }
 }

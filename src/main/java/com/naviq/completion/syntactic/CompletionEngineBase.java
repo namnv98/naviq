@@ -1,6 +1,7 @@
 package com.naviq.completion.syntactic;
 
 import com.naviq.completion.syntactic.feature.FollowingTokensFinder;
+import com.naviq.completion.syntactic.feature.NullableRuleChecker;
 import com.naviq.completion.syntactic.feature.PreferredRuleResolver;
 import com.naviq.completion.syntactic.feature.RuleCallStack;
 import com.naviq.completion.syntactic.feature.RuleTextRangeResolver;
@@ -22,8 +23,7 @@ import java.util.*;
  * <p>
  * - FollowSetsByState   : tính trước "từ phòng này, token nào có thể gặp",
  * cache thread-safe, dùng để cắt sớm trước khi dò cửa sống
- * — VÀ khi caret rơi đúng lúc vừa vào 1 mê cung, dùng
- * thẳng luôn để sinh gợi ý (generateSuggestionsFromFollowSets),
+ * — VÀ khi caret rơi đúng lúc vừa vào 1 mê cung, dùng thẳng luôn để sinh gợi ý (generateSuggestionsFromFollowSets),
  * core không cần biết cấu trúc dữ liệu follow-set là gì cả.
  * - PreferredRuleResolver: gộp gợi ý về mê cung đặc biệt NGOÀI CÙNG nếu lồng nhau.
  * - RuleTextRangeResolver: đổi vị trí mê cung đặc biệt thành offset ký tự.
@@ -93,6 +93,14 @@ public abstract class CompletionEngineBase {
      */
     protected abstract Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack);
 
+    /**
+     * Hook để xử lý preferred rules.
+     * @return true nếu đã xử lý (thêm rule vào result) và không cần thêm token nữa.
+     */
+    protected boolean handlePreferredRules(RuleCallStack stack, CandidatesResult result) {
+        return false;
+    }
+
     // ════════════════════════════════════════════════════════════════
     // BƯỚC 2 — Dò từng cửa trong 1 phòng: BFS trên các transition của ATN
     // ════════════════════════════════════════════════════════════════
@@ -110,7 +118,7 @@ public abstract class CompletionEngineBase {
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
                 if (isAtCaret(cur.tokenIndex())) {
-                    PreferredRuleResolver.resolve(cur.stack(), preferredRules, result);
+                    handlePreferredRules(cur.stack(), result);
                 }
                 ruleExits.add(cur.tokenIndex());
                 continue;
@@ -119,7 +127,7 @@ public abstract class CompletionEngineBase {
             boolean atCaret = isAtCaret(cur.tokenIndex());
             for (Transition t : cur.state().getTransitions()) {
                 if (t instanceof RuleTransition rt) {
-                    handleRuleDoor(rt, cur, queue);
+                    handleRuleDoor(rt, cur, atCaret, queue);
                 } else if (t instanceof PredicateTransition pt) {
                     handleFreeDoorWithCondition(pt, cur, queue);
                 } else if (t instanceof WildcardTransition wt) {
@@ -134,7 +142,41 @@ public abstract class CompletionEngineBase {
         return ruleExits;
     }
 
-    protected void handleRuleDoor(RuleTransition rt, PipelineEntry cur, Deque<PipelineEntry> queue) {
+    /**
+     * SỬA: nối {@code PreferredRuleResolver.recordMatch} vào đúng chỗ comment
+     * của nó mô tả — TRƯỚC KHI đệ quy vào {@code enterRule(rt.target, ...)}.
+     * <p>
+     * Ý tưởng: nếu đang ở ĐÚNG caret (không còn token nào để tiêu thụ nữa) VÀ
+     * ta đã biết trước {@code rt.target.ruleIndex} là 1 preferred-rule, thì
+     * việc đệ quy vào bên trong nó (walkRuleBody/enterRule đầy đủ) là THỪA:
+     * theo đúng ngữ nghĩa "quy về preferred-rule NGOÀI CÙNG NHẤT", bất kể bên
+     * trong nó có preferred-rule con nào khác hay không, kết quả cuối cùng
+     * VẪN LÀ chính {@code rt.target.ruleIndex} này (vì nó đã là match ngoài
+     * cùng nhất tại điểm này rồi). Ta chỉ cần:
+     * <p>
+     * 1) Ghi nhận match ngay lập tức via {@code recordMatch} — khỏi phải
+     * dựng lại {@code fullPath} rồi quét lại từ đầu như {@code resolve} làm.
+     * 2) Xác định rule đó có "rỗng" được không ({@code canExitWithoutConsumingToken})
+     * để biết caller (walkRuleBody đang chờ ở {@code cur}) có nên tiếp tục đi
+     * qua {@code rt.followState} hay dừng hẳn ở đây (chưa nói hết câu, không
+     * đủ để hoàn thành rule con này).
+     * <p>
+     * Nếu KHÔNG ở tại caret, hoặc {@code rt.target.ruleIndex} không phải
+     * preferred, quay lại đường đi bình thường: đệ quy {@code enterRule} như
+     * trước — vì lúc này còn phải thật sự tiêu thụ token để biết đi tiếp được
+     * hay ngõ cụt, "preferred hay không" không giúp bỏ qua bước đó được.
+     */
+    protected void handleRuleDoor(RuleTransition rt, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
+        if (atCaret && preferredRules.containsKey(rt.target.ruleIndex)) {
+            PreferredRuleResolver.recordMatch(rt.target.ruleIndex, cur.stack(), cur.tokenIndex(), result);
+            if (NullableRuleChecker.canExitWithoutConsumingToken(parser, rt.target)) {
+                queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
+            }
+            // Không nullable -> rule con này còn "nợ" ít nhất 1 token, không
+            // thể hoàn thành ngay tại caret -> không push gì thêm, dừng ở đây.
+            return;
+        }
+
         for (int exitTok : enterRule(rt.target, cur.tokenIndex(), cur.stack())) {
             queue.push(new PipelineEntry(rt.followState, exitTok, cur.stack()));
         }
@@ -159,7 +201,9 @@ public abstract class CompletionEngineBase {
             queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
             return;
         }
-        if (PreferredRuleResolver.resolve(cur.stack(), preferredRules, result)) return;
+        if (handlePreferredRules(cur.stack(), result)) {
+            return;
+        }
         IntervalSet all = IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
         for (int sym : all.toList()) {
             if (!ignoredTokens.containsKey(sym)) {
@@ -178,7 +222,7 @@ public abstract class CompletionEngineBase {
         }
 
         if (atCaret) {
-            if (PreferredRuleResolver.resolve(cur.stack(), preferredRules, result)) {
+            if (handlePreferredRules(cur.stack(), result)) {
                 return;
             }
             List<Integer> syms = label.toList();
