@@ -1,6 +1,6 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
          http://www.apache.org/xsd/maven-4.0.0.xsd">
 
     <modelVersion>4.0.0</modelVersion>
@@ -70,11 +70,29 @@
                         <goals>
                             <goal>antlr4</goal>
                         </goals>
+                        <id>postgresql</id>
                         <configuration>
                             <visitor>true</visitor>
                             <listener>true</listener>
-                            <sourceDirectory>src/main/antlr4</sourceDirectory>
-                            <outputDirectory>${project.build.directory}/generated-sources/antlr4/com/naviq/antlr4</outputDirectory>
+                            <sourceDirectory>src/main/antlr4/postgresql</sourceDirectory>
+                            <outputDirectory>
+                                ${project.build.directory}/generated-sources/antlr4/com/naviq/antlr4/postgresql
+                            </outputDirectory>
+                        </configuration>
+                    </execution>
+
+                    <execution>
+                        <goals>
+                            <goal>antlr4</goal>
+                        </goals>
+                        <id>oracle</id>
+                        <configuration>
+                            <visitor>true</visitor>
+                            <listener>true</listener>
+                            <sourceDirectory>src/main/antlr4/oracle</sourceDirectory>
+                            <outputDirectory>
+                                ${project.build.directory}/generated-sources/antlr4/com/naviq/antlr4/oracle
+                            </outputDirectory>
                         </configuration>
                     </execution>
                 </executions>
@@ -93,7 +111,7 @@
                         <configuration>
                             <transformers>
                                 <transformer
-                                  implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.naviq.cli.NaviQCli</mainClass>
                                 </transformer>
                             </transformers>
@@ -109,7 +127,9 @@
                 <executions>
                     <execution>
                         <phase>process-sources</phase>  <!-- đổi từ generate-sources -->
-                        <goals><goal>add-source</goal></goals>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
                         <configuration>
                             <sources>
                                 <source>${project.build.directory}/generated-sources/antlr4</source>
