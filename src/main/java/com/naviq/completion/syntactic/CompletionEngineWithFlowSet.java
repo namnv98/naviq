@@ -79,7 +79,16 @@ public class CompletionEngineWithFlowSet extends CompletionEngineBase {
         }
 
         boolean mayMatch = isNullable(followSets) || followSets.combined().contains(tokens.get(tokenIndex).type());
-        Set<Integer> exits = mayMatch ? walkRuleBody(start, tokenIndex, entered) : Collections.emptySet();
+
+        Set<Integer> exits;
+        // nếu trinh sát nói chắc chắn "không cửa nào ở đây khớp được với từ tiếp theo" (mayMatch == false),
+        // thì khỏi cần gọi walkRuleBody luôn — bỏ qua hẳn việc dò cửa sống, trả emptySet() ngay.
+        // Đây là tiết kiệm công
+        if (mayMatch) {
+            exits = walkRuleBody(start, tokenIndex, entered);
+        } else {
+            return Collections.emptySet();
+        }
         exitsByEntryToken.put(tokenIndex, exits);
         return exits;
     }

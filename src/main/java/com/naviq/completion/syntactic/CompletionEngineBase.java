@@ -143,38 +143,34 @@ public abstract class CompletionEngineBase {
     }
 
     /**
-     * SỬA: nối {@code PreferredRuleResolver.recordMatch} vào đúng chỗ comment
-     * của nó mô tả — TRƯỚC KHI đệ quy vào {@code enterRule(rt.target, ...)}.
+     * SỬA BUG THẬT (phát hiện qua DemoBugRepro3 — xem lại lịch sử trò chuyện):
+     * bản trước gọi thẳng {@code PreferredRuleResolver.recordMatch(rt.target.ruleIndex, ...)} —
+     * ghi nhận NGAY rule vừa chạm tới, mà KHÔNG kiểm tra {@code cur.stack()} (ngữ cảnh ancestor)
+     * đã có sẵn 1 preferred-rule NGOÀI nó hay chưa. Hệ quả: nếu 1 preferred-rule A lồng bên trong
+     * 1 preferred-rule B (A là ancestor của B trong stack lúc gặp RuleTransition vào B, cả 2 đều
+     * preferred), code cũ ghi nhận CẢ B (sai, vi phạm "quy về ngoài cùng nhất") LẪN A (đúng, qua
+     * lưới an toàn resolve() ở RULE_STOP của A) — ra 2 gợi ý thay vì đúng 1.
      * <p>
-     * Ý tưởng: nếu đang ở ĐÚNG caret (không còn token nào để tiêu thụ nữa) VÀ
-     * ta đã biết trước {@code rt.target.ruleIndex} là 1 preferred-rule, thì
-     * việc đệ quy vào bên trong nó (walkRuleBody/enterRule đầy đủ) là THỪA:
-     * theo đúng ngữ nghĩa "quy về preferred-rule NGOÀI CÙNG NHẤT", bất kể bên
-     * trong nó có preferred-rule con nào khác hay không, kết quả cuối cùng
-     * VẪN LÀ chính {@code rt.target.ruleIndex} này (vì nó đã là match ngoài
-     * cùng nhất tại điểm này rồi). Ta chỉ cần:
-     * <p>
-     * 1) Ghi nhận match ngay lập tức via {@code recordMatch} — khỏi phải
-     * dựng lại {@code fullPath} rồi quét lại từ đầu như {@code resolve} làm.
-     * 2) Xác định rule đó có "rỗng" được không ({@code canExitWithoutConsumingToken})
-     * để biết caller (walkRuleBody đang chờ ở {@code cur}) có nên tiếp tục đi
-     * qua {@code rt.followState} hay dừng hẳn ở đây (chưa nói hết câu, không
-     * đủ để hoàn thành rule con này).
-     * <p>
-     * Nếu KHÔNG ở tại caret, hoặc {@code rt.target.ruleIndex} không phải
-     * preferred, quay lại đường đi bình thường: đệ quy {@code enterRule} như
-     * trước — vì lúc này còn phải thật sự tiêu thụ token để biết đi tiếp được
-     * hay ngõ cụt, "preferred hay không" không giúp bỏ qua bước đó được.
+     * SỬA: dùng {@code resolve()} trên TOÀN BỘ (stack hiện tại + rt.target) — quét đúng từ ngoài
+     * vào trong, dừng ở match đầu tiên gặp được, dù đó là 1 ancestor đã có sẵn hay chính rt.target.
+     * Nếu resolve() tìm thấy match (bất kể là ai), ta biết chắc đã có 1 preferred-rule bao trọn
+     * điểm này rồi — không cần đệ quy vào thân {@code rt.target} nữa (dù nó preferred hay không),
+     * chỉ cần biết nó có "rỗng" được không để quyết định tiếp tục BFS qua {@code followState}.
      */
     protected void handleRuleDoor(RuleTransition rt, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
-        if (atCaret && preferredRules.containsKey(rt.target.ruleIndex)) {
-            PreferredRuleResolver.recordMatch(rt.target.ruleIndex, cur.stack(), cur.tokenIndex(), result);
-            if (NullableRuleChecker.canExitWithoutConsumingToken(parser, rt.target)) {
-                queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
+        if (atCaret) {
+            RuleCallStack withTarget = cur.stack().copy();
+            withTarget.push(rt.target.ruleIndex, cur.tokenIndex());
+            if (PreferredRuleResolver.resolve(withTarget, preferredRules, result)) {
+                if (NullableRuleChecker.canExitWithoutConsumingToken(parser, rt.target)) {
+                    queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
+                }
+                // Không nullable -> rule con này còn "nợ" ít nhất 1 token, không
+                // thể hoàn thành ngay tại caret -> không push gì thêm, dừng ở đây.
+                return;
             }
-            // Không nullable -> rule con này còn "nợ" ít nhất 1 token, không
-            // thể hoàn thành ngay tại caret -> không push gì thêm, dừng ở đây.
-            return;
+            // resolve() không tìm thấy preferred-rule nào (kể cả rt.target không preferred)
+            // -> đi tiếp bình thường, đệ quy vào enterRule như dưới.
         }
 
         for (int exitTok : enterRule(rt.target, cur.tokenIndex(), cur.stack())) {
