@@ -123,11 +123,26 @@ public class SemanticScope extends PlSqlParserBaseListener {
         return false;
     }
 
+//    public Scope scopeAt(int tokenIndex) {
+//        Scope best = null;
+//        for (Scope s : allScopes) {
+//            if (s.startTokenIndex < 0) {
+//                continue;
+//            }
+//            if (s.startTokenIndex <= tokenIndex && tokenIndex <= s.stopTokenIndex) {
+//                if (best == null || spanOf(s) < spanOf(best)) {
+//                    best = s;
+//                }
+//            }
+//        }
+//        return best != null ? best : root;
+//    }
+
     public Scope scopeAt(int tokenIndex) {
         Scope best = null;
         for (Scope s : allScopes) {
             if (s.startTokenIndex < 0) {
-                continue;
+                continue; // root hoặc chưa set
             }
             if (s.startTokenIndex <= tokenIndex && tokenIndex <= s.stopTokenIndex) {
                 if (best == null || spanOf(s) < spanOf(best)) {
@@ -135,8 +150,26 @@ public class SemanticScope extends PlSqlParserBaseListener {
                 }
             }
         }
+        if (best != null) {
+            return best;
+        }
+
+        // FALLBACK MỚI: không scope nào phủ TRỌN tokenIndex (rất có thể vì phần đuôi câu, nơi
+        // caret đang đứng, chưa được grammar tiêu thụ hết - do caller chỉ parse 1 rule con như
+        // unit_statement() thay vì cả sql_script kèm EOF, KHÔNG liên quan gì tới lỗi cú pháp).
+        // Chọn scope có startTokenIndex LỚN NHẤT mà vẫn <= tokenIndex - tức scope "gần vị trí
+        // caret nhất tính theo điểm bắt đầu" - thay vì rơi thẳng về root (mất sạch mọi alias).
+        for (Scope s : allScopes) {
+            if (s.startTokenIndex < 0 || s.startTokenIndex > tokenIndex) {
+                continue;
+            }
+            if (best == null || s.startTokenIndex > best.startTokenIndex) {
+                best = s;
+            }
+        }
         return best != null ? best : root;
     }
+
 
     private static long spanOf(Scope s) {
         long stop = s.stopTokenIndex == Integer.MAX_VALUE ? Long.MAX_VALUE : s.stopTokenIndex;
@@ -516,6 +549,7 @@ public class SemanticScope extends PlSqlParserBaseListener {
             cur.derivedScopeAliases.put(name, cteScope);
         }
     }
+
     /**
      * Tìm "table" trong danh sách CTE đã đăng ký (derivedScopeAliases) tính từ scope hiện tại leo
      * lên tổ tiên - vì WITH nằm CHUNG scope với chỗ dùng nó (khác Postgres cần merge từ pendingCte

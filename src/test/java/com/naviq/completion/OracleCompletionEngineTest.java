@@ -272,7 +272,7 @@ public class OracleCompletionEngineTest {
     void danglingDotInSelectListWithMultipleJoinsScopesCorrectAlias() {
         var result = suggest("select u.| from users u join orders o on u.id = o.user_id");
         assertTrue(hasKeyOfType(result, "u.name", "column"));
-        assertTrue(hasKeyOfType(result, "o.total", "column"));
+        assertFalse(hasKeyOfType(result, "o.total", "column"));
     }
 
     @Test
