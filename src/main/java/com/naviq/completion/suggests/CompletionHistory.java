@@ -1,4 +1,4 @@
-package com.naviq.completion.suggests.oracle;
+package com.naviq.completion.suggests;
 
 import java.io.IOException;
 import java.io.InputStream;

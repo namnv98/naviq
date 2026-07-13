@@ -1,4 +1,4 @@
-package com.naviq.completion.suggests.oracle;
+package com.naviq.completion.suggests;
 
 public class CompletionInputPreparer {   // ───────────────────────────────────────────────────
     public record PrepareCompletionInput(String sql, int cursor, String prefix, boolean dotMode, String sqlSearch,

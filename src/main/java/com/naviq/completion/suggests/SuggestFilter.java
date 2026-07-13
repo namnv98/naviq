@@ -1,4 +1,4 @@
-package com.naviq.completion.suggests.postgresql;
+package com.naviq.completion.suggests;
 
 import com.naviq.model.Suggest;
 

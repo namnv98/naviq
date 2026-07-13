@@ -1,4 +1,4 @@
-package com.naviq.completion.suggests.oracle;
+package com.naviq.completion.suggests;
 
 import com.naviq.completion.semantic.Scope;
 import com.naviq.datasource.SchemaIndex;

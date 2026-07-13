@@ -1,6 +1,9 @@
 package com.naviq.completion.suggests.oracle;
 
 import com.naviq.antlr4.oracle.PlSqlParser;
+import com.naviq.completion.suggests.CompletionInputPreparer;
+import com.naviq.completion.suggests.DerivedColumnExpander;
+import com.naviq.completion.suggests.SuggestFilter;
 import com.naviq.model.Suggest;
 import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
 import com.naviq.datasource.SchemaIndex;

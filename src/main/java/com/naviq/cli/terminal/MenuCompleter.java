@@ -1,12 +1,12 @@
 package com.naviq.cli.terminal;
 
+import com.naviq.completion.suggests.CompletionHistory;
+import com.naviq.completion.suggests.CompletionInputPreparer;
+import com.naviq.completion.suggests.SuggestFilter;
 import com.naviq.completion.suggests.postgresql.CompletionEngine;
 import com.naviq.model.Suggest;
 import com.naviq.cli.anchor.AnchorStrategyUtil;
 import com.naviq.cli.layout.TerminalMenu;
-import com.naviq.completion.suggests.postgresql.CompletionHistory;
-import com.naviq.completion.suggests.postgresql.CompletionInputPreparer;
-import com.naviq.completion.suggests.postgresql.SuggestFilter;
 import org.jline.keymap.BindingReader;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.Binding;
@@ -23,7 +23,7 @@ import org.jline.utils.InfoCmp.Capability;
 import java.io.IOError;
 import java.io.PrintWriter;
 import java.util.*;
-import com.naviq.completion.suggests.postgresql.CompletionInputPreparer.PrepareCompletionInput;
+
 /**
  * CẬP NHẬT: logic lọc/xếp hạng fuzzy (filter/display/fuzzyMatch/fuzzyScore) đã tách sang
  * {@link SuggestFilter} (thuần, không đụng LineReader/Terminal) - xem javadoc bên đó cho
@@ -179,7 +179,7 @@ public class MenuCompleter {
             return;
         }
 
-        PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
+        CompletionInputPreparer.PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
         List<Suggest> suggests = CompletionEngine.suggests(prepareCompletionInput);
 
         if (suggests.isEmpty()) {
@@ -197,7 +197,7 @@ public class MenuCompleter {
 
         String sql = reader.getBuffer().toString();
         int cursor = reader.getBuffer().cursor();
-        PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
+        CompletionInputPreparer.PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
         List<Suggest> suggests = CompletionEngine.suggests(prepareCompletionInput);
 
         if (suggests.isEmpty()) {
