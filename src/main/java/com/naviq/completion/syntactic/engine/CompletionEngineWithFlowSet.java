@@ -21,7 +21,7 @@ public class CompletionEngineWithFlowSet extends CompletionEngineBase {
 
     // FEATURE — xem FollowSetsByState.java. Field này chỉ là 1 "tay cầm" gọi
     // ra feature đó; engine core không quan tâm nó tính follow-set thế nào.
-    protected final FollowSetsByState followSetsByState = new FollowSetsByState();
+    private static final FollowSetsByState followSetsByState = new FollowSetsByState();
 
     public CompletionEngineWithFlowSet(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         super(parser, ignoredTokens, preferredRules);
