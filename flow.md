@@ -371,7 +371,7 @@ sâu hơn.
 
 ### Vì sao 2 đường này không bao giờ giẫm chân nhau
 
-Đường tắt (`recordMatch`, chạy trong `handleRuleDoor`) và lưới an toàn (`resolve`, chạy ở 3 điểm "chạm đáy") **không
+Đường tắt (`resolve`, chạy trong `handleRuleDoor`) và lưới an toàn (`resolve`, chạy ở 3 điểm "chạm đáy") **không
 bao giờ cùng chạy cho cùng 1 lần hết-lời trên cùng 1 nhánh** — vì lý do rất đơn giản:
 
 Đường tắt, một khi đã chạy, **chặn đứng hoàn toàn** việc đi sâu thêm vào phòng VIP đó (`return` ngay, không gọi

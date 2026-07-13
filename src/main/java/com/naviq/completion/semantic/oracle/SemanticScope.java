@@ -204,7 +204,9 @@ public class SemanticScope extends PlSqlParserBaseListener {
             return;
         }
         var aliasCtx = refCtx.table_alias();
-        String alias = aliasCtx != null ? aliasCtx.getText() : lastPart(table);
+        String alias = aliasCtx != null && !aliasCtx.getText().trim().isEmpty()
+                ? aliasCtx.getText().trim()
+                : lastPart(table);
         registerTableOrCte(target, alias, table);
     }
 
@@ -262,7 +264,9 @@ public class SemanticScope extends PlSqlParserBaseListener {
             return;
         }
         var aliasCtx = stCtx.table_alias();
-        String alias = aliasCtx != null ? aliasCtx.getText() : lastPart(table);
+        String alias = aliasCtx != null && !aliasCtx.getText().trim().isEmpty()
+                ? aliasCtx.getText().trim()
+                : lastPart(table);
         registerTableOrCte(target, alias, table);
     }
 
@@ -312,7 +316,9 @@ public class SemanticScope extends PlSqlParserBaseListener {
             return;
         }
         var aliasCtx = ctx.table_alias();
-        String alias = aliasCtx != null ? aliasCtx.getText() : lastPart(table);
+        String alias = aliasCtx != null && !aliasCtx.getText().trim().isEmpty()
+                ? aliasCtx.getText().trim()
+                : lastPart(table);
         registerTableOrCte(cur, alias, table);
     }
 
@@ -421,7 +427,9 @@ public class SemanticScope extends PlSqlParserBaseListener {
             if (table == null) {
                 return;
             }
-            String alias = aliasCtx != null ? aliasCtx.getText() : lastPart(table);
+            String alias = aliasCtx != null && !aliasCtx.getText().trim().isEmpty()
+                    ? aliasCtx.getText().trim()
+                    : lastPart(table);
             registerTableOrCte(cur, alias, table);
         } else if (dmlCtx.select_statement() != null) {
             // "(select ...) alias" - subquery trong ngoặc, chỉ tham chiếu được nếu CÓ alias

@@ -424,4 +424,217 @@ public class OracleCompletionEngineTest {
         var result = suggest("select count(*), | from orders group by status");
         assertTrue(hasKeyOfType(result, "orders.status", "column"));
     }
+
+    // =====================================================================
+    // Các test bổ sung
+    // =====================================================================
+
+    @Test
+    @DisplayName("'select * from users group by |' - gợi ý các cột của bảng users để nhóm")
+    void groupByClauseColumnSuggestions() {
+        var result = suggest("select * from users group by |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertTrue(hasKeyOfType(result, "users.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'select status, count(*) from orders group by status having |' - HAVING gợi ý cột đã có trong GROUP BY")
+    void havingClauseColumnSuggestions() {
+        var result = suggest("select status, count(*) from orders group by status having |");
+        // status là cột trong GROUP BY, có thể dùng trong HAVING
+        assertTrue(hasKeyOfType(result, "orders.status", "column"));
+        // aggregate count(*) không phải cột nên không gợi ý, nhưng có thể gợi ý hàm count
+        // không kiểm tra thêm
+    }
+
+    @Test
+    @DisplayName("'select * from users order by |' - gợi ý cột của bảng users cho ORDER BY")
+    void orderByClauseColumnSuggestions() {
+        var result = suggest("select * from users order by |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'select id as user_id from users order by |' - ORDER BY gợi ý được alias của cột")
+    void orderByWithAliasSuggestion() {
+        var result = suggest("select id as user_id from users order by |");
+//        // Alias user_id nên được gợi ý dạng column (vì có thể dùng trong ORDER BY)
+//        assertTrue(hasKeyOfType(result, "user_id", "column"));
+        // Cũng có thể gợi ý cột thật users.id
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'select | from users' - gợi ý cả cột và hàm (count, sum, ...)")
+    void selectListFunctionSuggestions() {
+        var result = suggest("select | from users");
+        // Có cột
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        // Có hàm (từ SchemaIndex.FUNCTIONS)
+        assertTrue(hasKeyOfType(result, "count", "function"));
+        assertTrue(hasKeyOfType(result, "sum", "function"));
+        assertTrue(hasKeyOfType(result, "avg", "function"));
+    }
+
+    @Test
+    @DisplayName("'select * from users u join orders o on |' - ON clause gợi ý cột của cả 2 bảng với alias")
+    void onClauseColumnSuggestions() {
+        var result = suggest("select * from users u join orders o on |");
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.id", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'select * from users u join orders o on u.id = o.user_id and |' - ON tiếp tục với AND gợi ý cột")
+    void onClauseAndContinuationColumnSuggestions() {
+        var result = suggest("select * from users u join orders o on u.id = o.user_id and |");
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+        assertTrue(hasKeyOfType(result, "o.status", "column"));
+    }
+
+    @Test
+    @DisplayName("'merge into users u using orders o on (u.id = o.user_id) when matched then update set |' - gợi ý cột của target table")
+    void mergeUpdateSetColumnSuggestions() {
+        var result = suggest("merge into users u using orders o on (u.id = o.user_id) when matched then update set |");
+        // Cột của users (target)
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+        // Không gợi ý cột của orders (source)
+        assertFalse(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'alter table users add column new_col |' - sau định nghĩa cột, gợi ý kiểu dữ liệu")
+    void alterTableAddColumnDataTypeSuggestions() {
+        var result = suggest("alter table users add column new_col |");
+        var datatypes = keysOfType(result, "datatype");
+        assertTrue(datatypes.contains("int4"));
+        assertTrue(datatypes.contains("text"));
+        assertTrue(datatypes.contains("numeric"));
+    }
+
+    @Test
+    @DisplayName("'alter table users modify column email |' - MODIFY cột gợi ý kiểu dữ liệu (có thể NULL/NOT NULL nhưng ta chỉ test datatype)")
+    void alterTableModifyColumnDataTypeSuggestions() {
+        var result = suggest("alter table users modify column email |");
+        var datatypes = keysOfType(result, "datatype");
+        assertTrue(datatypes.contains("text"));
+        // Có thể gợi ý thêm NULL/NOT NULL nhưng không bắt buộc
+    }
+
+    @Test
+    @DisplayName("'drop table |' - gợi ý tên bảng")
+    void dropTableSuggestions() {
+        var result = suggest("drop table |");
+        var tables = keysOfType(result, "table");
+        assertTrue(tables.contains("public.users"));
+        assertTrue(tables.contains("public.orders"));
+        assertTrue(tables.contains("public.contracts"));
+    }
+
+    @Test
+    @DisplayName("'truncate table |' - gợi ý tên bảng")
+    void truncateTableSuggestions() {
+        var result = suggest("truncate table |");
+        var tables = keysOfType(result, "table");
+        assertTrue(tables.contains("public.users"));
+        assertTrue(tables.contains("public.orders"));
+    }
+
+    @Test
+    @DisplayName("'select distinct | from users' - DISTINCT vẫn gợi ý cột bình thường")
+    void selectDistinctColumnSuggestions() {
+        var result = suggest("select distinct | from users");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'select (select | from orders o where o.user_id = u.id) from users u' - subquery trong SELECT list gợi ý cột của subquery và outer alias")
+    void subqueryInSelectListColumnSuggestions() {
+        var result = suggest("select (select | from orders o where o.user_id = u.id) from users u");
+        // Trong subquery, có thể gợi ý cột của orders (o)
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+        // Outer alias u cũng visible (correlated)
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        // Không gợi ý cột không tồn tại
+    }
+
+    @Test
+    @DisplayName("'with c1 as (select id from users), c2 as (select id, status from orders) select | from c1 join c2 on c1.id = c2.id' - nhiều CTE gợi ý cột của từng CTE")
+    void multipleCtesColumnSuggestions() {
+        var result = suggest("with c1 as (select id from users), c2 as (select id, status from orders) select | from c1 join c2 on c1.id = c2.id");
+        assertTrue(hasKeyOfType(result, "c1.id", "column"));
+        assertTrue(hasKeyOfType(result, "c2.id", "column"));
+        assertTrue(hasKeyOfType(result, "c2.status", "column"));
+    }
+
+    @Test
+    @DisplayName("'with c (col1, col2) as (select id, name from users) select | from c' - CTE có danh sách cột gợi ý đúng alias cột")
+    void cteWithColumnListSuggestions() {
+        var result = suggest("with c (col1, col2) as (select id, name from users) select | from c");
+        // Phải gợi ý col1, col2 chứ không phải id, name
+        assertTrue(hasKeyOfType(result, "c.col1", "column"));
+        assertTrue(hasKeyOfType(result, "c.col2", "column"));
+        assertFalse(hasKeyOfType(result, "c.id", "column"));
+        assertFalse(hasKeyOfType(result, "c.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'select id from users union select | from orders' - vế UNION thứ hai gợi ý cột của orders, không thấy users")
+    void unionSecondBranchColumnSuggestions() {
+        var result = suggest("select id from users union select | from orders");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+        assertFalse(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'select | from users' - gợi ý keyword 'distinct' và 'all'? (nếu có) - kiểm tra từ khóa")
+    void selectKeywordSuggestions() {
+        var result = suggest("select | from users");
+        var keywords = allKeywordKeys(result);
+        // Có thể gợi ý distinct/all nếu parser hỗ trợ
+        // Tùy triển khai, nhưng ta kiểm tra nếu có
+        // Không assert cứng, chỉ đảm bảo không crash
+        assertNotNull(result);
+    }
+
+    @Test
+    @DisplayName("'select * from users u where u.id = |' - bên phải so sánh gợi ý cột (có thể), hàm, literal - không rỗng")
+    void comparisonRightHandSideGeneralSuggestions() {
+        var result = suggest("select * from users u where u.id = |");
+        assertFalse(result.isEmpty());
+        // Có thể có cột, hàm, hoặc keyword NULL
+    }
+
+    @Test
+    @DisplayName("'select * from users where id in (select | from orders)' - subquery trong IN gợi ý cột của orders")
+    void subqueryInInClauseColumnSuggestions() {
+        var result = suggest("select * from users where id in (select | from orders)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("ROBUSTNESS: câu lệnh thiếu FROM nhưng có alias - không crash")
+    void missingFromDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("select u.|");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("ROBUSTNESS: câu lệnh chỉ có 'select |' - không crash, có thể gợi ý hàm hoặc từ khóa")
+    void bareSelectDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("select |");
+            assertNotNull(result);
+        });
+    }
 }

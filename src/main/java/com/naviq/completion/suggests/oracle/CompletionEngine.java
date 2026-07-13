@@ -56,7 +56,7 @@ public class CompletionEngine {
             addKeywordSuggestions(suggests, tokenType, following);
         }
 
-        Set<String> matchedRuleNames = KeywordNoiseFilter.computeMatchedRuleNames(syntacticResults, syntacticCursor);
+        Set<String> matchedRuleNames = KeywordNoiseFilter.computeMatchedRuleNamesV1(syntacticResults, syntacticCursor);
 
         // typename (Postgres) -> Oracle KHÔNG có rule tên "typename": type_spec là rule bao ngoài
         // (gồm cả REF/%ROWTYPE/%TYPE), datatype là kiểu dữ liệu "thuần" (NUMBER/VARCHAR2/...) -
@@ -103,7 +103,15 @@ public class CompletionEngine {
         boolean shouldSuggestColumnsViaGeneralElement = matchedRuleNames.contains("general_element")
                 && !isGeneralElementCursorName && !isGeneralElementAssignTarget;
 
-        if (matchedRuleNames.contains("column_name") || matchedRuleNames.contains("general_element")) {
+        boolean isInAddColumnClause = isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_add_column_clause)
+                || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_add_column_clause)
+                || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_column_definition)
+                || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_column_definition);
+
+        if (matchedRuleNames.contains("regular_id") && isInAddColumnClause) {
+            addDataTypeSuggestions(suggests);
+        }
+        if (matchedRuleNames.contains("column_name") || matchedRuleNames.contains("general_element") || matchedRuleNames.contains("regular_id")) {
             addColumnSuggestions(suggests, semanticResult);
         }
 
@@ -135,7 +143,7 @@ public class CompletionEngine {
     }
 
     private static void addDataTypeSuggestions(List<Suggest> suggests) {
-//        SchemaIndex.DATA_TYPES.forEach(t -> suggests.add(Suggest.of(t, "datatype", t)));
+        SchemaIndex.DATA_TYPES.forEach(t -> suggests.add(Suggest.of(t, "datatype", t)));
     }
 
     private static void addTableAliasSuggestions(List<Suggest> suggests, OracleSQLSyntacticAnalyzer.Result syn, SemanticAnalyzer.Result sem) {
@@ -147,7 +155,7 @@ public class CompletionEngine {
     }
 
     private static void addColumnSuggestions(List<Suggest> suggests, SemanticAnalyzer.Result sem) {
-//        SchemaIndex.FUNCTIONS.forEach(fn -> suggests.add(Suggest.of(fn, "function")));
+        SchemaIndex.FUNCTIONS.forEach(fn -> suggests.add(Suggest.of(fn, "function")));
         if (sem.qualifier() != null) {
             String qualifier = sem.qualifier();
             if (sem.qualifierDerivedScope() != null) {

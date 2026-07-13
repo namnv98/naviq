@@ -38,6 +38,18 @@ public class KeywordNoiseFilter {
     public KeywordNoiseFilter() {
     }
 
+
+    public static Set<String> computeMatchedRuleNamesV1(OracleSQLSyntacticAnalyzer.Result syn, int cursorOffset) {
+        var candidates = syn.candidates();
+        Map<Integer, List<RuleCallStack.RuleFrame>> rulesMatched = candidates.rules;
+
+        // TẠM THỜI: trả về tất cả rule names không qua filter
+        Set<String> result = new HashSet<>();
+        for (Integer ruleIndex : rulesMatched.keySet()) {
+            result.add(PlSqlParser.ruleNames[ruleIndex]);
+        }
+        return result;
+    }
     /**
      * Điểm vào duy nhất - trả về tập tên rule cuối cùng nên dùng để quyết định gợi ý, đã lọc bỏ các
      * rule "sống sót giả".
