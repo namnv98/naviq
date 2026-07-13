@@ -2,8 +2,9 @@ package com.naviq.completion.syntactic;
 
 import com.naviq.antlr4.oracle.PlSqlLexer;
 import com.naviq.antlr4.oracle.PlSqlParser;
-import com.naviq.completion.syntactic.feature.FollowSetsByState;
-import com.naviq.completion.syntactic.model.CandidatesResult;
+import com.naviq.completion.syntactic.engine.CompletionEngine;
+import com.naviq.completion.syntactic.engine.feature.FollowSetsByState;
+import com.naviq.completion.syntactic.engine.model.CandidatesResult;
 import com.naviq.utils.TokenPositionUtil;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;

@@ -3,7 +3,7 @@ package com.naviq;
 
 import com.naviq.antlr4.oracle.PlSqlLexer;
 import com.naviq.antlr4.oracle.PlSqlParser;
-import com.naviq.completion.syntactic.feature.RuleCallStack;
+import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
 import com.naviq.completion.syntactic.OracleSQLSyntacticAnalyzer;
 import com.vmware.antlr4c3.CodeCompletionCore;
 import org.antlr.v4.runtime.*;

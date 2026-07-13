@@ -1,9 +1,9 @@
-package com.naviq.completion.syntactic;
+package com.naviq.completion.syntactic.engine;
 
-import com.naviq.completion.syntactic.feature.FollowSetsByState;
-import com.naviq.completion.syntactic.feature.PreferredRuleResolver;
-import com.naviq.completion.syntactic.feature.RuleCallStack;
-import com.naviq.completion.syntactic.model.CandidatesResult;
+import com.naviq.completion.syntactic.engine.feature.FollowSetsByState;
+import com.naviq.completion.syntactic.engine.feature.PreferredRuleResolver;
+import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
+import com.naviq.completion.syntactic.engine.model.CandidatesResult;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.atn.ATNState;

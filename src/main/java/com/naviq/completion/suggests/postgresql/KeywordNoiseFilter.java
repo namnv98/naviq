@@ -1,7 +1,7 @@
 package com.naviq.completion.suggests.postgresql;
 
 import com.naviq.antlr4.postgresql.PostgreSQLParser;
-import com.naviq.completion.syntactic.feature.RuleCallStack;
+import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
 import com.naviq.completion.syntactic.PostgreSQLSyntacticAnalyzer;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;

@@ -1,6 +1,6 @@
-package com.naviq.completion.syntactic.feature;
+package com.naviq.completion.syntactic.engine.feature;
 
-import com.naviq.completion.syntactic.model.CandidatesResult;
+import com.naviq.completion.syntactic.engine.model.CandidatesResult;
 
 import java.util.*;
 

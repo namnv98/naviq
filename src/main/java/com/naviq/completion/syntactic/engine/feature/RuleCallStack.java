@@ -1,4 +1,4 @@
-package com.naviq.completion.syntactic.feature;
+package com.naviq.completion.syntactic.engine.feature;
 
 import lombok.Getter;
 

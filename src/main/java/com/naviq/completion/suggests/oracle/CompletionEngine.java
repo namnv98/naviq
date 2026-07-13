@@ -2,7 +2,7 @@ package com.naviq.completion.suggests.oracle;
 
 import com.naviq.antlr4.oracle.PlSqlParser;
 import com.naviq.model.Suggest;
-import com.naviq.completion.syntactic.feature.RuleCallStack;
+import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
 import com.naviq.datasource.SchemaIndex;
 import com.naviq.completion.syntactic.OracleSQLSyntacticAnalyzer;
 import com.naviq.completion.semantic.oracle.SemanticAnalyzer;

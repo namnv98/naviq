@@ -1,4 +1,4 @@
-package com.naviq.completion.syntactic.feature;
+package com.naviq.completion.syntactic.engine.feature;
 
 import org.antlr.v4.runtime.atn.AtomTransition;
 import org.antlr.v4.runtime.atn.ATNState;

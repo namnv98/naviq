@@ -1,6 +1,6 @@
-package com.naviq.completion.syntactic.model;
+package com.naviq.completion.syntactic.engine.model;
 
-import com.naviq.completion.syntactic.feature.RuleCallStack;
+import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
 
 import java.util.*;
 

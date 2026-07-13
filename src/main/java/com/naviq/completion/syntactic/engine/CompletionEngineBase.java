@@ -1,12 +1,12 @@
-package com.naviq.completion.syntactic;
+package com.naviq.completion.syntactic.engine;
 
-import com.naviq.completion.syntactic.feature.FollowingTokensFinder;
-import com.naviq.completion.syntactic.feature.NullableRuleChecker;
-import com.naviq.completion.syntactic.feature.PreferredRuleResolver;
-import com.naviq.completion.syntactic.feature.RuleCallStack;
-import com.naviq.completion.syntactic.feature.RuleTextRangeResolver;
-import com.naviq.completion.syntactic.model.CandidatesResult;
-import com.naviq.completion.syntactic.model.InputToken;
+import com.naviq.completion.syntactic.engine.feature.FollowingTokensFinder;
+import com.naviq.completion.syntactic.engine.feature.NullableRuleChecker;
+import com.naviq.completion.syntactic.engine.feature.PreferredRuleResolver;
+import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
+import com.naviq.completion.syntactic.engine.feature.RuleTextRangeResolver;
+import com.naviq.completion.syntactic.engine.model.CandidatesResult;
+import com.naviq.completion.syntactic.engine.model.InputToken;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
