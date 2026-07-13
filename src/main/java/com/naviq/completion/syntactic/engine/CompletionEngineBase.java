@@ -32,6 +32,14 @@ import java.util.*;
  * <p>
  * Đọc file này là đủ để hiểu đúng LÕI thuật toán completion. 4 file kia chỉ
  * cần đọc khi bạn quan tâm tới đúng phần tối ưu/tiện ích tương ứng.
+ * <p>
+ * GỘP LẠI (so với bản trước): {@code enterRule()} và {@code handlePreferredRules()}
+ * từng bị lặp lại y hệt nhau ở CẢ 2 subclass ({@code WithFlowSet}/{@code Default}) —
+ * phần khung (đọc/ghi ruleExitCache, dựng RuleCallStack) và phần
+ * {@code handlePreferredRules} hoá ra GIỐNG HỆT NHAU ở cả 2 nơi, chỉ có đúng
+ * "cách tính exits" (dùng follow-set hay dò sống) là thật sự khác nhau. Kéo
+ * hết phần giống nhau lên đây (Template Method), subclass giờ chỉ còn implement
+ * đúng 2 hook nhỏ ở cuối.
  */
 public abstract class CompletionEngineBase {
 
@@ -86,19 +94,71 @@ public abstract class CompletionEngineBase {
     // ════════════════════════════════════════════════════════════════
 
     /**
-     * Rẽ nhánh theo {@code useFollowSets} — 2 CHẾ ĐỘ HOÀN TOÀN TÁCH BIỆT, mỗi
-     * chế độ tự lo cả trường hợp còn lời lẫn tại caret bên trong nó. Lặp lại
-     * vài dòng (push stack, đọc/ghi cache) giữa 2 hàm, đổi lại mỗi hàm đọc
-     * trọn vẹn từ trên xuống dưới cho đúng 1 chế độ, không phải nhảy qua lại.
+     * KHUNG CHUNG cho cả 2 chế độ (bật/tắt follow-set) — phần cache HOÀN TOÀN
+     * giống nhau giữa 2 chế độ, chỉ khác đúng "cách tính exits", nên viết 1
+     * lần ở đây, 2 subclass chỉ cần implement {@link #computeExitsNotAtCaret}
+     * và {@link #computeExitsAtCaret}.
+     * <p>
+     * - CÒN LỜI: an toàn đọc/ghi {@code ruleExitCache} theo (ruleIndex, tokenIndex) —
+     * không có tác dụng phụ nào phụ thuộc {@code stack} của người gọi ở case này.
+     * <p>
+     * - TẠI CARET: KHÔNG đọc, KHÔNG ghi cache gì cả — ở đây có tác dụng phụ
+     * (ghi nhận preferred rule vào {@code result}) PHỤ THUỘC {@code stack} riêng
+     * của từng người gọi. Nếu đọc cache, chỉ nhánh gọi TRƯỚC mới thật sự chạy
+     * và ghi nhận đúng; nhánh gọi SAU nhận nhầm kết quả cache, tác dụng phụ của
+     * chính nó KHÔNG BAO GIỜ chạy — đây chính là bug thật đã gặp
+     * ({@code "select * from "} mất gợi ý {@code qualified_name} vì
+     * {@code func_name} dùng chung {@code colid} gọi trước, cache che mất
+     * lượt gọi sau).
      */
-    protected abstract Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack);
+    protected final Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack) {
+        boolean atCaret = isAtCaret(tokenIndex);
+
+        RuleCallStack entered = stack.copy();
+        entered.push(start.ruleIndex, tokenIndex);
+
+        if (!atCaret) {
+            Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
+            Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
+            if (cached != null) {
+                return cached;
+            }
+            exitsByEntryToken.put(tokenIndex, Collections.emptySet()); // chặn đệ quy vô hạn trong lúc tính dở
+
+            Set<Integer> exits = computeExitsNotAtCaret(start, tokenIndex, entered);
+            exitsByEntryToken.put(tokenIndex, exits);
+            return exits;
+        }
+
+        // TẠI CARET — không đọc, không ghi cache (xem lý do ở javadoc trên).
+        // Không cần chặn đệ quy vô hạn ở đây: ANTLR4 không cho phép 1 rule gọi
+        // lại chính nó qua đường không tốn token (bị cấm lúc build grammar).
+        return computeExitsAtCaret(start, tokenIndex, entered);
+    }
 
     /**
-     * Hook để xử lý preferred rules.
-     * @return true nếu đã xử lý (thêm rule vào result) và không cần thêm token nữa.
+     * Còn lời để nói: tính xem mê cung này thoát ra ở những vị trí nào (chế độ tự quyết định cách tính).
+     */
+    protected abstract Set<Integer> computeExitsNotAtCaret(ATNState start, int tokenIndex, RuleCallStack entered);
+
+    /**
+     * Đúng tại caret: sinh gợi ý (tác dụng phụ ghi vào {@code result}), rồi trả về xem mê cung có "rỗng" được không.
+     */
+    protected abstract Set<Integer> computeExitsAtCaret(ATNState start, int tokenIndex, RuleCallStack entered);
+
+    /**
+     * Mê cung {@code state} có "rỗng" được không — ra khỏi được mà không cần nói thêm gì?
+     */
+    protected abstract boolean isNullable(ATNState state);
+
+    /**
+     * Quét {@code stack} tìm mê cung đặc biệt (ngoài cùng nhất nếu lồng nhau),
+     * ghi nhận vào {@code result} nếu tìm thấy. Trước đây bị 2 subclass override
+     * y hệt nhau — gộp thành implementation thật ở đây, không còn là hook rỗng
+     * "return false" chờ override nữa.
      */
     protected boolean handlePreferredRules(RuleCallStack stack, CandidatesResult result) {
-        return false;
+        return PreferredRuleResolver.resolve(stack, preferredRules, result);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -162,7 +222,7 @@ public abstract class CompletionEngineBase {
             RuleCallStack withTarget = cur.stack().copy();
             withTarget.push(rt.target.ruleIndex, cur.tokenIndex());
             if (PreferredRuleResolver.resolve(withTarget, preferredRules, result)) {
-                if (NullableRuleChecker.canExitWithoutConsumingToken(parser, rt.target)) {
+                if (isNullable(rt.target)) {
                     queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
                 }
                 // Không nullable -> rule con này còn "nợ" ít nhất 1 token, không

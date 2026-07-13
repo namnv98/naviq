@@ -3,17 +3,20 @@ package com.naviq.completion.syntactic.engine;
 import com.naviq.completion.syntactic.engine.feature.FollowSetsByState;
 import com.naviq.completion.syntactic.engine.feature.PreferredRuleResolver;
 import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
-import com.naviq.completion.syntactic.engine.model.CandidatesResult;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.atn.ATNState;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-
+/**
+ * CHẾ ĐỘ BẬT FOLLOW-SET. Sau khi gộp khung {@code enterRule} chung lên
+ * {@code CompletionEngineBase}, file này giờ CHỈ còn đúng phần thật sự khác
+ * biệt so với {@code CompletionEngineDefault}: cách tính "exits" dựa vào
+ * follow-set đã tính trước, thay vì luôn dò cửa sống.
+ */
 public class CompletionEngineWithFlowSet extends CompletionEngineBase {
 
     // FEATURE — xem FollowSetsByState.java. Field này chỉ là 1 "tay cầm" gọi
@@ -24,82 +27,46 @@ public class CompletionEngineWithFlowSet extends CompletionEngineBase {
         super(parser, ignoredTokens, preferredRules);
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // BƯỚC 1 — Bước vào 1 mê cung, tại 1 vị trí lời nói cho trước
-    // ════════════════════════════════════════════════════════════════
-
     /**
-     * CHẾ ĐỘ BẬT FOLLOW-SET.
-     * <p>
-     * GỌN LẠI: 3 việc "tính `entered` / đảm bảo follow-set đã có / lấy follow-set
-     * ra" giống hệt nhau ở cả 2 nhánh (còn lời / tại caret) — tách ra tính đúng
-     * 1 lần, đưa lên TRƯỚC nhánh rẽ, thay vì lặp lại y hệt ở cả 2 nơi.
-     * <p>
-     * Phần BẮT BUỘC phải tách riêng theo nhánh vẫn giữ nguyên, vì lý do đã nói:
-     * cách cache hoạt động HOÀN TOÀN KHÁC NHAU giữa 2 case:
-     * <p>
-     * - CÒN LỜI: an toàn đọc/ghi {@code ruleExitCache} theo (ruleIndex, tokenIndex) —
-     * không có tác dụng phụ nào phụ thuộc {@code stack} của người gọi ở case này.
-     * <p>
-     * - TẠI CARET: KHÔNG đọc, KHÔNG ghi cache gì cả — ở đây có tác dụng phụ
-     * (ghi nhận preferred rule vào {@code result}, qua handleReachedCaretInsideRule)
-     * PHỤ THUỘC {@code stack} riêng của từng người gọi. Nếu đọc cache, chỉ
-     * nhánh gọi TRƯỚC mới thật sự chạy và ghi nhận đúng; nhánh gọi SAU nhận
-     * nhầm kết quả cache, tác dụng phụ của chính nó KHÔNG BAO GIỜ chạy — đây
-     * chính là bug thật đã gặp ({@code "select * from "} mất gợi ý
-     * {@code qualified_name} vì {@code func_name} dùng chung {@code colid}
-     * gọi trước, cache che mất lượt gọi sau).
+     * Còn lời để nói: tra follow-set trước — nếu chắc chắn token kế tiếp
+     * không khớp đâu cả (và cũng không nullable), khỏi cần gọi walkRuleBody
+     * cho tốn công lặn qua bao nhiêu mê cung con.
      */
-    protected Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack) {
-        boolean atCaret = isAtCaret(tokenIndex);
-
-        // Chỉ nhánh "còn lời" mới được đọc/ghi ruleExitCache. Nếu cache hit, trả về ngay — khỏi cần tính entered/follow-set làm gì.
-        Map<Integer, Set<Integer>> exitsByEntryToken = null;
-        if (!atCaret) {
-            exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
-            Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
-            if (cached != null) {
-                return cached;
-            }
-            exitsByEntryToken.put(tokenIndex, Collections.emptySet()); // chặn vòng lặp vô hạn
-        }
-
-        // Từ đây trở xuống, cả 2 nhánh đều cần đúng 3 thứ này như nhau.
-        RuleCallStack entered = stack.copy();
-        entered.push(start.ruleIndex, tokenIndex);
+    @Override
+    protected Set<Integer> computeExitsNotAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
         followSetsByState.ensureComputed(parser, start, ignoredTokens);
         FollowSetsByState.FollowSetsHolder followSets = followSetsByState.get(start.stateNumber, ignoredTokens);
 
-        if (atCaret) {
-            // TẠI CARET — không đọc, không ghi cache (xem lý do ở javadoc trên).
-            // Không cần chặn đệ quy vô hạn ở đây: ANTLR4 không cho phép 1 rule
-            // gọi lại chính nó qua đường không tốn token (bị cấm lúc build grammar).
-            handleReachedCaretInsideRule(start.ruleIndex, entered, followSets);
-            return isNullable(followSets) ? Collections.singleton(tokenIndex) : Collections.emptySet();
-        }
-
-        boolean mayMatch = isNullable(followSets) || followSets.combined().contains(tokens.get(tokenIndex).type());
-
-        Set<Integer> exits;
-        // nếu trinh sát nói chắc chắn "không cửa nào ở đây khớp được với từ tiếp theo" (mayMatch == false),
-        // thì khỏi cần gọi walkRuleBody luôn — bỏ qua hẳn việc dò cửa sống, trả emptySet() ngay.
-        // Đây là tiết kiệm công
-        if (mayMatch) {
-            exits = walkRuleBody(start, tokenIndex, entered);
-        } else {
-            return Collections.emptySet();
-        }
-        exitsByEntryToken.put(tokenIndex, exits);
-        return exits;
+        boolean mayMatch = followSets.combined().contains(Token.EPSILON) || followSets.combined().contains(tokens.get(tokenIndex).type());
+        return mayMatch ? walkRuleBody(start, tokenIndex, entered) : Collections.emptySet();
     }
 
     /**
-     * Mê cung này có "rỗng" được không — ra khỏi được mà không cần nói thêm
-     * gì? Tương đương {@code NullableRuleChecker.canExitWithoutConsumingToken}
-     * nhưng đọc thẳng từ follow-set đã tính sẵn, khỏi dò sống lại.
+     * Đúng tại caret: dùng thẳng follow-set đã tính sẵn để sinh gợi ý, KHÔNG
+     * cần dò cửa sống.
      */
-    private static boolean isNullable(FollowSetsByState.FollowSetsHolder followSets) {
-        return followSets.combined().contains(Token.EPSILON);
+    @Override
+    protected Set<Integer> computeExitsAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
+        followSetsByState.ensureComputed(parser, start, ignoredTokens);
+        FollowSetsByState.FollowSetsHolder followSets = followSetsByState.get(start.stateNumber, ignoredTokens);
+
+        handleReachedCaretInsideRule(start.ruleIndex, entered, followSets);
+        return followSets.combined().contains(Token.EPSILON) ? Collections.singleton(tokenIndex) : Collections.emptySet();
+    }
+
+    /**
+     * Override hook của Base: đọc thẳng {@code combined().contains(EPSILON)}
+     * từ follow-set đã tính sẵn (O(1)) — thay vì dò sống như bản mặc định
+     * ({@code NullableRuleChecker}) mà {@code Default} đang dùng. Đây chính
+     * là lý do 2 chế độ tồn tại 2 cách trả lời khác nhau cho cùng 1 câu hỏi:
+     * WithFlowSet đã buộc phải tính follow-set cho state đó rồi (để check
+     * mayMatch), nên đọc luôn từ đó là miễn phí; Default không hề có gì để
+     * đọc, phải dò sống.
+     */
+    @Override
+    protected boolean isNullable(ATNState state) {
+        followSetsByState.ensureComputed(parser, state, ignoredTokens);
+        return followSetsByState.get(state.stateNumber, ignoredTokens).combined().contains(Token.EPSILON);
     }
 
     /**
@@ -109,20 +76,12 @@ public class CompletionEngineWithFlowSet extends CompletionEngineBase {
      * Nhánh không-đặc-biệt uỷ thác thẳng cho FollowSetsByState — core ở đây
      * không cần biết cấu trúc FollowSetWithPath/path/following là gì cả.
      */
-    protected void handleReachedCaretInsideRule(int ruleIndex, RuleCallStack stack, FollowSetsByState.FollowSetsHolder followSets) {
-        // Nếu rule hiện tại là preferred, ưu tiên rule này
+    private void handleReachedCaretInsideRule(int ruleIndex, RuleCallStack stack, FollowSetsByState.FollowSetsHolder followSets) {
         if (preferredRules.containsKey(ruleIndex)) {
             // FEATURE: gộp về đúng mê cung đặc biệt ngoài cùng (nếu lồng nhau).
             PreferredRuleResolver.resolve(stack, preferredRules, result);
             return;
         }
-        // Nếu không, dùng follow-set để sinh gợi ý (bên trong nó sẽ kiểm tra preferred rule trên fullPath)
         FollowSetsByState.generateSuggestionsFromFollowSets(stack, followSets, ignoredTokens, preferredRules, result);
-    }
-
-    // Hook xử lý preferred rules trong BFS (tại caret)
-    @Override
-    protected boolean handlePreferredRules(RuleCallStack stack, CandidatesResult result) {
-        return PreferredRuleResolver.resolve(stack, preferredRules, result);
     }
 }
