@@ -103,14 +103,6 @@ public class CompletionEngine {
         boolean shouldSuggestColumnsViaGeneralElement = matchedRuleNames.contains("general_element")
                 && !isGeneralElementCursorName && !isGeneralElementAssignTarget;
 
-        boolean isInAddColumnClause = isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_add_column_clause)
-                || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_add_column_clause)
-                || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_column_definition)
-                || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_column_definition);
-
-        if (matchedRuleNames.contains("regular_id") && isInAddColumnClause) {
-            addDataTypeSuggestions(suggests);
-        }
         if (matchedRuleNames.contains("column_name") || matchedRuleNames.contains("general_element") || matchedRuleNames.contains("regular_id")) {
             addColumnSuggestions(suggests, semanticResult);
         }

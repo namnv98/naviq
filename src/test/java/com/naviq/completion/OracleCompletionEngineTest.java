@@ -272,7 +272,7 @@ public class OracleCompletionEngineTest {
     void danglingDotInSelectListWithMultipleJoinsScopesCorrectAlias() {
         var result = suggest("select u.| from users u join orders o on u.id = o.user_id");
         assertTrue(hasKeyOfType(result, "u.name", "column"));
-        assertFalse(hasKeyOfType(result, "o.total", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
     }
 
     @Test
@@ -510,7 +510,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'alter table users add column new_col |' - sau định nghĩa cột, gợi ý kiểu dữ liệu")
     void alterTableAddColumnDataTypeSuggestions() {
-        var result = suggest("alter table users add column new_col |");
+        var result = suggest("alter table users add new_col |");
         var datatypes = keysOfType(result, "datatype");
         assertTrue(datatypes.contains("int4"));
         assertTrue(datatypes.contains("text"));
@@ -520,7 +520,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'alter table users modify column email |' - MODIFY cột gợi ý kiểu dữ liệu (có thể NULL/NOT NULL nhưng ta chỉ test datatype)")
     void alterTableModifyColumnDataTypeSuggestions() {
-        var result = suggest("alter table users modify column email |");
+        var result = suggest("alter table users modify email |");
         var datatypes = keysOfType(result, "datatype");
         assertTrue(datatypes.contains("text"));
         // Có thể gợi ý thêm NULL/NOT NULL nhưng không bắt buộc

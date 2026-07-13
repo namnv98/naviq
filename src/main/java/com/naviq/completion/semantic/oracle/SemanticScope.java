@@ -488,8 +488,34 @@ public class SemanticScope extends PlSqlParserBaseListener {
         String name = ctx.query_name().getText();
         cur.aliases.put(name, "<cte#" + inner.id + ">");
         cur.derivedScopeAliases.put(name, inner);
-    }
 
+        // XỬ LÝ paren_column_list: ghi đè projectedColumns của CTE
+        var columnList = ctx.paren_column_list();
+        if (columnList != null) {
+            // Tạo một scope mới hoặc clone scope inner với projectedColumns được thay thế
+            // Cách 1: Tạo derived scope mới
+            Scope cteScope = new Scope(nextId++, cur);
+            cteScope.startTokenIndex = ctx.getStart().getTokenIndex();
+            cteScope.stopTokenIndex = ctx.getStop().getTokenIndex();
+
+            // Lấy danh sách tên cột từ paren_column_list
+            List<String> columnNames = new ArrayList<>();
+            var columnListCtx = columnList.column_list();
+            if (columnListCtx != null) {
+                for (var colCtx : columnListCtx.column_name()) {
+                    columnNames.add(colCtx.getText());
+                }
+            }
+
+            // Sao chép projectedColumns từ inner, nhưng thay thế bằng tên cột mới
+            // Hoặc đơn giản là gán projectedColumns = columnNames
+            cteScope.projectedColumns.addAll(columnNames);
+
+            // Đăng ký scope mới này thay vì inner
+            cur.aliases.put(name, "<cte#" + cteScope.id + ">");
+            cur.derivedScopeAliases.put(name, cteScope);
+        }
+    }
     /**
      * Tìm "table" trong danh sách CTE đã đăng ký (derivedScopeAliases) tính từ scope hiện tại leo
      * lên tổ tiên - vì WITH nằm CHUNG scope với chỗ dùng nó (khác Postgres cần merge từ pendingCte
