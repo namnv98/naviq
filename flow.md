@@ -197,16 +197,15 @@ tìm ra từng cái."* Bạn không cần tự đi lại đường đó nữa, c
 ```mermaid
 flowchart TD
     RS(["RULE_START của phòng R"]) -->|miễn phí| S1(["Phòng S1"])
-    S1 -->|"cửa vào mê cung con M<br/>(không tốn lời)"| M0(["Điểm vào M"])
+    S1 -->|" cửa vào mê cung con M<br/>(không tốn lời) "| M0(["Điểm vào M"])
 
     subgraph MAZE [" Trinh sát lặn xuyên qua mê cung con M "]
-        M0 -->|"Identifier<br/>mật khẩu THẬT"| M1(["Hết mê cung con M"])
+        M0 -->|" Identifier<br/>mật khẩu THẬT "| M1(["Hết mê cung con M"])
     end
 
-    M1 -->|"quay lại R,<br/>đúng tại followState"| S2(["Phòng S2"])
-    S2 -->|"COMMA<br/>mật khẩu THẬT"| E1[["Báo cáo trinh sát #1:<br/>mật khẩu = COMMA<br/>đường đi = [M]"]]
-    S2 -->|"miễn phí,<br/>chạm RULE_STOP của R"| E2[["Báo cáo trinh sát #2:<br/>'ra được luôn, không cần nói gì'<br/>(mật khẩu giả EPSILON)<br/>đường đi = []"]]
-
+    M1 -->|" quay lại R,<br/>đúng tại followState "| S2(["Phòng S2"])
+    S2 -->|" COMMA<br/>mật khẩu THẬT "| E1[["Báo cáo trinh sát #1:<br/>mật khẩu = COMMA<br/>đường đi = [M]"]]
+    S2 -->|" miễn phí,<br/>chạm RULE_STOP của R "| E2[["Báo cáo trinh sát #2:<br/>'ra được luôn, không cần nói gì'<br/>(mật khẩu giả EPSILON)<br/>đường đi = []"]]
     E1 --> COMBINED[["Bảng tóm tắt nhanh (combined):<br/>{COMMA, EPSILON}<br/>+ cả tập báo cáo chi tiết từng đường đi"]]
     E2 --> COMBINED
 ```
@@ -236,8 +235,8 @@ này chỉ là mở hồ sơ cũ ra đọc, không cử ai đi thêm nữa.
 ```mermaid
 flowchart TD
     Enter(["Bước vào 1 phòng<br/>(enterRule được gọi)"]) --> Check{"Văn phòng đã có<br/>hồ sơ trinh sát cho<br/>ĐÚNG phòng này<br/>+ ĐÚNG danh sách bỏ qua<br/>chưa?"}
-    Check -->|"Chưa"| Dispatch[["CỬ TRINH SÁT ĐI THẬT<br/>(lặn xuyên ATN, ghi báo cáo)"]]
-    Check -->|"Rồi"| Reuse[["Mở hồ sơ cũ ra dùng luôn,<br/>không cử ai đi cả"]]
+    Check -->|" Chưa "| Dispatch[["CỬ TRINH SÁT ĐI THẬT<br/>(lặn xuyên ATN, ghi báo cáo)"]]
+    Check -->|" Rồi "| Reuse[["Mở hồ sơ cũ ra dùng luôn,<br/>không cử ai đi cả"]]
     Dispatch --> Store[["Cất hồ sơ vào văn phòng<br/>(theo đúng phòng + danh sách bỏ qua)"]]
 ```
 
@@ -270,10 +269,10 @@ Vài hệ quả thực tế đáng chú ý:
 ```mermaid
 flowchart LR
     Q{Đang xử lý<br/>1 phòng R} --> Q1{Còn lời<br/>để nói?}
-    Q1 -->|"Có"| CHECK{"Từ tiếp theo có tên<br/>trong bảng tóm tắt không?<br/>(hoặc phòng nullable)"}
+    Q1 -->|" Có "| CHECK{"Từ tiếp theo có tên<br/>trong bảng tóm tắt không?<br/>(hoặc phòng nullable)"}
     CHECK -->|Không| SKIP[["Ngõ cụt chắc chắn —<br/>KHỎI dò cửa sống,<br/>trinh sát đã xác nhận rồi"]]
     CHECK -->|Có| WALK[["Vẫn phải dò cửa sống như bình thường<br/>(walkRuleBody) — báo cáo chỉ nói<br/>'có khả năng', không nói 'đi tiếp thế nào'"]]
-    Q1 -->|"Hết lời<br/>(tại caret)"| READ[["Đọc THẲNG từ báo cáo trinh sát —<br/>generateSuggestionsFromFollowSets<br/>KHỎI dò cửa sống lại nữa"]]
+    Q1 -->|" Hết lời<br/>(tại caret) "| READ[["Đọc THẲNG từ báo cáo trinh sát —<br/>generateSuggestionsFromFollowSets<br/>KHỎI dò cửa sống lại nữa"]]
 ```
 
 - **Còn lời**: báo cáo trinh sát chỉ dùng để **cắt sớm** (kiểm tra rẻ, khỏi tốn công dò BFS nếu biết chắc ngõ cụt) —
@@ -290,12 +289,12 @@ lặn tiếp, chứ không phải dừng khựng lại tại chỗ `RULE_STOP` c
 
 ```mermaid
 flowchart TD
-    S1(["Phòng S1 của R"]) -->|"cửa vào mê cung con M<br/>(nullable)"| M0(["Điểm vào M"])
+    S1(["Phòng S1 của R"]) -->|" cửa vào mê cung con M<br/>(nullable) "| M0(["Điểm vào M"])
     subgraph MAZE2 [" M — nullable, không cần nói gì cũng ra được "]
         M0 -->|miễn phí| MSTOP(["RULE_STOP của M"])
     end
-    MSTOP -->|"trinh sát PHẢI quay lại đúng<br/>followState của R"| S2(["Phòng S2 của R<br/>(chỗ ngay sau cửa vào M)"])
-    S2 -->|"FROM<br/>mật khẩu thật"| E3[["Báo cáo trinh sát:<br/>mật khẩu = FROM<br/>đường đi = [M]"]]
+    MSTOP -->|" trinh sát PHẢI quay lại đúng<br/>followState của R "| S2(["Phòng S2 của R<br/>(chỗ ngay sau cửa vào M)"])
+    S2 -->|" FROM<br/>mật khẩu thật "| E3[["Báo cáo trinh sát:<br/>mật khẩu = FROM<br/>đường đi = [M]"]]
 ```
 
 Đây là lý do trinh sát mang theo 1 cuốn **"sổ tay hẹn quay lại"** (`returnStates`, kiểu như 1 chồng giấy nhớ "nếu ra
@@ -310,6 +309,10 @@ Có những mê cung "vô nghĩa" với người dùng cuối (như `identifier`
 ý nghĩa nghiệp vụ. Nhưng có những mê cung "có ý nghĩa" (như `columnref`, tên bảng, tên cột) — khi caret rơi vào đây, ta
 muốn gợi ý nguyên "loại phòng" đó, kiểu *"bạn cần điền 1 tên cột ở đây"*, thay vì liệt kê `Identifier`. Gọi những mê
 cung này là **phòng VIP** (đúng là `preferredRules` trong code).
+
+*Giống như hỏi đường vậy: nếu người ta nhận ra ngay bạn đang hỏi tới đúng khu VIP, họ chỉ luôn hướng đi, không cần nghe
+bạn kể lể thêm. Nhưng nếu bạn cứ đi tự nhiên rồi lỡ đi lạc vào khu đó, phải tới tận cuối đường mới có người tổng kết
+lại: "à, lúc nãy cậu có ghé qua khu VIP đấy" — 2 mục bên dưới (đường tắt / lưới an toàn) chính là 2 tình huống này.*
 
 ### Cuốn nhật ký cần mang theo *riêng* cho từng nhánh
 
@@ -336,8 +339,8 @@ Hệ quả: trên mỗi nhánh, có **đúng 1 khoảnh khắc** chuyển từ "
 
 ```mermaid
 flowchart TD
-    R1([Phòng bình thường]) -->|"cửa vào phòng VIP<br/>ĐÚNG LÚC hết lời"| shortcut[["Dừng ngay tại đây.<br/>Ghi nhận: gợi ý = tên phòng VIP này.<br/>KHÔNG bước chân vào bên trong."]]
-    style shortcut fill:#cfc
+    R1([Phòng bình thường]) -->|" cửa vào phòng VIP<br/>ĐÚNG LÚC hết lời "| shortcut[["Dừng ngay tại đây.<br/>Ghi nhận: gợi ý = tên phòng VIP này.<br/>KHÔNG bước chân vào bên trong."]]
+    style shortcut fill: #cfc
 ```
 
 Đây là việc `handleRuleDoor` làm: nếu đang **đúng tại caret** (không còn lời) VÀ cửa này dẫn vào 1 phòng VIP, nó
@@ -356,11 +359,11 @@ ngay khi chạm 1 cửa mật khẩu/wildcard bình thường, chẳng liên qua
 
 ```mermaid
 flowchart TD
-    R1([Phòng bình thường]) -->|"cửa vào phòng VIP<br/>NHƯNG CÒN LỜI"| GEinside["Bước vào bình thường<br/>(ghi tên phòng VIP vào nhật ký,<br/>KHÔNG dùng đường tắt vì chưa hết lời)"]
+    R1([Phòng bình thường]) -->|" cửa vào phòng VIP<br/>NHƯNG CÒN LỜI "| GEinside["Bước vào bình thường<br/>(ghi tên phòng VIP vào nhật ký,<br/>KHÔNG dùng đường tắt vì chưa hết lời)"]
     GEinside -->|còn lời, tốn 1 từ nữa| deeper[Sâu hơn bên trong]
-    deeper -->|"đúng từ NÀY là từ cuối"| hitCaret{{"Giờ mới HẾT LỜI —<br/>đang đứng ở đây, KHÔNG phải<br/>ngay cửa vào 1 phòng VIP nào"}}
-    hitCaret -->|"chạm RULE_STOP,<br/>hoặc cửa mật khẩu, hoặc wildcard"| fallback[["Quét lại TOÀN BỘ nhật ký,<br/>từ ngoài vào trong,<br/>tìm phòng VIP GẦN NGOÀI NHẤT<br/>đã từng đi qua"]]
-    style fallback fill:#ccf
+    deeper -->|" đúng từ NÀY là từ cuối "| hitCaret{{"Giờ mới HẾT LỜI —<br/>đang đứng ở đây, KHÔNG phải<br/>ngay cửa vào 1 phòng VIP nào"}}
+    hitCaret -->|" chạm RULE_STOP,<br/>hoặc cửa mật khẩu, hoặc wildcard "| fallback[["Quét lại TOÀN BỘ nhật ký,<br/>từ ngoài vào trong,<br/>tìm phòng VIP GẦN NGOÀI NHẤT<br/>đã từng đi qua"]]
+    style fallback fill: #ccf
 ```
 
 Đây là việc `resolve()` (trong `PreferredRuleResolver`) làm — được gọi tại đúng 3 chỗ trong `walkRuleBody`:
@@ -371,18 +374,24 @@ sâu hơn.
 
 ### Vì sao 2 đường này không bao giờ giẫm chân nhau
 
-Đường tắt (`resolve`, chạy trong `handleRuleDoor`) và lưới an toàn (`resolve`, chạy ở 3 điểm "chạm đáy") **không
-bao giờ cùng chạy cho cùng 1 lần hết-lời trên cùng 1 nhánh** — vì lý do rất đơn giản:
+> **Lưu ý về tên hàm** (đã sửa so với bản trước): cả đường tắt lẫn lưới an toàn đều gọi **CHUNG đúng 1 hàm** —
+> `PreferredRuleResolver.resolve()`. Không có 2 hàm riêng biệt, không có hàm nào tên `recordMatch()` cả. Khác biệt
+> duy nhất giữa 2 cơ chế là **thời điểm gọi** và **nội dung nhật ký truyền vào**: đường tắt gọi `resolve()` ngay tại
+> `handleRuleDoor`, với nhật ký đã cộng thêm rule sắp bước vào (`withTarget`), trước khi kịp đệ quy vào bên trong;
+> lưới an toàn gọi `resolve()` tại 3 điểm "chạm đáy" (`RULE_STOP`/cửa mật khẩu/wildcard), với nhật ký của đúng trạng
+> thái hiện tại (`cur.stack()`). Cùng 1 hàm, khác chỗ gọi và khác dữ liệu đưa vào.
 
-Đường tắt, một khi đã chạy, **chặn đứng hoàn toàn** việc đi sâu thêm vào phòng VIP đó (`return` ngay, không gọi
-`enterRule`/`walkRuleBody` cho nó nữa). Nên nếu đường tắt đã xử lý xong 1 phòng VIP, BFS **không bao giờ có cơ hội**
-đi tiếp vào bên trong để chạm `RULE_STOP`/cửa mật khẩu bên trong phòng đó — nghĩa là lưới an toàn không bao giờ được
-gọi cho phần bên trong phòng VIP đã bị đường tắt xử lý.
+Đường tắt và lưới an toàn **không bao giờ cùng chạy cho cùng 1 lần hết-lời trên cùng 1 nhánh** — vì lý do rất đơn giản:
+
+Đường tắt, một khi đã chạy và `resolve()` trả về `true` (tìm thấy phòng VIP), **chặn đứng hoàn toàn** việc đi sâu thêm
+vào phòng VIP đó (`return` ngay, không gọi `enterRule`/`walkRuleBody` cho nó nữa). Nên nếu đường tắt đã xử lý xong 1
+phòng VIP, BFS **không bao giờ có cơ hội** đi tiếp vào bên trong để chạm `RULE_STOP`/cửa mật khẩu bên trong phòng đó —
+nghĩa là lưới an toàn không bao giờ được gọi cho phần bên trong phòng VIP đã bị đường tắt xử lý.
 
 Ngược lại, nếu tại đúng khoảnh khắc hết lời, cửa đang đứng trước **không phải** cửa vào 1 phòng VIP (mà là 1 phòng
 bình thường, hoặc đang đứng giữa 1 phòng VIP đã bước vào từ trước) — đường tắt không có cơ hội chạy (điều kiện `atCaret
-&& preferred` sai ngay từ đầu) — nên BFS cứ đi tiếp bình thường, cho tới khi chạm đáy thật sự, lúc đó lưới an toàn mới
-vào cuộc.
+&& preferred` sai ngay từ đầu, hoặc `resolve()` trả về `false` vì không có phòng VIP nào trên nhật ký) — nên BFS cứ đi
+tiếp bình thường, cho tới khi chạm đáy thật sự, lúc đó lưới an toàn mới vào cuộc.
 
 Nói ngắn gọn: **đúng 1 khoảnh khắc hết-lời trên mỗi nhánh, code hỏi đúng 1 câu duy nhất trước tiên** — *"cửa mình
 sắp/đang đứng trước có phải VIP không?"* — nếu có, đường tắt chiếm quyền và dừng lại ngay; nếu không, cứ đi tiếp cho
@@ -416,8 +425,8 @@ nhau (Câu 1 vs Câu 2) dẫn tới phòng VIP được chọn khác nhau, đún
 | "Nhìn quanh phòng liệt kê tên các cửa"       | đoạn code trong `handlePasswordDoor()`: khi `atCaret`, thêm token vào `result.tokens`                                     |
 | Phòng VIP                                    | `preferredRules` (Map<Integer, Boolean>)                                                                                  |
 | Cuốn nhật ký đường đi (riêng từng nhánh)     | `RuleCallStack` — copy trước khi push, không sửa trực tiếp bản gốc                                                        |
-| Đường tắt VIP (chạy ngay tại cửa vào)        | `PreferredRuleResolver.recordMatch()`, gọi từ `handleRuleDoor()`                                                          |
-| Lưới an toàn (quét lại nhật ký khi chạm đáy) | `PreferredRuleResolver.resolve()`, gọi từ `RULE_STOP` / `handlePasswordDoor` / `handleWildcardDoor`                       |
+| Đường tắt VIP (chạy ngay tại cửa vào)        | `PreferredRuleResolver.resolve()`, gọi từ `handleRuleDoor()` — với nhật ký đã cộng thêm rule sắp vào                      |
+| Lưới an toàn (quét lại nhật ký khi chạm đáy) | `PreferredRuleResolver.resolve()` — CÙNG hàm trên, gọi từ `RULE_STOP` / `handlePasswordDoor` / `handleWildcardDoor`       |
 | "Phòng VIP có rỗng được không"               | `NullableRuleChecker.canExitWithoutConsumingToken(parser, start)`                                                         |
 | Cache "từ phòng này, cửa nào từng gặp được"  | `feature/FollowSetsByState.java` — "trinh sát" đi trước, dò 1 lần dùng lại mãi (chỉ dùng ở `CompletionEngineWithFlowSet`) |
 
@@ -447,10 +456,16 @@ Câu trả lời: **còn từ để nói thì lọc chặt, chỉ hết từ (t�
 Nhìn `handlePasswordDoor` (rút gọn, bỏ phần xử lý VIP để thấy rõ phần lọc):
 
 ```java
-} else if (label.contains(tokens.get(cur.tokenIndex()).type())) {
-    // Còn lời để nói: đúng mật khẩu thì bước qua, tốn 1 lời.
-    queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
-}
+}else if(label.contains(tokens.get(cur.tokenIndex()).
+
+type())){
+        // Còn lời để nói: đúng mật khẩu thì bước qua, tốn 1 lời.
+        queue.
+
+push(new PipelineEntry(t.target, cur.tokenIndex() +1,cur.
+
+stack()));
+        }
 // Sai mật khẩu -> không push gì cả -> nhánh này chết ở đây.
 ```
 
