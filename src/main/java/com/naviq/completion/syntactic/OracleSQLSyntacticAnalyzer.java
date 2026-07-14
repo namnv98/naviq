@@ -96,10 +96,8 @@ public class OracleSQLSyntacticAnalyzer {
         m.put(PlSqlParser.RULE_function_name, true);
         m.put(PlSqlParser.RULE_table_alias, true);
         m.put(PlSqlParser.RULE_identifier, true);
-
         m.put(PlSqlParser.RULE_id_expression, true);
         m.put(PlSqlParser.RULE_regular_id, true);
-
         return m;
     }
 

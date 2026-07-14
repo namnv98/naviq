@@ -183,6 +183,7 @@ BUILD:                        'BUILD';
 BULK:                         'BULK';
 BY:                           'BY';
 BYPASS_RECURSIVE_CHECK:       'BYPASS_RECURSIVE_CHECK';
+RECURSIVE: 'RECURSIVE';
 BYPASS_UJVC:                  'BYPASS_UJVC';
 BYTE:                         'BYTE';
 CACHE:                        'CACHE';

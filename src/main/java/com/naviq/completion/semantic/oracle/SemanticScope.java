@@ -457,33 +457,14 @@ public class SemanticScope extends PlSqlParserBaseListener {
             if (table == null) {
                 return;
             }
-            String alias = aliasCtx != null && !aliasCtx.getText().trim().isEmpty()
-                    ? aliasCtx.getText().trim()
-                    : lastPart(table);
-
-//            // KIỂM TRA: Nếu alias là từ khóa JOIN (NATURAL, CROSS, etc.) thì bỏ qua
-//            // Không đăng ký alias nếu nó là từ khóa SQL
-//            if (isSqlKeyword(alias)) {
-//                // Không đăng ký alias, chỉ đăng ký bảng với tên thật
-//                registerTableOrCte(cur, lastPart(table), table);
-//                return;
-//            }
-
+            String alias = aliasCtx != null && !aliasCtx.getText().trim().isEmpty() ? aliasCtx.getText().trim() : lastPart(table);
             registerTableOrCte(cur, alias, table);
         } else if (dmlCtx.select_statement() != null) {
             // "(select ...) alias" - subquery trong ngoặc, chỉ tham chiếu được nếu CÓ alias
             if (aliasCtx == null || cur.children.isEmpty()) {
                 return;
             }
-//            String alias = aliasCtx.getText().trim();
-//
-//            // KIỂM TRA: Nếu alias là từ khóa SQL thì bỏ qua
-//            if (isSqlKeyword(alias)) {
-//                return;
-//            }
-
             Scope inner = cur.children.get(cur.children.size() - 1);
-            //TODO: remove
             String alias = aliasCtx.getText();
             cur.aliases.put(alias, "<subquery#" + inner.id + ">");
             cur.derivedScopeAliases.put(alias, inner);

@@ -12,8 +12,18 @@ public abstract class PlSqlParserBase extends Parser {
         super(input);
     }
 
-    public boolean isTableAlias() {
-        return getCurrentToken().getType() != PlSqlLexer.JOIN;
+//    public boolean isTableAlias() {
+//        return getCurrentToken().getTokenIndex() != PlSqlLexer.JOIN;
+//    }
+
+    protected boolean isTableAlias() {
+        String text = getCurrentToken().getText().toUpperCase();
+        if (text.equals("NATURAL") || text.equals("CROSS") || text.equals("JOIN") || text.equals("INNER")
+                || text.equals("OUTER") || text.equals("LEFT") || text.equals("RIGHT") || text.equals("FULL")) {
+            return false;
+        }
+
+        return true;
     }
 
     public boolean isVersion12() {

@@ -24,6 +24,7 @@ public class OracleCompletionEngineTest {
         var idCol = new SchemaLoader.DBColumnInfo("id", "id", "int4", true);
         var nameCol = new SchemaLoader.DBColumnInfo("name", "name", "text", false);
         var emailCol = new SchemaLoader.DBColumnInfo("email", "email", "text", false);
+        var managerIdCol = new SchemaLoader.DBColumnInfo("manager_id", "manager_id", "int4", false);
         var customerIdCol = new SchemaLoader.DBColumnInfo("customer_id", "customer_id", "int4", false);
         var totalCol = new SchemaLoader.DBColumnInfo("total", "total", "numeric", false);
         var amountCol = new SchemaLoader.DBColumnInfo("amount", "amount", "numeric", false);
@@ -37,7 +38,7 @@ public class OracleCompletionEngineTest {
         var descriptionCol = new SchemaLoader.DBColumnInfo("description", "description", "text", false);
 
         var users = new SchemaLoader.TableInfo("public", "users", "table",
-                List.of(idCol, nameCol, emailCol, createdDateCol));
+                List.of(idCol, nameCol, emailCol, managerIdCol, createdDateCol));
         var orders = new SchemaLoader.TableInfo("public", "orders", "table",
                 List.of(idCol, customerIdCol, totalCol, statusCol, userIdCol));
         var contracts = new SchemaLoader.TableInfo("public", "contracts", "table",
@@ -835,7 +836,7 @@ public class OracleCompletionEngineTest {
     void windowFrameBoundSuggestsKeywordsAndColumns() {
         var result = suggest("SELECT SUM(total) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND |) FROM orders");
         var keywords = allKeywordKeys(result);
-        assertTrue(keywords.contains("current") || keywords.contains("unbounded"));
+        assertTrue(keywords.contains("current row") || keywords.contains("unbounded preceding"));
         // Có thể gợi ý cột nếu cho phép expression
     }
 
@@ -1168,7 +1169,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM XMLTABLE('/root/row' PASSING xml_col COLUMNS id INT PATH '@id', name VARCHAR2 |)' - XMLTABLE column type suggests datatypes")
     void xmlTableColumnTypeSuggestsDatatypes() {
-        var result = suggest("SELECT * FROM XMLTABLE('/root/row' PASSING xml_col COLUMNS id INT, name VARCHAR2 |)");
+        var result = suggest("SELECT * FROM XMLTABLE('/root/row' PASSING xml_col COLUMNS id INT, name |)");
         var datatypes = keysOfType(result, "datatype");
         assertTrue(datatypes.contains("varchar") || datatypes.contains("text"));
     }

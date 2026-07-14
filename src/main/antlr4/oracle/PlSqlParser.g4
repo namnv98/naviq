@@ -5848,7 +5848,7 @@ select_statement
 // Select Specific Clauses
 
 subquery_factoring_clause
-    : WITH factoring_element (COMMA factoring_element)*
+    : WITH RECURSIVE? factoring_element (COMMA factoring_element)*
     ;
 
 factoring_element
