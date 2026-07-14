@@ -637,4 +637,738 @@ public class OracleCompletionEngineTest {
             assertNotNull(result);
         });
     }
+
+    @Test
+    @DisplayName("'SELECT ROWNUM, | FROM users' - pseudo-column ROWNUM, vị trí sau dấu phẩy gợi ý cột của users")
+    void selectListAfterRowNumSuggestsColumns() {
+        var result = suggest("SELECT ROWNUM, | FROM users");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT LEVEL, | FROM users CONNECT BY PRIOR id = manager_id' - LEVEL pseudo-column, gợi ý cột users")
+    void selectLevelAndColumnSuggestions() {
+        var result = suggest("SELECT LEVEL, | FROM users CONNECT BY PRIOR id = manager_id");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users START WITH |' - START WITH condition suggests columns of users")
+    void startWithConditionSuggestsColumns() {
+        var result = suggest("SELECT * FROM users START WITH |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.manager_id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users CONNECT BY |' - after CONNECT BY, suggests keyword PRIOR and columns")
+    void connectBySuggestsPriorKeywordAndColumns() {
+        var result = suggest("SELECT * FROM users CONNECT BY |");
+        assertTrue(allKeywordKeys(result).contains("prior"));
+        // Có thể gợi ý cột nếu grammar cho phép expression
+        assertFalse(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("'SELECT NVL(name, |) FROM users' - second argument of NVL suggests columns or expressions")
+    void nvlFunctionSecondArgSuggestsSomething() {
+        var result = suggest("SELECT NVL(name, |) FROM users");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "users.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT DECODE(status, 'A', 'Active', |) FROM orders' - DECODE function argument suggests columns or values")
+    void decodeFunctionArgSuggestsSomething() {
+        var result = suggest("SELECT DECODE(status, 'A', 'Active', |) FROM orders");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'CREATE TABLE new_users AS SELECT | FROM users' - CTAS select list suggests columns")
+    void createTableAsSelectListSuggestsColumns() {
+        var result = suggest("CREATE TABLE new_users AS SELECT | FROM users");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'CREATE VIEW v AS SELECT | FROM users' - view select list suggests columns")
+    void createViewSelectListSuggestsColumns() {
+        var result = suggest("CREATE VIEW v AS SELECT | FROM users");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'ALTER TABLE users ADD CONSTRAINT pk PRIMARY KEY (|)' - constraint column list suggests columns")
+    void alterTableAddConstraintColumnListSuggestsColumns() {
+        var result = suggest("ALTER TABLE users ADD CONSTRAINT pk PRIMARY KEY (|)");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users FOR |' - FOR keyword suggests UPDATE from keyword list")
+    void forClauseSuggestsUpdateKeyword() {
+        var result = suggest("SELECT * FROM users FOR |");
+        assertTrue(allKeywordKeys(result).contains("update"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users ORDER BY id OFFSET |' - OFFSET should not crash, may suggest number literals?")
+    void offsetClauseDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users ORDER BY id OFFSET |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users FETCH FIRST | ROWS ONLY' - FETCH FIRST should not crash")
+    void fetchFirstDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users FETCH FIRST | ROWS ONLY");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE ROWNUM < |' - ROWNUM comparison should not crash")
+    void rownumComparisonDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE ROWNUM < |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT SUM(total) OVER (PARTITION BY |) FROM orders' - PARTITION BY suggests columns of orders")
+    void windowPartitionBySuggestsColumns() {
+        var result = suggest("SELECT SUM(total) OVER (PARTITION BY |) FROM orders");
+        assertTrue(hasKeyOfType(result, "orders.status", "column"));
+        assertTrue(hasKeyOfType(result, "orders.user_id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT RANK() OVER (ORDER BY |) FROM orders' - ORDER BY inside OVER suggests columns")
+    void windowOrderBySuggestsColumns() {
+        var result = suggest("SELECT RANK() OVER (ORDER BY |) FROM orders");
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+    // =====================================================================
+    // Additional test cases - Set operations, CASE, analytic functions,
+    // DDL, DCL, PL/SQL, advanced features, etc.
+    // =====================================================================
+
+    @Test
+    @DisplayName("'SELECT id FROM users INTERSECT SELECT | FROM orders' - INTERSECT second branch suggests columns from orders")
+    void intersectSecondBranchSuggestsColumns() {
+        var result = suggest("SELECT id FROM users INTERSECT SELECT | FROM orders");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+        assertFalse(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT id FROM users MINUS SELECT | FROM orders' - MINUS second branch suggests columns from orders")
+    void minusSecondBranchSuggestsColumns() {
+        var result = suggest("SELECT id FROM users MINUS SELECT | FROM orders");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+        assertFalse(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT CASE WHEN status = 'A' THEN | END FROM orders' - CASE THEN clause suggests columns or expressions")
+    void caseThenClauseSuggestsSomething() {
+        var result = suggest("SELECT CASE WHEN status = 'A' THEN | END FROM orders");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT CASE status WHEN 'A' THEN | END FROM orders' - simple CASE THEN suggests something")
+    void simpleCaseThenClauseSuggestsSomething() {
+        var result = suggest("SELECT CASE status WHEN 'A' THEN | END FROM orders");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT COALESCE(total, |) FROM orders' - COALESCE second arg suggests columns or expressions")
+    void coalesceSecondArgSuggestsSomething() {
+        var result = suggest("SELECT COALESCE(total, |) FROM orders");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT NULLIF(status, |) FROM orders' - NULLIF second arg suggests something")
+    void nullifSecondArgSuggestsSomething() {
+        var result = suggest("SELECT NULLIF(status, |) FROM orders");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT GREATEST(total, |) FROM orders' - GREATEST second arg suggests columns or expressions")
+    void greatestSecondArgSuggestsSomething() {
+        var result = suggest("SELECT GREATEST(total, |) FROM orders");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT LEAST(total, |) FROM orders' - LEAST second arg suggests something")
+    void leastSecondArgSuggestsSomething() {
+        var result = suggest("SELECT LEAST(total, |) FROM orders");
+        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT SUM(total) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND |) FROM orders' - windowing clause ROWS/RANGE suggests keywords CURRENT ROW, etc.")
+    void windowFrameBoundSuggestsKeywordsAndColumns() {
+        var result = suggest("SELECT SUM(total) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND |) FROM orders");
+        var keywords = allKeywordKeys(result);
+        assertTrue(keywords.contains("current") || keywords.contains("unbounded"));
+        // Có thể gợi ý cột nếu cho phép expression
+    }
+
+    @Test
+    @DisplayName("'SELECT FIRST_VALUE(name) OVER (PARTITION BY dept ORDER BY hire_date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM |' - suggests tables after FROM")
+    void complexWindowFunctionAfterFromSuggestsTables() {
+        var result = suggest("SELECT FIRST_VALUE(name) OVER (PARTITION BY dept ORDER BY hire_date ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) FROM |");
+        var tables = keysOfType(result, "table");
+        assertTrue(tables.contains("public.users"));
+    }
+
+    @Test
+    @DisplayName("'MERGE INTO users u USING (SELECT * FROM orders) o ON (u.id = o.user_id) WHEN NOT MATCHED THEN INSERT (|) VALUES (...)' - INSERT column list in MERGE suggests target columns")
+    void mergeInsertColumnListSuggestsTargetColumns() {
+        var result = suggest("MERGE INTO users u USING orders o ON (u.id = o.user_id) WHEN NOT MATCHED THEN INSERT (|) VALUES (1, 'new')");
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'MERGE INTO users u USING orders o ON (u.id = o.user_id) WHEN MATCHED THEN UPDATE SET name = |' - UPDATE RHS suggests source columns")
+    void mergeUpdateSetRhsSuggestsSourceColumns() {
+        var result = suggest("MERGE INTO users u USING orders o ON (u.id = o.user_id) WHEN MATCHED THEN UPDATE SET name = |");
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+        assertTrue(hasKeyOfType(result, "o.status", "column"));
+        // Also target column might be visible
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'INSERT ALL INTO users (id, name) VALUES (1, 'a') INTO orders (id, total) VALUES (2, |) SELECT * FROM DUAL' - INSERT ALL second VALUES suggests expression (no columns expected)")
+    void insertAllValuesDoesNotSuggestColumns() {
+        var result = suggest("INSERT ALL INTO users (id, name) VALUES (1, 'a') INTO orders (id, total) VALUES (2, |) SELECT * FROM DUAL");
+        // Position is a value expression, not a column list, so column suggestions may be absent or minimal.
+        // We just check no crash.
+        assertNotNull(result);
+        // Optionally ensure not suggesting columns of any table.
+        assertTrue(keysOfType(result, "column").isEmpty() || result.stream().noneMatch(s -> s.getKey().matches("(?i).*\\..*")));
+    }
+
+    @Test
+    @DisplayName("'INSERT FIRST WHEN total > 100 THEN INTO orders_high VALUES (|) ELSE INTO orders_low VALUES (|)' - multi-table insert, VALUES expression positions")
+    void insertFirstValuesDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("INSERT FIRST WHEN total > 100 THEN INTO orders_high VALUES (|) ELSE INTO orders_low VALUES (|) SELECT * FROM orders");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'WITH c (col1) AS (SELECT id FROM users) SELECT | FROM c' - CTE column alias list (col1) suggests that alias only")
+    void cteWithColumnAliasListSuggestsAlias() {
+        var result = suggest("WITH c (col1) AS (SELECT id FROM users) SELECT | FROM c");
+        assertTrue(hasKeyOfType(result, "c.col1", "column"));
+        assertFalse(hasKeyOfType(result, "c.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'WITH RECURSIVE cte AS (SELECT id FROM users UNION ALL SELECT id FROM orders) SELECT | FROM cte' - recursive CTE suggests columns of cte")
+    void recursiveCteSuggestsColumns() {
+        var result = suggest("WITH RECURSIVE cte AS (SELECT id FROM users UNION ALL SELECT id FROM orders) SELECT | FROM cte");
+        assertTrue(hasKeyOfType(result, "cte.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id IN (SELECT | FROM orders)' - subquery in IN suggests columns from orders")
+    void inSubquerySuggestsColumns() {
+        var result = suggest("SELECT * FROM users WHERE id IN (SELECT | FROM orders)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE |)' - EXISTS subquery suggests columns from orders and outer alias")
+    void existsSubquerySuggestsColumns() {
+        var result = suggest("SELECT * FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE |)");
+        assertTrue(hasKeyOfType(result, "o.id", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+        // Outer alias u should be visible (correlated)
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id = ANY (SELECT | FROM orders)' - ANY subquery suggests columns")
+    void anySubquerySuggestsColumns() {
+        var result = suggest("SELECT * FROM users WHERE id = ANY (SELECT | FROM orders)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id > ALL (SELECT | FROM orders)' - ALL subquery suggests columns")
+    void allSubquerySuggestsColumns() {
+        var result = suggest("SELECT * FROM users WHERE id > ALL (SELECT | FROM orders)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id IN (SELECT orders.id FROM orders)' - subquery with qualified column works")
+    void subqueryQualifiedColumnDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE id IN (SELECT | FROM orders)");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u, TABLE(orders) o' - TABLE collection expression suggests columns from order table? (if supported) - no crash")
+    void tableCollectionExpressionDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users u, TABLE(orders) o WHERE o.|");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'COMMENT ON TABLE users IS |' - COMMENT literal does not suggest columns, but not crash")
+    void commentOnTableDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("COMMENT ON TABLE users IS |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'GRANT SELECT ON users TO |' - GRANT TO suggests user/role, not crash")
+    void grantToDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("GRANT SELECT ON users TO |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'REVOKE SELECT ON users FROM |' - REVOKE FROM suggests user/role, not crash")
+    void revokeFromDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("REVOKE SELECT ON users FROM |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'ANALYZE TABLE users COMPUTE STATISTICS' - ANALYZE does not crash (no cursor)")
+    void analyzeTableDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("ANALYZE TABLE users |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'TRUNCATE TABLE users DROP STORAGE' - with storage clause does not crash")
+    void truncateTableWithStorageDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("TRUNCATE TABLE users DROP |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'ALTER INDEX idx_name REBUILD |' - ALTER INDEX suggests ONLINE/PARALLEL keywords")
+    void alterIndexRebuildSuggestsKeywords() {
+        var result = suggest("ALTER INDEX idx_name REBUILD |");
+        var keywords = allKeywordKeys(result);
+        assertTrue(keywords.contains("online") || keywords.contains("parallel"));
+    }
+
+    @Test
+    @DisplayName("'CREATE SEQUENCE seq_name START WITH |' - START WITH value, not crash")
+    void createSequenceStartWithDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("CREATE SEQUENCE seq_name START WITH |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT seq_name.NEXTVAL FROM |' - NEXTVAL suggests tables after FROM")
+    void nextvalFromSuggestsTables() {
+        var result = suggest("SELECT seq_name.NEXTVAL FROM |");
+        var tables = keysOfType(result, "table");
+        assertTrue(tables.contains("public.users"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE SYSDATE > |' - SYSDATE comparison, not crash")
+    void sysdateComparisonDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE SYSDATE > |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE TRUNC(SYSDATE) = |' - function call, not crash")
+    void truncFunctionDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE TRUNC(SYSDATE) = |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT TO_CHAR(created_date, 'YYYY') FROM users WHERE |' - TO_CHAR with format mask, then WHERE suggests columns")
+    void toCharThenWhereSuggestsColumns() {
+        var result = suggest("SELECT TO_CHAR(created_date, 'YYYY') FROM users WHERE |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE EXTRACT(YEAR FROM created_date) = |' - EXTRACT, not crash")
+    void extractFunctionDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE EXTRACT(YEAR FROM created_date) = |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users ORDER BY name NULLS FIRST |' - after NULLS FIRST, no suggestion (end of clause), but not crash")
+    void orderByNullsFirstDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users ORDER BY name NULLS FIRST |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users FOR UPDATE OF |' - FOR UPDATE OF suggests columns of users (for locking)")
+    void forUpdateOfSuggestsColumns() {
+        var result = suggest("SELECT * FROM users FOR UPDATE OF |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE CURRENT OF cursor_name' - no cursor defined, but does not crash")
+    void whereCurrentOfDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE CURRENT OF |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'DECLARE v_id NUMBER; BEGIN SELECT id INTO v_id FROM users WHERE |; END;' - PL/SQL block SELECT INTO where clause suggests columns")
+    void plsqlSelectIntoWhereSuggestsColumns() {
+        var result = suggest("DECLARE v_id NUMBER; BEGIN SELECT id INTO v_id FROM users WHERE |; END;");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'DECLARE v_name users.name%TYPE; BEGIN SELECT name INTO v_name FROM users WHERE id=1; | END;' - variable assignment after SELECT suggests columns? (not crash)")
+    void plsqlVariableAssignmentDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("DECLARE v_name users.name%TYPE; BEGIN SELECT name INTO v_name FROM users WHERE id=1; | END;");
+            // Probably no suggestions, but not crash
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'BEGIN FOR rec IN (SELECT * FROM users) LOOP DBMS_OUTPUT.PUT_LINE(rec.|); END LOOP; END;' - cursor loop rec. suggests columns of users")
+    void plsqlCursorLoopRecDotSuggestsColumns() {
+        var result = suggest("BEGIN FOR rec IN (SELECT * FROM users) LOOP DBMS_OUTPUT.PUT_LINE(rec.|); END LOOP; END;");
+        assertTrue(hasKeyOfType(result, "rec.id", "column"));
+        assertTrue(hasKeyOfType(result, "rec.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'BEGIN IF | THEN NULL; END IF; END;' - IF condition suggests columns? Actually no table visible, but not crash")
+    void plsqlIfConditionDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("BEGIN IF | THEN NULL; END IF; END;");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users PIVOT (COUNT(*) FOR status IN (|))' - PIVOT IN list suggests values? Not easy, but not crash")
+    void pivotInClauseDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM orders PIVOT (COUNT(*) FOR status IN (|))");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users UNPIVOT (value FOR column IN (|))' - UNPIVOT IN suggests columns of users")
+    void unpivotInClauseSuggestsColumns() {
+        var result = suggest("SELECT * FROM users UNPIVOT (value FOR column IN (|))");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE JSON_EXISTS(json_col, '$.?' (|))' - JSON_EXISTS condition, not crash")
+    void jsonExistsDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE JSON_EXISTS(json_col, '$' |)");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE JSON_VALUE(json_col, '$.name' RETURNING VARCHAR2 |)' - JSON_VALUE returning type suggests datatypes")
+    void jsonValueReturningSuggestsDatatypes() {
+        var result = suggest("SELECT * FROM users WHERE JSON_VALUE(json_col, '$.name' RETURNING VARCHAR2 |)");
+        var datatypes = keysOfType(result, "datatype");
+        assertTrue(datatypes.contains("varchar") || datatypes.contains("text"));
+    }
+
+    @Test
+    @DisplayName("'SELECT XMLELEMENT(ELEMENT, |) FROM users' - XMLELEMENT argument suggests columns")
+    void xmlElementSuggestsColumns() {
+        var result = suggest("SELECT XMLELEMENT(\"user\", |) FROM users");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT XMLAGG(XMLELEMENT(ELEMENT, name)) FROM users WHERE |' - XMLAGG then WHERE suggests columns")
+    void xmlAggThenWhereSuggestsColumns() {
+        var result = suggest("SELECT XMLAGG(XMLELEMENT(\"name\", name)) FROM users WHERE |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM XMLTABLE('/root/row' PASSING xml_col COLUMNS id INT PATH '@id', name VARCHAR2 |)' - XMLTABLE column type suggests datatypes")
+    void xmlTableColumnTypeSuggestsDatatypes() {
+        var result = suggest("SELECT * FROM XMLTABLE('/root/row' PASSING xml_col COLUMNS id INT, name VARCHAR2 |)");
+        var datatypes = keysOfType(result, "datatype");
+        assertTrue(datatypes.contains("varchar") || datatypes.contains("text"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE SOUNDEX(name) = SOUNDEX(|)' - SOUNDEX argument suggests columns or expressions")
+    void soundexArgSuggestsSomething() {
+        var result = suggest("SELECT * FROM users WHERE SOUNDEX(name) = SOUNDEX(|)");
+        assertTrue(hasKeyOfType(result, "users.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE CONTAINS(name, 'keyword', 1) > 0' - Oracle Text, not crash")
+    void containsFunctionDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE CONTAINS(name, 'keyword', 1) > |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE condition AND |' - after AND in WHERE suggests more conditions (columns, functions, keywords)")
+    void whereAndContinuationSuggestsColumnsAndKeywords() {
+        var result = suggest("SELECT * FROM users u WHERE u.id = 1 AND |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+        // Also might suggest keyword 'NOT', 'EXISTS', etc.
+        assertFalse(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id NOT IN (SELECT | FROM orders)' - NOT IN subquery suggests columns from orders")
+    void notInSubquerySuggestsColumns() {
+        var result = suggest("SELECT * FROM users WHERE id NOT IN (SELECT | FROM orders)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id = ANY (SELECT | FROM orders)' - ANY subquery suggests columns")
+    void anySubquerySuggestsColumnsAgain() {
+        var result = suggest("SELECT * FROM users WHERE id = ANY (SELECT | FROM orders)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id > ALL (SELECT | FROM orders)' - ALL subquery suggests columns")
+    void allSubquerySuggestsColumnsAgain() {
+        var result = suggest("SELECT * FROM users WHERE id > ALL (SELECT | FROM orders)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id = (SELECT id FROM orders WHERE |)' - correlated subquery suggests columns from orders and outer")
+    void correlatedSubquerySuggestsBoth() {
+        var result = suggest("SELECT * FROM users u WHERE id = (SELECT o.id FROM orders o WHERE |)");
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id IN (SELECT id FROM orders UNION SELECT | FROM products)' - UNION inside subquery suggests columns from products")
+    void unionInsideSubquerySuggestsColumns() {
+        var result = suggest("SELECT * FROM users WHERE id IN (SELECT id FROM orders UNION SELECT | FROM products)");
+        assertTrue(hasKeyOfType(result, "products.id", "column"));
+        assertTrue(hasKeyOfType(result, "products.name", "column"));
+        assertFalse(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id IN (SELECT id FROM orders MINUS SELECT | FROM products)' - MINUS inside subquery suggests columns from products")
+    void minusInsideSubquerySuggestsColumns() {
+        var result = suggest("SELECT * FROM users WHERE id IN (SELECT id FROM orders MINUS SELECT | FROM products)");
+        assertTrue(hasKeyOfType(result, "products.id", "column"));
+        assertTrue(hasKeyOfType(result, "products.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE ROWNUM <= |' - ROWNUM compares to number, not column, but not crash")
+    void rownumCompareDoesNotCrash() {
+        assertDoesNotThrow(() -> {
+            var result = suggest("SELECT * FROM users WHERE ROWNUM <= |");
+            assertNotNull(result);
+        });
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM (SELECT * FROM users) WHERE |' - subquery in FROM, WHERE suggests columns from subquery alias? (subquery has no alias, table name accessible?)")
+    void subqueryWithoutAliasWhereSuggestsColumns() {
+        var result = suggest("SELECT * FROM (SELECT * FROM users) WHERE |");
+        // Because subquery has no alias, columns may be exposed as original table name? Or maybe unresolved.
+        // It should not crash.
+        assertNotNull(result);
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM (SELECT * FROM users) sub WHERE sub.|' - dangling dot on subquery alias suggests columns")
+    void danglingDotOnSubqueryAliasSuggestsColumns() {
+        var result = suggest("SELECT * FROM (SELECT * FROM users) sub WHERE sub.|");
+        assertTrue(hasKeyOfType(result, "sub.id", "column"));
+        assertTrue(hasKeyOfType(result, "sub.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT u.id, (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) FROM users u WHERE u.|' - scalar subquery in SELECT and WHERE with dangling dot")
+    void scalarSubqueryAndWhereDanglingDot() {
+        var result = suggest("SELECT u.id, (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) FROM users u WHERE u.|");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u WHERE u.id IN (SELECT o.user_id FROM orders o WHERE o.user_id = |)' - correlated subquery in IN, inner dangling dot points to outer alias?")
+    void correlatedInSubqueryDanglingDot() {
+        var result = suggest("SELECT * FROM users u WHERE u.id IN (SELECT o.user_id FROM orders o WHERE o.user_id = |)");
+        // At this position, both o and u are visible, but dot is not present; we just suggest columns from o and u.
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE id = (SELECT MAX(total) FROM orders WHERE |)' - subquery in scalar expression, WHERE suggests columns from orders")
+    void scalarSubqueryWhereSuggestsColumns() {
+        var result = suggest("SELECT * FROM users WHERE id = (SELECT MAX(total) FROM orders WHERE |)");
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
+        assertTrue(hasKeyOfType(result, "orders.status", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users WHERE EXISTS (SELECT 1 FROM orders WHERE user_id = u.id AND |)' - AND in EXISTS subquery suggests columns from orders and outer")
+    void existsAndContinuationSuggestsColumns() {
+        var result = suggest("SELECT * FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND |)");
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u JOIN orders o ON u.id = o.user_id AND |' - ON clause AND suggests columns from both tables")
+    void onClauseAndSuggestsBothTables() {
+        var result = suggest("SELECT * FROM users u JOIN orders o ON u.id = o.user_id AND |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.status", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u LEFT OUTER JOIN orders o ON u.id = o.user_id WHERE |' - LEFT OUTER JOIN registered both aliases")
+    void leftOuterJoinWhereSuggestsBoth() {
+        var result = suggest("SELECT * FROM users u LEFT OUTER JOIN orders o ON u.id = o.user_id WHERE |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u RIGHT JOIN orders o ON u.id = o.user_id WHERE |' - RIGHT JOIN registered both")
+    void rightJoinWhereSuggestsBoth() {
+        var result = suggest("SELECT * FROM users u RIGHT JOIN orders o ON u.id = o.user_id WHERE |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u FULL OUTER JOIN orders o ON u.id = o.user_id WHERE |' - FULL JOIN registered both")
+    void fullJoinWhereSuggestsBoth() {
+        var result = suggest("SELECT * FROM users u FULL OUTER JOIN orders o ON u.id = o.user_id WHERE |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u NATURAL JOIN orders o WHERE |' - NATURAL JOIN aliases visible")
+    void naturalJoinWhereSuggestsBoth() {
+        var result = suggest("SELECT * FROM users u NATURAL JOIN orders o WHERE |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users u CROSS JOIN orders o WHERE |' - CROSS JOIN aliases visible")
+    void crossJoinWhereSuggestsBoth() {
+        var result = suggest("SELECT * FROM users u CROSS JOIN orders o WHERE |");
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "o.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users INNER JOIN orders USING (user_id) WHERE |' - USING join, alias defaults to table names, columns visible")
+    void innerJoinUsingWhereSuggestsColumns() {
+        var result = suggest("SELECT * FROM users INNER JOIN orders USING (user_id) WHERE |");
+        // Although USING merges columns, both table names are still accessible? In Oracle, USING disables table qualifier for join columns.
+        // But we don't test that exact behavior, just ensure not crash.
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
+
+    @Test
+    @DisplayName("'SELECT * FROM users NATURAL JOIN orders WHERE |' - NATURAL JOIN without alias, columns visible")
+    void naturalJoinWithoutAliasWhereSuggestsColumns() {
+        var result = suggest("SELECT * FROM users NATURAL JOIN orders WHERE |");
+        // Should suggest columns from both tables (if parser handles)
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+    }
 }
