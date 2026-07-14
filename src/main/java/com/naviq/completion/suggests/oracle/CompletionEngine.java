@@ -142,7 +142,7 @@ public class CompletionEngine {
     }
 
     private static void addTableAliasSuggestions(List<Suggest> suggests, OracleSQLSyntacticAnalyzer.Result syn, SemanticAnalyzer.Result sem) {
-        var tableName = AliasNameSuggester.extractTableBeforeAs(syn.tokenStream(), syn.caretTokenIndex());
+        var tableName = AliasNameSuggester.extractTableNameForImplicitAlias(syn.tokenStream(), syn.caretTokenIndex());
         if (tableName != null) {
             String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
             suggests.add(Suggest.of(alias, "alias"));
