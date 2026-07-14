@@ -14,7 +14,7 @@ public class MainC3 {
 
     public static void main(String[] args) {
 
-        String sql = "select * from users where  ";
+        String sql = "WITH RECURSIVE cte AS (SELECT id FROM users UNION ALL SELECT id FROM orders) SELECT ";
 
         // ===================== My Engine =====================
 

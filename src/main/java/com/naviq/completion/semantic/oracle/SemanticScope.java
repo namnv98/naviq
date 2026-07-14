@@ -416,10 +416,7 @@ public class SemanticScope extends PlSqlParserBaseListener {
         }
     }
 
-    // ---- FROM/JOIN alias - table_ref_aux_internal dùng LABELED ALTERNATIVES nên ANTLR sinh 3
-    //      class Context riêng (_one/_two/_three), không phải 1 class chung như Postgres's
-    //      table_ref. dml_table_expression_clause GỘP CHUNG "bảng thật" và "subquery trong ngoặc"
-    //      vào 1 rule (khác Postgres tách relation_expr/select_with_parens riêng ở table_ref). ----
+    // ---- FROM/JOIN alias - SỬA LẠI ĐỂ XỬ LÝ ĐÚNG NATURAL JOIN ----
     // table_ref_aux : table_ref_aux_internal flashback_query_clause* ({p.isTableAlias()}? table_alias)? ;
     // table_ref_aux_internal
     //     : dml_table_expression_clause (pivot_clause|unpivot_clause)?          # table_ref_aux_internal_one
@@ -463,18 +460,53 @@ public class SemanticScope extends PlSqlParserBaseListener {
             String alias = aliasCtx != null && !aliasCtx.getText().trim().isEmpty()
                     ? aliasCtx.getText().trim()
                     : lastPart(table);
+
+//            // KIỂM TRA: Nếu alias là từ khóa JOIN (NATURAL, CROSS, etc.) thì bỏ qua
+//            // Không đăng ký alias nếu nó là từ khóa SQL
+//            if (isSqlKeyword(alias)) {
+//                // Không đăng ký alias, chỉ đăng ký bảng với tên thật
+//                registerTableOrCte(cur, lastPart(table), table);
+//                return;
+//            }
+
             registerTableOrCte(cur, alias, table);
         } else if (dmlCtx.select_statement() != null) {
             // "(select ...) alias" - subquery trong ngoặc, chỉ tham chiếu được nếu CÓ alias
             if (aliasCtx == null || cur.children.isEmpty()) {
                 return;
             }
+//            String alias = aliasCtx.getText().trim();
+//
+//            // KIỂM TRA: Nếu alias là từ khóa SQL thì bỏ qua
+//            if (isSqlKeyword(alias)) {
+//                return;
+//            }
+
             Scope inner = cur.children.get(cur.children.size() - 1);
+            //TODO: remove
             String alias = aliasCtx.getText();
             cur.aliases.put(alias, "<subquery#" + inner.id + ">");
             cur.derivedScopeAliases.put(alias, inner);
         }
         // table_collection_expression / json_table_clause - bỏ qua có chủ đích (hiếm gặp).
+    }
+
+    /**
+     * Kiểm tra xem một từ có phải là từ khóa SQL của Oracle không
+     */
+    private boolean isSqlKeyword(String word) {
+        if (word == null || word.isEmpty()) {
+            return false;
+        }
+        String upper = word.toUpperCase();
+        // Các từ khóa JOIN và các từ khóa thường bị nhầm là alias
+        return Set.of(
+                "NATURAL", "CROSS", "INNER", "OUTER", "LEFT", "RIGHT", "FULL",
+                "JOIN", "ON", "USING", "WHERE", "AND", "OR", "NOT",
+                "SELECT", "FROM", "AS", "TABLE", "VIEW", "INDEX",
+                "ORDER", "BY", "GROUP", "HAVING", "UNION", "INTERSECT", "MINUS",
+                "WITH", "RECURSIVE", "ALL", "DISTINCT", "UNIQUE"
+        ).contains(upper);
     }
 
     /**
