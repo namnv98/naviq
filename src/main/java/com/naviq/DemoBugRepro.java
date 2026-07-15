@@ -1,9 +1,6 @@
 package com.naviq;
 
-import com.naviq.antlr4.postgresql.Demo4Lexer;
-import com.naviq.antlr4.postgresql.Demo4Parser;
-import com.naviq.antlr4.postgresql.Demo5Lexer;
-import com.naviq.antlr4.postgresql.Demo5Parser;
+import com.naviq.antlr4.postgresql.*;
 import com.naviq.completion.syntactic.engine.CompletionEngineDefault;
 import com.naviq.completion.syntactic.engine.model.CandidatesResult;
 import org.antlr.v4.runtime.CharStreams;
@@ -14,70 +11,52 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class DemoBugRepro {
+
     public static void main(String[] args) throws Exception {
-        runDemo4();
-        System.out.println();
-        runDemo5();
+        runQualifiedNameAmbiguity();
     }
 
-    // ── Test 1: lồng 3 tầng — ge -> ide -> rid, cả 3 preferred ─────────────
-    private static void runDemo4() throws Exception {
-        String sql = "XY"; // PREFIX='X', TOK1='Y'
-        int caretTokenIndex = 2; // caret ngay sau 'Y'
+    // ── Test: "1 từ khớp nhiều cửa cùng lúc" (mục cuối ATN_ROOM_DOOR_ANALOGY.md) ──
+    // qualified_name : IDENTIFIER (DOT IDENTIFIER)? ;
+    // Gõ xong "public" (1 Identifier), engine đang sống song song ở CẢ 2 nhánh:
+    //   - "public" là TÊN BẢNG, qualified_name coi như xong -> gợi ý tiếp = WHERE, EOF
+    //   - "public" là TÊN SCHEMA, đang chờ ".tên_bảng"          -> gợi ý tiếp = DOT
+    // Kỳ vọng đúng: cả 3 token (WHERE, EOF, DOT) cùng xuất hiện trong 1 lần gọi
+    // collectCandidates() — không phải 1 nhánh "thắng" rồi loại nhánh kia.
+    private static void runQualifiedNameAmbiguity() throws Exception {
+        String sql = "SELECT name FROM public";
+        // Token: SELECT(0) name(1) FROM(2) public(3) EOF(4) -> caret ngay sau "public"
+        int caretTokenIndex = 4;
 
         var input = CharStreams.fromString(sql);
-        var lexer = new Demo4Lexer(input);
+        var lexer = new DemoLexer(input);
         var tokens = new CommonTokenStream(lexer);
-        var parser = new Demo4Parser(tokens);
+        var parser = new DemoParser(tokens);
         tokens.fill();
 
         Map<Integer, Boolean> ignored = new HashMap<>();
-        Map<Integer, Boolean> preferred = new HashMap<>();
-        preferred.put(Demo4Parser.RULE_ge, true);
-        preferred.put(Demo4Parser.RULE_ide, true);
-        preferred.put(Demo4Parser.RULE_rid, true);
+        Map<Integer, Boolean> preferred = new HashMap<>(); // không cần VIP cho test này
 
         var engine = new CompletionEngineDefault(parser, ignored, preferred);
         CandidatesResult result = engine.collectCandidates(caretTokenIndex);
 
-        System.out.println("========== DEMO4: lồng 3 tầng (ge -> ide -> rid) ==========");
-        printRules(parser, result);
-        System.out.println("KỲ VỌNG ĐÚNG: CHỈ có 'ge' (outermost nhất trong 3 tầng).");
-        System.out.println("NẾU SAI: thấy 'ide' và/hoặc 'rid' xuất hiện thêm.");
+        System.out.println("========== TEST: qualified_name — 1 từ khớp nhiều cửa cùng lúc ==========");
+        System.out.println("Input: \"" + sql + "\", caret ngay sau \"public\"");
+        printTokens(parser, result);
+        System.out.println("KỲ VỌNG ĐÚNG: thấy CẢ 3 — DOT, WHERE, EOF.");
+        System.out.println("  - DOT   : nhánh coi \"public\" là tên schema, đang chờ \".tên_bảng\"");
+        System.out.println("  - WHERE : nhánh coi \"public\" là tên bảng, qualified_name đã xong, có thể thêm WHERE");
+        System.out.println("  - EOF   : nhánh coi \"public\" là tên bảng, câu kết thúc luôn tại đây");
+        System.out.println("NẾU SAI: chỉ thấy 1 hoặc 2 trong 3 token trên -> 1 nhánh bị chặn nhầm.");
     }
 
-    // ── Test 2: 2 preferred-rule độc lập, cùng chạm 1 vị trí qua 2 nhánh ──
-    private static void runDemo5() throws Exception {
-        String sql = "XY"; // PREFIX='X', TOK1='Y' — TOK1 khớp CẢ 2 nhánh cùng lúc
-        int caretTokenIndex = 2;
-
-        var input = CharStreams.fromString(sql);
-        var lexer = new Demo5Lexer(input);
-        var tokens = new CommonTokenStream(lexer);
-        var parser = new Demo5Parser(tokens);
-        tokens.fill();
-
-        Map<Integer, Boolean> ignored = new HashMap<>();
-        Map<Integer, Boolean> preferred = new HashMap<>();
-        preferred.put(Demo5Parser.RULE_preferredA, true);
-        preferred.put(Demo5Parser.RULE_preferredB, true);
-
-        var engine = new CompletionEngineDefault(parser, ignored, preferred);
-        CandidatesResult result = engine.collectCandidates(caretTokenIndex);
-
-        System.out.println("========== DEMO5: 2 preferred-rule độc lập, cùng vị trí ==========");
-        printRules(parser, result);
-        System.out.println("KỲ VỌNG ĐÚNG: CẢ 'preferredA' LẪN 'preferredB' đều xuất hiện.");
-        System.out.println("NẾU SAI: chỉ 1 trong 2 xuất hiện (bị lẫn/nuốt nhầm nhau).");
-    }
-
-    private static void printRules(Parser parser, CandidatesResult result) {
-        if (result.rules.isEmpty()) {
-            System.out.println("(KHÔNG có preferred-rule nào được gợi ý)");
+    private static void printTokens(Parser parser, CandidatesResult result) {
+        if (result.tokens.isEmpty()) {
+            System.out.println("(KHÔNG có token nào được gợi ý)");
             return;
         }
-        for (var ruleId : result.rules.keySet()) {
-            System.out.println("  " + parser.getRuleNames()[ruleId]);
+        for (var tokenType : result.tokens.keySet()) {
+            System.out.println("  " + parser.getVocabulary().getDisplayName(tokenType));
         }
     }
 }

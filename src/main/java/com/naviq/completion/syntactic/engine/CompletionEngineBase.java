@@ -1,7 +1,7 @@
 package com.naviq.completion.syntactic.engine;
 
 import com.naviq.completion.syntactic.engine.feature.FollowingTokensFinder;
-import com.naviq.completion.syntactic.engine.feature.NullableRuleChecker;
+import com.naviq.completion.syntactic.engine.feature.MazeZoomGraph;
 import com.naviq.completion.syntactic.engine.feature.PreferredRuleResolver;
 import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
 import com.naviq.completion.syntactic.engine.feature.RuleTextRangeResolver;
@@ -55,11 +55,14 @@ public abstract class CompletionEngineBase {
     protected CandidatesResult result;
     protected final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
 
+    protected final MazeZoomGraph mazeZoom;
+
     public CompletionEngineBase(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         this.parser = parser;
         this.atn = parser.getATN();
         this.ignoredTokens = ignoredTokens;
         this.preferredRules = preferredRules;
+        this.mazeZoom = new MazeZoomGraph(parser);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -113,6 +116,7 @@ public abstract class CompletionEngineBase {
      */
     protected final Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack) {
         boolean atCaret = isAtCaret(tokenIndex);
+        mazeZoom.onEnterMaze(start, tokenIndex);
 
         RuleCallStack entered = stack.copy();
         entered.push(start.ruleIndex, tokenIndex);
@@ -121,19 +125,23 @@ public abstract class CompletionEngineBase {
             Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
             Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
             if (cached != null) {
+                mazeZoom.onExitMaze();
                 return cached;
             }
             exitsByEntryToken.put(tokenIndex, Collections.emptySet()); // chặn đệ quy vô hạn trong lúc tính dở
 
             Set<Integer> exits = computeExitsNotAtCaret(start, tokenIndex, entered);
             exitsByEntryToken.put(tokenIndex, exits);
+            mazeZoom.onExitMaze();
             return exits;
         }
 
         // TẠI CARET — không đọc, không ghi cache (xem lý do ở javadoc trên).
         // Không cần chặn đệ quy vô hạn ở đây: ANTLR4 không cho phép 1 rule gọi
         // lại chính nó qua đường không tốn token (bị cấm lúc build grammar).
-        return computeExitsAtCaret(start, tokenIndex, entered);
+        Set<Integer> exits = computeExitsAtCaret(start, tokenIndex, entered);
+        mazeZoom.onExitMaze();
+        return exits;
     }
 
     /**
@@ -177,7 +185,9 @@ public abstract class CompletionEngineBase {
             }
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
-                if (isAtCaret(cur.tokenIndex())) {
+                boolean atCaretHere = isAtCaret(cur.tokenIndex());
+                mazeZoom.onVisitState(cur.state(), cur.tokenIndex(), true, atCaretHere);
+                if (atCaretHere) {
                     handlePreferredRules(cur.stack(), result);
                 }
                 ruleExits.add(cur.tokenIndex());
@@ -185,6 +195,7 @@ public abstract class CompletionEngineBase {
             }
 
             boolean atCaret = isAtCaret(cur.tokenIndex());
+            mazeZoom.onVisitState(cur.state(), cur.tokenIndex(), false, atCaret);
             for (Transition t : cur.state().getTransitions()) {
                 if (t instanceof RuleTransition rt) {
                     handleRuleDoor(rt, cur, atCaret, queue);
@@ -222,6 +233,7 @@ public abstract class CompletionEngineBase {
             RuleCallStack withTarget = cur.stack().copy();
             withTarget.push(rt.target.ruleIndex, cur.tokenIndex());
             if (PreferredRuleResolver.resolve(withTarget, preferredRules, result)) {
+                mazeZoom.onRuleDoorShortcutAtCaret(cur.state(), cur.tokenIndex(), rt.target.ruleIndex);
                 if (isNullable(rt.target)) {
                     queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
                 }
@@ -234,17 +246,20 @@ public abstract class CompletionEngineBase {
         }
 
         for (int exitTok : enterRule(rt.target, cur.tokenIndex(), cur.stack())) {
+            mazeZoom.onRuleDoor(cur.state(), cur.tokenIndex(), rt.target.ruleIndex, rt.followState, exitTok);
             queue.push(new PipelineEntry(rt.followState, exitTok, cur.stack()));
         }
     }
 
     protected void handleFreeDoorWithCondition(PredicateTransition pt, PipelineEntry cur, Deque<PipelineEntry> queue) {
         if (pt.getPredicate().eval(parser, ParserRuleContext.EMPTY)) {
+            mazeZoom.onFreeDoor(cur.state(), cur.tokenIndex(), pt.target, true);
             queue.push(new PipelineEntry(pt.target, cur.tokenIndex(), cur.stack()));
         }
     }
 
     protected void handleFreeDoor(Transition t, PipelineEntry cur, Deque<PipelineEntry> queue) {
+        mazeZoom.onFreeDoor(cur.state(), cur.tokenIndex(), t.target, false);
         queue.push(new PipelineEntry(t.target, cur.tokenIndex(), cur.stack()));
     }
 
@@ -254,9 +269,11 @@ public abstract class CompletionEngineBase {
      */
     protected void handleWildcardDoor(WildcardTransition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
         if (!atCaret) {
+            mazeZoom.onWildcardDoor(cur.state(), cur.tokenIndex(), t.target, cur.tokenIndex() + 1);
             queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
             return;
         }
+        mazeZoom.onCaretSuggestionHere(cur.state(), cur.tokenIndex());
         if (handlePreferredRules(cur.stack(), result)) {
             return;
         }
@@ -278,6 +295,7 @@ public abstract class CompletionEngineBase {
         }
 
         if (atCaret) {
+            mazeZoom.onCaretSuggestionHere(cur.state(), cur.tokenIndex());
             if (handlePreferredRules(cur.stack(), result)) {
                 return;
             }
@@ -294,6 +312,7 @@ public abstract class CompletionEngineBase {
                 }
             }
         } else if (label.contains(tokens.get(cur.tokenIndex()).type())) {
+            mazeZoom.onPasswordDoor(cur.state(), cur.tokenIndex(), t.target, cur.tokenIndex() + 1, parser.getVocabulary().getDisplayName(tokens.get(cur.tokenIndex()).type()));
             queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
         }
     }

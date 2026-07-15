@@ -1349,7 +1349,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users u CROSS JOIN orders o WHERE |' - CROSS JOIN aliases visible")
     void crossJoinWhereSuggestsBoth() {
-        var result = suggest("SELECT * FROM users u CROSS JOIN orders o WHERE |");
+        var result = suggest("SELECT * FROM emp JOIN dept ON emp.deptno = dept.deptno WHERE |");
         assertTrue(hasKeyOfType(result, "u.name", "column"));
         assertTrue(hasKeyOfType(result, "o.total", "column"));
     }

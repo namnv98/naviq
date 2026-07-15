@@ -1,0 +1,10 @@
+flowchart TD
+  r0["🌀 select_stmt\n@in=0\n@out=[]"]
+  r1["🌀 columnref\n@in=1\n@out=[2]"]
+  r2["🌀 qualified_name\n@in=3\n@out=[4]"]
+
+  r0 -->|state 2| r1
+  r0 -->|state 4| r2
+
+  classDef caret fill:#ffe08a,stroke:#c77700,stroke-width:2px;
+  classDef cachehit stroke-dasharray: 4 3;
