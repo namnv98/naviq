@@ -46,7 +46,7 @@ public class PostgreSQLSyntacticAnalyzer {
     private static final Map<Integer, Boolean> IGNORED_TOKENS = buildIgnoredTokens();
     private static final Map<Integer, Boolean> PREFERRED_RULES = buildPreferredRules();
 
-    private static Map<Integer, Boolean> buildIgnoredTokens() {
+    public static Map<Integer, Boolean> buildIgnoredTokens() {
         Map<Integer, Boolean> m = new HashMap<>();
         m.put(Token.EOF, true);
         m.put(PostgreSQLParser.Identifier, true);
@@ -68,7 +68,7 @@ public class PostgreSQLSyntacticAnalyzer {
         return m;
     }
 
-    private static Map<Integer, Boolean> buildPreferredRules() {
+    public static Map<Integer, Boolean> buildPreferredRules() {
         Map<Integer, Boolean> m = new HashMap<>();
         m.put(PostgreSQLParser.RULE_qualified_name, true);  // tableName/CTE
         m.put(PostgreSQLParser.RULE_any_name, true);        // DROP TABLE/VIEW/INDEX/SEQUENCE/...

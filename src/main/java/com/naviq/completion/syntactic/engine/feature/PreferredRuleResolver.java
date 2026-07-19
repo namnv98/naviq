@@ -43,17 +43,6 @@ public class PreferredRuleResolver {
         return false;
     }
 
-    /**
-     * Ghi nhận trực tiếp {@code ruleId} làm 1 mê cung đặc biệt đã khớp - dùng khi caller (
-     * {@code handleRuleDoor}) ĐÃ TỰ XÁC ĐỊNH rule này khớp preferredRules, không cần quét lại.
-     * {@code stack} truyền vào là chuỗi tổ tiên TRƯỚC KHI push chính rule này (đúng ý nghĩa
-     * "đường đi dẫn TỚI rule đặc biệt", khớp với {@code pathToRule} trong {@link #resolve}).
-     */
-    public static void recordMatch(int ruleId, RuleCallStack stack, int tokenIndex, CandidatesResult result) {
-        List<RuleCallStack.RuleFrame> pathToRule = new ArrayList<>(stack.frames());
-        recordIfMoreRelevant(ruleId, pathToRule, tokenIndex, result);
-    }
-
     private static void recordIfMoreRelevant(int ruleId, List<RuleCallStack.RuleFrame> pathToRule, int tokenIndex, CandidatesResult result) {
         Integer existingEntryIndex = result.ruleEntryTokenIndex.get(ruleId);
         if (isMoreRelevant(tokenIndex, existingEntryIndex)) {

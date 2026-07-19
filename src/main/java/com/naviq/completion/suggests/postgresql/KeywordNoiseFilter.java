@@ -98,7 +98,7 @@ public class KeywordNoiseFilter {
         return result;
     }
 
-    private static Set<String> allRuleNames(Set<Integer> ruleIds) {
+    public static Set<String> allRuleNames(Set<Integer> ruleIds) {
         Set<String> result = new HashSet<>();
         for (Integer ruleIndex : ruleIds) {
             result.add(PostgreSQLParser.ruleNames[ruleIndex]);

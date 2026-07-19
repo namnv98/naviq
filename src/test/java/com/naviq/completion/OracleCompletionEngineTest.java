@@ -1341,7 +1341,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users u NATURAL JOIN orders o WHERE |' - NATURAL JOIN aliases visible")
     void naturalJoinWhereSuggestsBoth() {
-        var result = suggest("SELECT * FROM users u NATURAL JOIN orders o WHERE |");
+        var result = suggest("SELECT * FROM1 orders WHERE |");
         assertTrue(hasKeyOfType(result, "u.name", "column"));
         assertTrue(hasKeyOfType(result, "o.total", "column"));
     }
