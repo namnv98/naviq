@@ -39,7 +39,7 @@ public class LogMazeZoomGraph {
 //                "'*' , IDENTIFIER (đang chờ columnref tiếp theo sau dấu phẩy)");
 
         // ── Nhóm 2: thiếu ĐÚNG 1 từ khoá, KHÔNG có token thừa gây nhiễu ──
-        run("select * from1  ",
+        run("select * from (a, b ",
                 "thiếu FROM, đúng 1 chỗ lỗi",
                 "'*' , IDENTIFIER — nếu đúng, fallback cứu được sạch sẽ");
 //
@@ -142,7 +142,14 @@ public class LogMazeZoomGraph {
     }
 
     private static void printSuggestions(Parser parser, CandidatesResult result) {
-        var a = allRuleNames(result.rules.keySet());
+        System.out.println("---------------------");
+        var rules = allRuleNames(result.rules.keySet());
+        System.out.println("RULES: ");
+        for (var r : rules) {
+            System.out.println(r);
+        }
+        System.out.println("---------------------");
+        System.out.println("TOKENS: ");
         if (result.tokens.isEmpty()) {
             System.out.println("    Gợi ý: (RỖNG — không gợi ý gì)");
             return;
@@ -155,5 +162,7 @@ public class LogMazeZoomGraph {
             first = false;
         }
         System.out.println(sb);
+        System.out.println("---------------------");
+
     }
 }
