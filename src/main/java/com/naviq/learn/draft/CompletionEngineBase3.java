@@ -1,7 +1,6 @@
-package com.naviq.completion.syntactic.engine;
+package com.naviq.learn.draft;
 
 import com.naviq.completion.syntactic.engine.feature.FollowingTokensFinder;
-import com.naviq.completion.syntactic.engine.feature.MazeZoomGraph;
 import com.naviq.completion.syntactic.engine.feature.PreferredRuleResolver;
 import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
 import com.naviq.completion.syntactic.engine.feature.RuleTextRangeResolver;
@@ -33,15 +32,19 @@ import java.util.*;
  * Đọc file này là đủ để hiểu đúng LÕI thuật toán completion. 4 file kia chỉ
  * cần đọc khi bạn quan tâm tới đúng phần tối ưu/tiện ích tương ứng.
  * <p>
- * GỘP LẠI (so với bản trước): {@code enterRule()} và {@code handlePreferredRules()}
- * từng bị lặp lại y hệt nhau ở CẢ 2 subclass ({@code WithFlowSet}/{@code Default}) —
- * phần khung (đọc/ghi ruleExitCache, dựng RuleCallStack) và phần
- * {@code handlePreferredRules} hoá ra GIỐNG HỆT NHAU ở cả 2 nơi, chỉ có đúng
- * "cách tính exits" (dùng follow-set hay dò sống) là thật sự khác nhau. Kéo
- * hết phần giống nhau lên đây (Template Method), subclass giờ chỉ còn implement
- * đúng 2 hook nhỏ ở cuối.
+ * Có đúng 3 HOOK nhỏ (mặc định KHÔNG làm gì cả — giữ nguyên hành vi gốc) để
+ * class con thêm hành vi mà KHÔNG cần sửa file này:
+ * <p>
+ * - {@link #recoverIfNeeded}    : sau khi 1 rule chết hẳn, có muốn cứu không?
+ * - {@link #recoverRuleDeadEnd} : sau khi 1 rule con (qua RuleTransition) chết hẳn, có muốn cứu không?
+ * - {@link #onReachedCaret}     : mỗi khi có 1 nhánh sống chạm caret, cần biết thì override.
+ * <p>
+ * Xem {@code ResyncCompletionEngineBase} — class con dùng cả 3 hook này để
+ * cộng thêm khả năng hồi phục lỗi, không đụng vào 1 dòng nào ở đây.
+ * Xem {@code ResyncCompletionEngineBase} — class con dùng cả 3 hook này để
+ * cộng thêm khả năng hồi phục lỗi, không đụng vào 1 dòng nào ở đây.
  */
-public abstract class CompletionEngineBase1 {
+public abstract class CompletionEngineBase3 {
 
     protected final Parser parser;
     protected final ATN atn;
@@ -55,14 +58,11 @@ public abstract class CompletionEngineBase1 {
     protected CandidatesResult result;
     protected final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
 
-    protected final MazeZoomGraph mazeZoom;
-
-    public CompletionEngineBase1(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
+    public CompletionEngineBase3(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         this.parser = parser;
         this.atn = parser.getATN();
         this.ignoredTokens = ignoredTokens;
         this.preferredRules = preferredRules;
-        this.mazeZoom = new MazeZoomGraph(parser);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -74,12 +74,28 @@ public abstract class CompletionEngineBase1 {
     }
 
     public CandidatesResult collectCandidates(int caretTokenIndex, ParserRuleContext context) {
+        prepareTokens(caretTokenIndex, context);
+        return runOnePass(startRuleIndexOf(context));
+    }
+
+    /**
+     * Tách riêng để class con (2-lượt resync) tái sử dụng, không phải chuẩn bị token lại từ đầu cho mỗi lượt.
+     */
+    protected void prepareTokens(int caretTokenIndex, ParserRuleContext context) {
+        tokenStartIndex = context != null ? context.start.getTokenIndex() : 0;
+        tokens = readTokens(parser.getTokenStream(), tokenStartIndex, caretTokenIndex);
+    }
+
+    protected int startRuleIndexOf(ParserRuleContext context) {
+        return context != null ? context.getRuleIndex() : 0;
+    }
+
+    /**
+     * Chạy đúng 1 lượt phân tích trọn vẹn — class con gọi lại hàm này (không override) để chạy nhiều lượt nếu cần.
+     */
+    protected CandidatesResult runOnePass(int startRuleIndex) {
         result = new CandidatesResult();
         ruleExitCache.clear();
-
-        tokenStartIndex = context != null ? context.start.getTokenIndex() : 0;
-        int startRuleIndex = context != null ? context.getRuleIndex() : 0;
-        tokens = readTokens(parser.getTokenStream(), tokenStartIndex, caretTokenIndex);
 
         enterRule(atn.ruleToStartState[startRuleIndex], 0, new RuleCallStack());
 
@@ -116,7 +132,6 @@ public abstract class CompletionEngineBase1 {
      */
     protected final Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack) {
         boolean atCaret = isAtCaret(tokenIndex);
-        mazeZoom.onEnterMaze(start, tokenIndex);
 
         RuleCallStack entered = stack.copy();
         entered.push(start.ruleIndex, tokenIndex);
@@ -125,23 +140,16 @@ public abstract class CompletionEngineBase1 {
             Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
             Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
             if (cached != null) {
-                mazeZoom.onExitMaze();
                 return cached;
             }
-            exitsByEntryToken.put(tokenIndex, Collections.emptySet()); // chặn đệ quy vô hạn trong lúc tính dở
+            exitsByEntryToken.put(tokenIndex, Collections.emptySet());
 
             Set<Integer> exits = computeExitsNotAtCaret(start, tokenIndex, entered);
             exitsByEntryToken.put(tokenIndex, exits);
-            mazeZoom.onExitMaze();
             return exits;
         }
 
-        // TẠI CARET — không đọc, không ghi cache (xem lý do ở javadoc trên).
-        // Không cần chặn đệ quy vô hạn ở đây: ANTLR4 không cho phép 1 rule gọi
-        // lại chính nó qua đường không tốn token (bị cấm lúc build grammar).
-        Set<Integer> exits = computeExitsAtCaret(start, tokenIndex, entered);
-        mazeZoom.onExitMaze();
-        return exits;
+        return computeExitsAtCaret(start, tokenIndex, entered);
     }
 
     /**
@@ -176,8 +184,28 @@ public abstract class CompletionEngineBase1 {
     protected Set<Integer> walkRuleBody(ATNState start, int startTokenIndex, RuleCallStack stack) {
         Set<Integer> ruleExits = new HashSet<>();
         Set<String> visited = new HashSet<>();
+        List<DeadEnd> deadEnds = new ArrayList<>();
         Deque<PipelineEntry> queue = new ArrayDeque<>();
         queue.push(new PipelineEntry(start, startTokenIndex, stack));
+        bfsSweep(queue, visited, ruleExits, deadEnds);
+        // HOOK — mặc định trả nguyên ruleExits, không cố cứu gì (đúng thuật
+        // toán gốc). ResyncCompletionEngineBase override để thêm khả năng vá.
+        return recoverIfNeeded(visited, ruleExits, deadEnds);
+    }
+
+    /**
+     * HOOK — gọi SAU KHI 1 rule đã chạy hết BFS bình thường. Mặc định KHÔNG
+     * làm gì (rule chết là chết thật, giữ nguyên {@code ruleExits}).
+     * Override để thử "vá" dựa vào {@code deadEnds} đã ghi lại.
+     */
+    protected Set<Integer> recoverIfNeeded(Set<String> visited, Set<Integer> ruleExits, List<DeadEnd> deadEnds) {
+        return ruleExits;
+    }
+
+    /**
+     * Quét cạn {@code queue} bằng BFS (không phải "LƯỢT" của collectCandidates — 1 lượt collectCandidates có thể gọi hàm này NHIỀU LẦN, mỗi lần vá xong 1 vòng resync). Protected để class con (resync) gọi lại, không phải chép logic dispatch.
+     */
+    protected void bfsSweep(Deque<PipelineEntry> queue, Set<String> visited, Set<Integer> ruleExits, List<DeadEnd> deadEnds) {
         while (!queue.isEmpty()) {
             PipelineEntry cur = queue.pop();
             if (!visited.add(cur.state().stateNumber + ":" + cur.tokenIndex())) {
@@ -185,9 +213,8 @@ public abstract class CompletionEngineBase1 {
             }
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
-                boolean atCaretHere = isAtCaret(cur.tokenIndex());
-                mazeZoom.onVisitState(cur.state(), cur.tokenIndex(), true, atCaretHere);
-                if (atCaretHere) {
+                if (isAtCaret(cur.tokenIndex())) {
+                    onReachedCaret();
                     handlePreferredRules(cur.stack(), result);
                 }
                 ruleExits.add(cur.tokenIndex());
@@ -195,7 +222,9 @@ public abstract class CompletionEngineBase1 {
             }
 
             boolean atCaret = isAtCaret(cur.tokenIndex());
-            mazeZoom.onVisitState(cur.state(), cur.tokenIndex(), false, atCaret);
+            if (atCaret) {
+                onReachedCaret();
+            }
             for (Transition t : cur.state().getTransitions()) {
                 if (t instanceof RuleTransition rt) {
                     handleRuleDoor(rt, cur, atCaret, queue);
@@ -206,34 +235,28 @@ public abstract class CompletionEngineBase1 {
                 } else if (t.isEpsilon()) {
                     handleFreeDoor(t, cur, queue);
                 } else {
-                    handlePasswordDoor(t, cur, atCaret, queue);
+                    handlePasswordDoor(t, cur, atCaret, queue, deadEnds);
                 }
             }
         }
-        return ruleExits;
     }
 
     /**
-     * SỬA BUG THẬT (phát hiện qua DemoBugRepro3 — xem lại lịch sử trò chuyện):
-     * bản trước gọi thẳng {@code PreferredRuleResolver.recordMatch(rt.target.ruleIndex, ...)} —
-     * ghi nhận NGAY rule vừa chạm tới, mà KHÔNG kiểm tra {@code cur.stack()} (ngữ cảnh ancestor)
-     * đã có sẵn 1 preferred-rule NGOÀI nó hay chưa. Hệ quả: nếu 1 preferred-rule A lồng bên trong
-     * 1 preferred-rule B (A là ancestor của B trong stack lúc gặp RuleTransition vào B, cả 2 đều
-     * preferred), code cũ ghi nhận CẢ B (sai, vi phạm "quy về ngoài cùng nhất") LẪN A (đúng, qua
-     * lưới an toàn resolve() ở RULE_STOP của A) — ra 2 gợi ý thay vì đúng 1.
-     * <p>
-     * SỬA: dùng {@code resolve()} trên TOÀN BỘ (stack hiện tại + rt.target) — quét đúng từ ngoài
-     * vào trong, dừng ở match đầu tiên gặp được, dù đó là 1 ancestor đã có sẵn hay chính rt.target.
-     * Nếu resolve() tìm thấy match (bất kể là ai), ta biết chắc đã có 1 preferred-rule bao trọn
-     * điểm này rồi — không cần đệ quy vào thân {@code rt.target} nữa (dù nó preferred hay không),
-     * chỉ cần biết nó có "rỗng" được không để quyết định tiếp tục BFS qua {@code followState}.
+     * HOOK — gọi mỗi khi có 1 nhánh SỐNG (không qua resync) chạm caret. Mặc định không làm gì.
+     */
+    protected void onReachedCaret() {
+    }
+
+    /**
+     * Preferred-rule quy về NGOÀI CÙNG nhất nếu lồng nhau: {@code resolve()}
+     * quét từ ngoài vào trong trên (stack + rt.target), dừng ở match đầu
+     * tiên — không đệ quy vào {@code rt.target} nữa nếu đã match.
      */
     protected void handleRuleDoor(RuleTransition rt, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
         if (atCaret) {
             RuleCallStack withTarget = cur.stack().copy();
             withTarget.push(rt.target.ruleIndex, cur.tokenIndex());
             if (PreferredRuleResolver.resolve(withTarget, preferredRules, result)) {
-                mazeZoom.onRuleDoorShortcutAtCaret(cur.state(), cur.tokenIndex(), rt.target.ruleIndex);
                 if (isNullable(rt.target)) {
                     queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
                 }
@@ -245,22 +268,35 @@ public abstract class CompletionEngineBase1 {
             // -> đi tiếp bình thường, đệ quy vào enterRule như dưới.
         }
 
-        mazeZoom.onRuleDoorEnter(cur.state(), cur.tokenIndex(), rt.target);
-        for (int exitTok : enterRule(rt.target, cur.tokenIndex(), cur.stack())) {
-            mazeZoom.onRuleDoorExit(rt.target.ruleIndex, rt.followState, exitTok);
+        Set<Integer> exits = enterRule(rt.target, cur.tokenIndex(), cur.stack());
+
+        if (exits.isEmpty() && !atCaret) {
+            // HOOK — mặc định trả nguyên (vẫn rỗng, chết thật). Override để cứu.
+            exits = recoverRuleDeadEnd(rt, cur, exits);
+        }
+
+        for (int exitTok : exits) {
             queue.push(new PipelineEntry(rt.followState, exitTok, cur.stack()));
         }
     }
 
+    /**
+     * HOOK — {@code rt.target} (1 rule con gọi qua RuleTransition) vừa CHẾT
+     * HẲN (không thoát ra được đâu cả). Mặc định KHÔNG cứu, trả nguyên
+     * {@code exits} (vẫn rỗng). Override để nhảy tới vị trí caller chấp nhận
+     * được, giống {@code DefaultErrorStrategy} của ANTLR thật.
+     */
+    protected Set<Integer> recoverRuleDeadEnd(RuleTransition rt, PipelineEntry cur, Set<Integer> exits) {
+        return exits;
+    }
+
     protected void handleFreeDoorWithCondition(PredicateTransition pt, PipelineEntry cur, Deque<PipelineEntry> queue) {
         if (pt.getPredicate().eval(parser, ParserRuleContext.EMPTY)) {
-            mazeZoom.onFreeDoor(cur.state(), cur.tokenIndex(), pt.target, true);
             queue.push(new PipelineEntry(pt.target, cur.tokenIndex(), cur.stack()));
         }
     }
 
     protected void handleFreeDoor(Transition t, PipelineEntry cur, Deque<PipelineEntry> queue) {
-        mazeZoom.onFreeDoor(cur.state(), cur.tokenIndex(), t.target, false);
         queue.push(new PipelineEntry(t.target, cur.tokenIndex(), cur.stack()));
     }
 
@@ -270,11 +306,9 @@ public abstract class CompletionEngineBase1 {
      */
     protected void handleWildcardDoor(WildcardTransition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
         if (!atCaret) {
-            mazeZoom.onWildcardDoor(cur.state(), cur.tokenIndex(), t.target, cur.tokenIndex() + 1);
             queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
             return;
         }
-        mazeZoom.onCaretSuggestionHere(cur.state(), cur.tokenIndex());
         if (handlePreferredRules(cur.stack(), result)) {
             return;
         }
@@ -286,7 +320,7 @@ public abstract class CompletionEngineBase1 {
         }
     }
 
-    protected void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
+    protected void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue, List<DeadEnd> deadEnds) {
         IntervalSet label = t.label();
         if (label == null || label.size() == 0) {
             return;
@@ -305,7 +339,6 @@ public abstract class CompletionEngineBase1 {
                 if (ignoredTokens.containsKey(sym)) {
                     continue;
                 }
-                mazeZoom.onSuggestedToken(cur.state(), cur.tokenIndex(), parser.getVocabulary().getDisplayName(sym));
                 if (!result.tokens.containsKey(sym)) {
                     result.tokens.put(sym, following);
                 } else if (!result.tokens.get(sym).equals(following)) {
@@ -313,13 +346,20 @@ public abstract class CompletionEngineBase1 {
                 }
             }
         } else if (label.contains(tokens.get(cur.tokenIndex()).type())) {
-            mazeZoom.onPasswordDoor(cur.state(), cur.tokenIndex(), t.target, cur.tokenIndex() + 1, parser.getVocabulary().getDisplayName(tokens.get(cur.tokenIndex()).type()));
             queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
         } else {
-            // Sai mật khẩu -> nhánh này chết ở đây, không push gì cả (giữ nguyên hành vi thuật toán).
-            // CHỈ khi SHOW_DEAD_ENDS bật, ghi lại để debug thấy được cả những cửa đã xét nhưng không khớp.
-            mazeZoom.onPasswordDoorRejected(cur.state(), cur.tokenIndex(), label.toString(), parser.getVocabulary().getDisplayName(tokens.get(cur.tokenIndex()).type()));
+            // Sai mật khẩu -> chết ở đây. Vẫn GHI vào deadEnds (rẻ, vô hại) để
+            // hook recoverIfNeeded có dữ liệu dùng NẾU class con muốn — bản
+            // gốc ở đây không tự đọc deadEnds, nên hành vi không đổi.
+            deadEnds.add(new DeadEnd(cur.state(), cur.tokenIndex(), label, t.target, cur.stack()));
         }
+    }
+
+    /**
+     * 1 điểm chết tại 1 cửa mật khẩu — ghi nhớ đủ thông tin để hook {@link #recoverIfNeeded} dùng nếu cần.
+     */
+    protected record DeadEnd(ATNState from, int fromTokenIndex, IntervalSet label, ATNState target,
+                             RuleCallStack stack) {
     }
 
     // ════════════════════════════════════════════════════════════════

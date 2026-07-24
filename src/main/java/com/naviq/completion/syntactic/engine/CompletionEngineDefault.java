@@ -17,7 +17,7 @@ import java.util.*;
  * chỉ còn đúng phần khác biệt duy nhất: "cách tính exits" — với chế độ này,
  * luôn luôn là gọi thẳng {@code walkRuleBody}, dù còn lời hay tại caret.
  */
-public class CompletionEngineDefault extends ResyncCompletionEngineBase {
+public class CompletionEngineDefault extends CompletionEngineBase {
 
     public CompletionEngineDefault(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         super(parser, ignoredTokens, preferredRules);

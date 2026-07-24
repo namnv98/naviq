@@ -1,10 +1,10 @@
-package com.naviq.completion.syntactic.engine;
+package com.naviq.learn.draft;
 
+import com.naviq.completion.syntactic.engine.CompletionEngineBase;
 import com.naviq.completion.syntactic.engine.feature.RuleResyncSkipper;
 import com.naviq.completion.syntactic.engine.model.CandidatesResult;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
-import org.antlr.v4.runtime.atn.ATNState;
 import org.antlr.v4.runtime.atn.RuleTransition;
 
 import java.util.*;
@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Toàn bộ lý do thiết kế (2 lượt, dead-end ghi sổ, LỚP 1/LỚP 2, cờ toàn cục)
  * xem chi tiết ở từng method dưới.
  */
-public abstract class ResyncCompletionEngineBase extends CompletionEngineBase {
+public abstract class ResyncCompletionEngineBase extends CompletionEngineBase3 {
 
     protected final RuleResyncSkipper resyncSkipper;
     /** Giấy phép dùng resync (constructor, bất biến) — khác {@link #resyncActiveThisPass} (công tắc thật, đổi theo từng lượt). */
@@ -121,17 +121,32 @@ public abstract class ResyncCompletionEngineBase extends CompletionEngineBase {
      * LỚP 2 — không có bản sao nào -> coi cửa "bị bỏ qua miễn phí" (0-skip
      * theo follow-set đích đến). Là ĐOÁN, có thể sai; nếu sai sẽ tự chết ở
      * bước sau, không cần tự tay chặn — sống tới caret thì góp vào gợi ý.
+     * <p>
+     * BUG FIX (IndexOutOfBounds): {@code idx} trả về từ resyncSkipper là 1
+     * vị trí HỢP LỆ trong {@code tokens} (0..size-1). Nhưng {@code idx + 1}
+     * ở LỚP 1 có thể vượt quá {@code tokens.size()-1} nếu token khớp label
+     * nằm đúng ở vị trí cuối cùng (caret). Thuật toán gốc giữ bất biến: mọi
+     * tokenIndex đẩy vào pipeline không bao giờ vượt quá {@code tokens.size()-1}
+     * (xem {@code handlePasswordDoor}: chỉ +1 khi chưa ở caret). Nếu phá vỡ
+     * bất biến này, giá trị vượt bounds sẽ bị lưu vào {@code ruleExits} rồi
+     * sau đó {@code RuleTextRangeResolver} index thẳng vào {@code tokens.get(...)}
+     * gây {@code IndexOutOfBoundsException}. Kẹp cả 2 nhánh về đúng bounds.
      */
     private void resolveDeadEnd(DeadEnd de, Deque<PipelineEntry> resyncQueue) {
         int idx = resyncSkipper.findResyncPointForLabel(de.label(), tokens, de.fromTokenIndex());
         if (idx != -1) {
-            resyncQueue.push(new PipelineEntry(de.target(), idx + 1, de.stack()));
+            resyncQueue.push(new PipelineEntry(de.target(), clampToCaret(idx + 1), de.stack()));
             return;
         }
         idx = resyncSkipper.findResyncPoint(de.target(), tokens, de.fromTokenIndex());
         if (idx != -1) {
-            resyncQueue.push(new PipelineEntry(de.target(), idx, de.stack()));
+            resyncQueue.push(new PipelineEntry(de.target(), clampToCaret(idx), de.stack()));
         }
+    }
+
+    /** Kẹp 1 token index do resync tự tính ra về đúng bounds hợp lệ của {@code tokens} (0..size-1), giữ đúng bất biến của thuật toán gốc. */
+    private int clampToCaret(int idx) {
+        return Math.min(idx, tokens.size() - 1);
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -143,6 +158,9 @@ public abstract class ResyncCompletionEngineBase extends CompletionEngineBase {
      * khoá bắt buộc) — nhảy tới vị trí token gần nhất mà CALLER
      * ({@code rt.followState}) chấp nhận được, giống
      * {@code DefaultErrorStrategy} của ANTLR thật recover.
+     * <p>
+     * BUG FIX: {@code resyncIndex} cũng cần kẹp về bounds hợp lệ, cùng lý do
+     * như {@link #resolveDeadEnd}.
      */
     @Override
     protected Set<Integer> recoverRuleDeadEnd(RuleTransition rt, PipelineEntry cur, Set<Integer> exits) {
@@ -150,7 +168,7 @@ public abstract class ResyncCompletionEngineBase extends CompletionEngineBase {
             return exits;
         }
         int resyncIndex = resyncSkipper.findResyncPoint(rt.followState, tokens, cur.tokenIndex());
-        return resyncIndex != -1 ? Collections.singleton(resyncIndex) : exits;
+        return resyncIndex != -1 ? Collections.singleton(clampToCaret(resyncIndex)) : exits;
     }
 
     // ════════════════════════════════════════════════════════════════

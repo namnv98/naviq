@@ -15,35 +15,6 @@ import org.antlr.v4.runtime.misc.IntervalSet;
 
 import java.util.*;
 
-/**
- * CORE — chỉ chứa đúng thuật toán "phòng và cửa" (xem ATN_ROOM_DOOR_ANALOGY.md).
- * 4 tính năng thêm vào bản gốc đầy đủ giờ nằm ở FILE RIÊNG, engine này chỉ GỌI
- * RA chúng ở đúng vài điểm nối, không tự cài logic của chúng vào giữa:
- * <p>
- * - FollowSetsByState   : tính trước "từ phòng này, token nào có thể gặp",
- * cache thread-safe, dùng để cắt sớm trước khi dò cửa sống
- * — VÀ khi caret rơi đúng lúc vừa vào 1 mê cung, dùng thẳng luôn để sinh gợi ý (generateSuggestionsFromFollowSets),
- * core không cần biết cấu trúc dữ liệu follow-set là gì cả.
- * - PreferredRuleResolver: gộp gợi ý về mê cung đặc biệt NGOÀI CÙNG nếu lồng nhau.
- * - RuleTextRangeResolver: đổi vị trí mê cung đặc biệt thành offset ký tự.
- * - RuleCallStack       : ngăn xếp "đang lồng trong mê cung nào" — dữ liệu
- * dùng chung giữa 2 feature outermost/text-range.
- * <p>
- * Đọc file này là đủ để hiểu đúng LÕI thuật toán completion. 4 file kia chỉ
- * cần đọc khi bạn quan tâm tới đúng phần tối ưu/tiện ích tương ứng.
- * <p>
- * Có đúng 3 HOOK nhỏ (mặc định KHÔNG làm gì cả — giữ nguyên hành vi gốc) để
- * class con thêm hành vi mà KHÔNG cần sửa file này:
- * <p>
- * - {@link #recoverIfNeeded}    : sau khi 1 rule chết hẳn, có muốn cứu không?
- * - {@link #recoverRuleDeadEnd} : sau khi 1 rule con (qua RuleTransition) chết hẳn, có muốn cứu không?
- * - {@link #onReachedCaret}     : mỗi khi có 1 nhánh sống chạm caret, cần biết thì override.
- * <p>
- * Xem {@code ResyncCompletionEngineBase} — class con dùng cả 3 hook này để
- * cộng thêm khả năng hồi phục lỗi, không đụng vào 1 dòng nào ở đây.
- * Xem {@code ResyncCompletionEngineBase} — class con dùng cả 3 hook này để
- * cộng thêm khả năng hồi phục lỗi, không đụng vào 1 dòng nào ở đây.
- */
 public abstract class CompletionEngineBase {
 
     protected final Parser parser;
@@ -57,6 +28,7 @@ public abstract class CompletionEngineBase {
 
     protected CandidatesResult result;
     protected final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
+
 
     public CompletionEngineBase(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         this.parser = parser;
@@ -74,28 +46,12 @@ public abstract class CompletionEngineBase {
     }
 
     public CandidatesResult collectCandidates(int caretTokenIndex, ParserRuleContext context) {
-        prepareTokens(caretTokenIndex, context);
-        return runOnePass(startRuleIndexOf(context));
-    }
-
-    /**
-     * Tách riêng để class con (2-lượt resync) tái sử dụng, không phải chuẩn bị token lại từ đầu cho mỗi lượt.
-     */
-    protected void prepareTokens(int caretTokenIndex, ParserRuleContext context) {
-        tokenStartIndex = context != null ? context.start.getTokenIndex() : 0;
-        tokens = readTokens(parser.getTokenStream(), tokenStartIndex, caretTokenIndex);
-    }
-
-    protected int startRuleIndexOf(ParserRuleContext context) {
-        return context != null ? context.getRuleIndex() : 0;
-    }
-
-    /**
-     * Chạy đúng 1 lượt phân tích trọn vẹn — class con gọi lại hàm này (không override) để chạy nhiều lượt nếu cần.
-     */
-    protected CandidatesResult runOnePass(int startRuleIndex) {
         result = new CandidatesResult();
         ruleExitCache.clear();
+
+        tokenStartIndex = context != null ? context.start.getTokenIndex() : 0;
+        int startRuleIndex = context != null ? context.getRuleIndex() : 0;
+        tokens = readTokens(parser.getTokenStream(), tokenStartIndex, caretTokenIndex);
 
         enterRule(atn.ruleToStartState[startRuleIndex], 0, new RuleCallStack());
 
@@ -111,25 +67,6 @@ public abstract class CompletionEngineBase {
     // ════════════════════════════════════════════════════════════════
     // BƯỚC 1 — Bước vào 1 mê cung, tại 1 vị trí lời nói cho trước
     // ════════════════════════════════════════════════════════════════
-
-    /**
-     * KHUNG CHUNG cho cả 2 chế độ (bật/tắt follow-set) — phần cache HOÀN TOÀN
-     * giống nhau giữa 2 chế độ, chỉ khác đúng "cách tính exits", nên viết 1
-     * lần ở đây, 2 subclass chỉ cần implement {@link #computeExitsNotAtCaret}
-     * và {@link #computeExitsAtCaret}.
-     * <p>
-     * - CÒN LỜI: an toàn đọc/ghi {@code ruleExitCache} theo (ruleIndex, tokenIndex) —
-     * không có tác dụng phụ nào phụ thuộc {@code stack} của người gọi ở case này.
-     * <p>
-     * - TẠI CARET: KHÔNG đọc, KHÔNG ghi cache gì cả — ở đây có tác dụng phụ
-     * (ghi nhận preferred rule vào {@code result}) PHỤ THUỘC {@code stack} riêng
-     * của từng người gọi. Nếu đọc cache, chỉ nhánh gọi TRƯỚC mới thật sự chạy
-     * và ghi nhận đúng; nhánh gọi SAU nhận nhầm kết quả cache, tác dụng phụ của
-     * chính nó KHÔNG BAO GIỜ chạy — đây chính là bug thật đã gặp
-     * ({@code "select * from "} mất gợi ý {@code qualified_name} vì
-     * {@code func_name} dùng chung {@code colid} gọi trước, cache che mất
-     * lượt gọi sau).
-     */
     protected final Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack) {
         boolean atCaret = isAtCaret(tokenIndex);
 
@@ -142,7 +79,7 @@ public abstract class CompletionEngineBase {
             if (cached != null) {
                 return cached;
             }
-            exitsByEntryToken.put(tokenIndex, Collections.emptySet());
+            exitsByEntryToken.put(tokenIndex, Collections.emptySet()); // chặn đệ quy vô hạn trong lúc tính dở
 
             Set<Integer> exits = computeExitsNotAtCaret(start, tokenIndex, entered);
             exitsByEntryToken.put(tokenIndex, exits);
@@ -168,10 +105,7 @@ public abstract class CompletionEngineBase {
     protected abstract boolean isNullable(ATNState state);
 
     /**
-     * Quét {@code stack} tìm mê cung đặc biệt (ngoài cùng nhất nếu lồng nhau),
-     * ghi nhận vào {@code result} nếu tìm thấy. Trước đây bị 2 subclass override
-     * y hệt nhau — gộp thành implementation thật ở đây, không còn là hook rỗng
-     * "return false" chờ override nữa.
+     * Quét {@code stack} tìm mê cung đặc biệt (ngoài cùng nhất nếu lồng nhau), ghi nhận vào {@code result} nếu tìm thấy.
      */
     protected boolean handlePreferredRules(RuleCallStack stack, CandidatesResult result) {
         return PreferredRuleResolver.resolve(stack, preferredRules, result);
@@ -184,28 +118,8 @@ public abstract class CompletionEngineBase {
     protected Set<Integer> walkRuleBody(ATNState start, int startTokenIndex, RuleCallStack stack) {
         Set<Integer> ruleExits = new HashSet<>();
         Set<String> visited = new HashSet<>();
-        List<DeadEnd> deadEnds = new ArrayList<>();
         Deque<PipelineEntry> queue = new ArrayDeque<>();
         queue.push(new PipelineEntry(start, startTokenIndex, stack));
-        bfsSweep(queue, visited, ruleExits, deadEnds);
-        // HOOK — mặc định trả nguyên ruleExits, không cố cứu gì (đúng thuật
-        // toán gốc). ResyncCompletionEngineBase override để thêm khả năng vá.
-        return recoverIfNeeded(visited, ruleExits, deadEnds);
-    }
-
-    /**
-     * HOOK — gọi SAU KHI 1 rule đã chạy hết BFS bình thường. Mặc định KHÔNG
-     * làm gì (rule chết là chết thật, giữ nguyên {@code ruleExits}).
-     * Override để thử "vá" dựa vào {@code deadEnds} đã ghi lại.
-     */
-    protected Set<Integer> recoverIfNeeded(Set<String> visited, Set<Integer> ruleExits, List<DeadEnd> deadEnds) {
-        return ruleExits;
-    }
-
-    /**
-     * Quét cạn {@code queue} bằng BFS (không phải "LƯỢT" của collectCandidates — 1 lượt collectCandidates có thể gọi hàm này NHIỀU LẦN, mỗi lần vá xong 1 vòng resync). Protected để class con (resync) gọi lại, không phải chép logic dispatch.
-     */
-    protected void bfsSweep(Deque<PipelineEntry> queue, Set<String> visited, Set<Integer> ruleExits, List<DeadEnd> deadEnds) {
         while (!queue.isEmpty()) {
             PipelineEntry cur = queue.pop();
             if (!visited.add(cur.state().stateNumber + ":" + cur.tokenIndex())) {
@@ -213,8 +127,8 @@ public abstract class CompletionEngineBase {
             }
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
-                if (isAtCaret(cur.tokenIndex())) {
-                    onReachedCaret();
+                boolean atCaretHere = isAtCaret(cur.tokenIndex());
+                if (atCaretHere) {
                     handlePreferredRules(cur.stack(), result);
                 }
                 ruleExits.add(cur.tokenIndex());
@@ -222,9 +136,6 @@ public abstract class CompletionEngineBase {
             }
 
             boolean atCaret = isAtCaret(cur.tokenIndex());
-            if (atCaret) {
-                onReachedCaret();
-            }
             for (Transition t : cur.state().getTransitions()) {
                 if (t instanceof RuleTransition rt) {
                     handleRuleDoor(rt, cur, atCaret, queue);
@@ -235,23 +146,13 @@ public abstract class CompletionEngineBase {
                 } else if (t.isEpsilon()) {
                     handleFreeDoor(t, cur, queue);
                 } else {
-                    handlePasswordDoor(t, cur, atCaret, queue, deadEnds);
+                    handlePasswordDoor(t, cur, atCaret, queue);
                 }
             }
         }
+        return ruleExits;
     }
 
-    /**
-     * HOOK — gọi mỗi khi có 1 nhánh SỐNG (không qua resync) chạm caret. Mặc định không làm gì.
-     */
-    protected void onReachedCaret() {
-    }
-
-    /**
-     * Preferred-rule quy về NGOÀI CÙNG nhất nếu lồng nhau: {@code resolve()}
-     * quét từ ngoài vào trong trên (stack + rt.target), dừng ở match đầu
-     * tiên — không đệ quy vào {@code rt.target} nữa nếu đã match.
-     */
     protected void handleRuleDoor(RuleTransition rt, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
         if (atCaret) {
             RuleCallStack withTarget = cur.stack().copy();
@@ -260,34 +161,15 @@ public abstract class CompletionEngineBase {
                 if (isNullable(rt.target)) {
                     queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
                 }
-                // Không nullable -> rule con này còn "nợ" ít nhất 1 token, không
-                // thể hoàn thành ngay tại caret -> không push gì thêm, dừng ở đây.
+                // Không nullable -> rule con này còn "nợ" ít nhất 1 token, không thể hoàn thành ngay tại caret -> không push gì thêm, dừng ở đây.
                 return;
             }
-            // resolve() không tìm thấy preferred-rule nào (kể cả rt.target không preferred)
-            // -> đi tiếp bình thường, đệ quy vào enterRule như dưới.
+            // resolve() không tìm thấy preferred-rule nào (kể cả rt.target không preferred) -> đi tiếp bình thường, đệ quy vào enterRule như dưới.
         }
 
-        Set<Integer> exits = enterRule(rt.target, cur.tokenIndex(), cur.stack());
-
-        if (exits.isEmpty() && !atCaret) {
-            // HOOK — mặc định trả nguyên (vẫn rỗng, chết thật). Override để cứu.
-            exits = recoverRuleDeadEnd(rt, cur, exits);
-        }
-
-        for (int exitTok : exits) {
+        for (int exitTok : enterRule(rt.target, cur.tokenIndex(), cur.stack())) {
             queue.push(new PipelineEntry(rt.followState, exitTok, cur.stack()));
         }
-    }
-
-    /**
-     * HOOK — {@code rt.target} (1 rule con gọi qua RuleTransition) vừa CHẾT
-     * HẲN (không thoát ra được đâu cả). Mặc định KHÔNG cứu, trả nguyên
-     * {@code exits} (vẫn rỗng). Override để nhảy tới vị trí caller chấp nhận
-     * được, giống {@code DefaultErrorStrategy} của ANTLR thật.
-     */
-    protected Set<Integer> recoverRuleDeadEnd(RuleTransition rt, PipelineEntry cur, Set<Integer> exits) {
-        return exits;
     }
 
     protected void handleFreeDoorWithCondition(PredicateTransition pt, PipelineEntry cur, Deque<PipelineEntry> queue) {
@@ -320,7 +202,7 @@ public abstract class CompletionEngineBase {
         }
     }
 
-    protected void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue, List<DeadEnd> deadEnds) {
+    protected void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
         IntervalSet label = t.label();
         if (label == null || label.size() == 0) {
             return;
@@ -348,18 +230,8 @@ public abstract class CompletionEngineBase {
         } else if (label.contains(tokens.get(cur.tokenIndex()).type())) {
             queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
         } else {
-            // Sai mật khẩu -> chết ở đây. Vẫn GHI vào deadEnds (rẻ, vô hại) để
-            // hook recoverIfNeeded có dữ liệu dùng NẾU class con muốn — bản
-            // gốc ở đây không tự đọc deadEnds, nên hành vi không đổi.
-            deadEnds.add(new DeadEnd(cur.state(), cur.tokenIndex(), label, t.target, cur.stack()));
+            // Sai mật khẩu -> nhánh này chết ở đây, không push gì cả (giữ nguyên hành vi thuật toán).
         }
-    }
-
-    /**
-     * 1 điểm chết tại 1 cửa mật khẩu — ghi nhớ đủ thông tin để hook {@link #recoverIfNeeded} dùng nếu cần.
-     */
-    protected record DeadEnd(ATNState from, int fromTokenIndex, IntervalSet label, ATNState target,
-                             RuleCallStack stack) {
     }
 
     // ════════════════════════════════════════════════════════════════
