@@ -62,18 +62,43 @@ public class SemanticAnalyzer {
             model.recordDanglingDot(cursorOffset, danglingQualifier);
 
             var scope = model.scopeAt(patch.caretTokenIndex());
+            if (scope != model.root() && crossesRealSemicolon(tokens, scope, patch.caretTokenIndex())) {
+                // scopeAt() có 1 fallback (xem javadoc ở đó) chọn "scope gần caret nhất theo điểm
+                // bắt đầu" khi không scope nào phủ trọn caret - đúng ý đồ cho câu bị gõ dở/lỗi cú
+                // pháp (chưa có ";"). NHƯNG nếu giữa điểm ĐÓNG THẬT của scope đó và caret có 1 dấu
+                // ";" THẬT (đã lex đúng, không phải lỗi) - đây là ranh giới statement rõ ràng, câu
+                // trước đã hoàn toàn kết thúc và caret đang ở 1 statement MỚI không liên quan, vd
+                // "SELECT ... FROM users WHERE id=1; |" trong PL/SQL block - scope SELECT không
+                // được phép rò alias/cột sang đây. Bỏ qua fallback, coi như không tìm được scope.
+                scope = model.root();
+            }
             var result = model.resolveAt(cursorOffset, scope);
+            String ddlTargetAlias = scope != null && scope.isDdlTargetScope ? scope.primaryAlias() : null;
             return new Result(
                     result.danglingQualifier(),
                     result.danglingQualifierResolvesTo(),
                     result.danglingQualifierScope(),
                     result.visibleAliases(),
-                    result.visibleDerivedScopes()
+                    result.visibleDerivedScopes(),
+                    ddlTargetAlias
             );
         } catch (Exception e) {
             e.printStackTrace();
             return Result.empty();
         }
+    }
+
+    private static boolean crossesRealSemicolon(CommonTokenStream tokens, Scope scope, int caretTokenIndex) {
+        if (scope.stopTokenIndex == Integer.MAX_VALUE) {
+            return false; // scope thật sự chưa đóng (lỗi cú pháp/gõ dở) - không có gì để "vượt qua"
+        }
+        for (int i = scope.stopTokenIndex + 1; i < caretTokenIndex; i++) {
+            Token t = tokens.get(i);
+            if (t.getChannel() == Token.DEFAULT_CHANNEL && t.getType() == PlSqlParser.SEMICOLON) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static String detect(CommonTokenStream tokens, int caretTokenIndex, int dotTokenType, Set<Integer> identifierTypes) {
@@ -101,10 +126,11 @@ public class SemanticAnalyzer {
             String qualifierResolvesTo,
             Scope qualifierDerivedScope,
             Map<String, String> visibleAliases,
-            Map<String, Scope> visibleDerivedScopes
+            Map<String, Scope> visibleDerivedScopes,
+            String ddlTargetAlias
     ) {
         public static Result empty() {
-            return new Result(null, null, null, Map.of(), Map.of());
+            return new Result(null, null, null, Map.of(), Map.of(), null);
         }
     }
 }

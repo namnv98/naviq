@@ -3,6 +3,9 @@ package com.naviq.antlr4.postgresql;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.Lexer;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 /**
  * Base class required by PostgreSQLLexer.g4's {@code options { superClass = PostgreSQLLexerBase; }}.
  * <p>
@@ -57,16 +60,30 @@ public abstract class PostgreSQLLexerBase extends Lexer {
 
     // ---- dollar-quoted string tag tracking ($tag$ ... $tag$) ----
 
+    /**
+     * Stack of open dollar-quote tags, mirroring the lexer's pushMode/popMode stack for
+     * DollarQuotedStringMode - one entry per currently-open dollar-quoted string.
+     */
+    private final Deque<String> tagStack = new ArrayDeque<>();
+
+    /** Text matched so far for the token being built, e.g. "$$" or "$tag$", minus the two '$'. */
+    private String currentTag() {
+        String text = getText();
+        return text.substring(1, text.length() - 1);
+    }
+
     public void pushTag() {
-        // no-op stand-in - see class javadoc
+        tagStack.push(currentTag());
     }
 
     public void popTag() {
-        // no-op stand-in - see class javadoc
+        if (!tagStack.isEmpty()) {
+            tagStack.pop();
+        }
     }
 
     public boolean isTag() {
-        return false;
+        return !tagStack.isEmpty() && tagStack.peek().equals(currentTag());
     }
 
     // ---- operator / identifier disambiguation predicates ----

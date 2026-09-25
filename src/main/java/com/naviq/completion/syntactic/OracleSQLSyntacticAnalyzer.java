@@ -93,6 +93,8 @@ public class OracleSQLSyntacticAnalyzer {
         m.put(PlSqlParser.RULE_column_name, true);
         m.put(PlSqlParser.RULE_type_spec, true);
         m.put(PlSqlParser.RULE_datatype, true);
+        m.put(PlSqlParser.RULE_json_value_return_type, true);
+        m.put(PlSqlParser.RULE_json_query_return_type, true);
         m.put(PlSqlParser.RULE_function_name, true);
         m.put(PlSqlParser.RULE_table_alias, true);
         m.put(PlSqlParser.RULE_identifier, true);

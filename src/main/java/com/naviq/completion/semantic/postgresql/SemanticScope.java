@@ -271,7 +271,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         if (qualifiedNameCtx == null || isUnreliable(relationExprCtx)) {
             return;
         }
-        String table = qualifiedNameCtx.getText();
+        String table = tableNameText(qualifiedNameCtx);
         String alias = lastPart(table);
         Scope cteScope = resolveAsExistingCte(table);
         if (cteScope != null) {
@@ -319,7 +319,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         if (target == null || qualifiedNameCtx == null || isUnreliable(qualifiedNameCtx)) {
             return;
         }
-        String table = qualifiedNameCtx.getText();
+        String table = tableNameText(qualifiedNameCtx);
         String alias = (aliasClauseCtx != null && aliasClauseCtx.colid() != null)
                 ? aliasClauseCtx.colid().getText() : lastPart(table);
         Scope cteScope = resolveAsExistingCte(table);
@@ -361,6 +361,106 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         popScope(ctx.getStop());
     }
 
+    // ---- Danh sách cột trong ngoặc ngay sau tên bảng: COPY t (a, |), ANALYZE t (a, |),
+    //      GRANT UPDATE (a, |) ON t, REFERENCES t (a, |). Mỗi statement/mệnh đề push 1 scope riêng
+    //      đăng ký đúng bảng liên quan để "colid" trong danh sách cột tra được cột của bảng đó.
+    //      GRANT/REVOKE: bảng đứng SAU danh sách cột (ON t) - vẫn resolve được vì scope phủ cả
+    //      statement và CursorTokenPatcher đã chèn placeholder để parse hợp lệ. ----
+
+    @Override
+    public void enterCopystmt(PostgreSQLParser.CopystmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, ctx.qualified_name());
+    }
+
+    @Override
+    public void exitCopystmt(PostgreSQLParser.CopystmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    @Override
+    public void enterVacuum_relation(PostgreSQLParser.Vacuum_relationContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, ctx.qualified_name());
+    }
+
+    @Override
+    public void exitVacuum_relation(PostgreSQLParser.Vacuum_relationContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    @Override
+    public void enterGrantstmt(PostgreSQLParser.GrantstmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, firstQualifiedName(ctx.privilege_target()));
+    }
+
+    @Override
+    public void exitGrantstmt(PostgreSQLParser.GrantstmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    @Override
+    public void enterRevokestmt(PostgreSQLParser.RevokestmtContext ctx) {
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, firstQualifiedName(ctx.privilege_target()));
+    }
+
+    @Override
+    public void exitRevokestmt(PostgreSQLParser.RevokestmtContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    // REFERENCES qualified_name opt_column_list? - cả dạng cột (colconstraintelem) lẫn dạng bảng
+    // (constraintelem: FOREIGN KEY (...) REFERENCES ...). Bảng ĐƯỢC THAM CHIẾU (không phải bảng
+    // đang tạo) mới là bảng của danh sách cột trong ngoặc phía sau.
+    @Override
+    public void enterColconstraintelem(PostgreSQLParser.ColconstraintelemContext ctx) {
+        if (ctx.REFERENCES() == null) {
+            return;
+        }
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, ctx.qualified_name());
+    }
+
+    @Override
+    public void exitColconstraintelem(PostgreSQLParser.ColconstraintelemContext ctx) {
+        if (ctx.REFERENCES() != null) {
+            popScope(ctx.getStop());
+        }
+    }
+
+    @Override
+    public void enterConstraintelem(PostgreSQLParser.ConstraintelemContext ctx) {
+        if (ctx.REFERENCES() == null) {
+            return;
+        }
+        Scope child = pushScope(ctx.getStart());
+        child.isDdlTargetScope = true;
+        registerQualifiedNameTarget(child, ctx.qualified_name());
+    }
+
+    @Override
+    public void exitConstraintelem(PostgreSQLParser.ConstraintelemContext ctx) {
+        if (ctx.REFERENCES() != null) {
+            popScope(ctx.getStop());
+        }
+    }
+
+    private static PostgreSQLParser.Qualified_nameContext firstQualifiedName(
+            PostgreSQLParser.Privilege_targetContext ctx
+    ) {
+        if (ctx == null || ctx.qualified_name_list() == null || ctx.qualified_name_list().qualified_name().isEmpty()) {
+            return null;
+        }
+        return ctx.qualified_name_list().qualified_name().get(0);
+    }
+
     private void registerQualifiedNameTarget(
             Scope target,
             PostgreSQLParser.Qualified_nameContext qualifiedNameCtx
@@ -368,7 +468,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         if (target == null || qualifiedNameCtx == null || isUnreliable(qualifiedNameCtx)) {
             return;
         }
-        String table = qualifiedNameCtx.getText();
+        String table = tableNameText(qualifiedNameCtx);
         String alias = lastPart(table);
         Scope cteScope = resolveAsExistingCte(table);
         if (cteScope != null) {
@@ -390,7 +490,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         if (isUnreliable(insertTargetCtx)) {
             return;
         }
-        String table = insertTargetCtx.qualified_name().getText();
+        String table = tableNameText(insertTargetCtx.qualified_name());
         PostgreSQLParser.ColidContext aliasCtx = insertTargetCtx.colid();
         String alias = aliasCtx != null ? aliasCtx.getText() : lastPart(table);
         // Về lý thuyết INSERT INTO 1 CTE (writable CTE) là hợp lệ trong 1 số ngữ cảnh hiếm -
@@ -460,7 +560,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         if (aliasCtx != null && isUnreliable(aliasCtx)) {
             return;
         }
-        String table = qualifiedNameCtx.getText();
+        String table = tableNameText(qualifiedNameCtx);
         String alias = aliasCtx != null ? aliasCtx.getText() : lastPart(table);
         // resolveAsExistingCte() trả về Scope (không phải String) - phải populate CẢ
         // aliases (dạng hiển thị) LẪN derivedScopeAliases (Scope thật, cho
@@ -515,7 +615,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
             return;
         }
         // không có alias -> chỉ suy ra tên nếu là 1 columnName đơn giản (vd "t.id" -> "id").
-        cur.projectedColumns.add(lastPart(col.getText()));
+        addProjectedColumn(cur, lastPart(col.getText()));
     }
 
     @Override
@@ -548,9 +648,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
             String text = ctx.a_expr().getText();
             outName = text.matches("[a-zA-Z_][a-zA-Z0-9_.]*") ? lastPart(text) : null;
         }
-        if (outName != null) {
-            cur.projectedColumns.add(outName);
-        }
+        addProjectedColumn(cur, outName);
     }
 
     private static boolean endsWithStar(PostgreSQLParser.IndirectionContext indirection) {
@@ -593,7 +691,7 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         if (isUnreliable(ctx)) {
             return;
         }
-        String table = qualifiedNameCtx.getText();
+        String table = tableNameText(qualifiedNameCtx);
         String alias = tableAliasText(ctx);
         if (alias == null) {
             alias = lastPart(table);
@@ -712,7 +810,32 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         if (ctx.preparablestmt() == null || ctx.preparablestmt().selectstmt() == null) {
             return;
         }
-        pendingCte.peek().put(ctx.name().getText(), host.children.get(host.children.size() - 1));
+        Scope cteScope = host.children.get(host.children.size() - 1);
+        cteScope.isolatedFromParentAliases = true;
+        applyCteColumnRename(cteScope, ctx.opt_name_list());
+        pendingCte.peek().put(ctx.name().getText(), cteScope);
+    }
+
+    /**
+     * "WITH c(a, b) AS (SELECT id, name ...)" - danh sách tên cột tường minh ĐỔI TÊN các cột
+     * đầu ra của CTE: tham chiếu c.| phải gợi ý c.a/c.b, không phải tên gốc id/name. Nếu số tên
+     * ít hơn số cột đầu ra thì các cột còn lại giữ tên gốc (đúng ngữ nghĩa Postgres). Bỏ qua khi
+     * SELECT list có wildcard - không biết trước cột nào ứng với tên nào.
+     */
+    private static void applyCteColumnRename(Scope cteScope, PostgreSQLParser.Opt_name_listContext nameListCtx) {
+        if (nameListCtx == null || nameListCtx.name_list() == null || cteScope.hasWildcard) {
+            return;
+        }
+        List<String> renamed = new ArrayList<>();
+        for (PostgreSQLParser.NameContext n : nameListCtx.name_list().name()) {
+            renamed.add(n.getText());
+        }
+        List<String> original = new ArrayList<>(cteScope.projectedColumns);
+        cteScope.projectedColumns.clear();
+        cteScope.projectedColumns.addAll(renamed);
+        for (int i = renamed.size(); i < original.size(); i++) {
+            cteScope.projectedColumns.add(original.get(i));
+        }
     }
 
     @Override
@@ -720,12 +843,11 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         Scope host = withHost.isEmpty() ? null : withHost.pop();
         Map<String, Scope> pending = pendingCte.isEmpty() ? null : pendingCte.pop();
         if (host != null && pending != null) {
-            pending.forEach((name, s) -> {
-                host.aliases.put(name, "<cte#" + s.id + ">");
-                host.derivedScopeAliases.put(name, s); // BẮT BUỘC - resolveAsExistingCte's
-                // nhánh 2 (CTE của WITH bao ngoài) chỉ tin derivedScopeAliases, không
-                // còn fallback qua aliases chung nữa.
-            });
+            // CHỈ đăng ký vào derivedScopeAliases (nơi resolveAsExistingCte tra để biết "FROM c"
+            // trỏ tới CTE nào) - KHÔNG đăng ký vào aliases: tên CTE chưa xuất hiện trong FROM thì
+            // không phải nguồn cột hợp lệ (vd "with r as (...) select | from users" hay cursor nằm
+            // TRONG thân CTE r) - alias thật sự được thêm vào aliases khi table_ref "FROM c" chạy.
+            pending.forEach((name, s) -> host.derivedScopeAliases.put(name, s));
         }
     }
 
@@ -822,6 +944,31 @@ public class SemanticScope extends PostgreSQLParserBaseListener {
         String resolvesTo = qualifier == null ? null : aliases.get(qualifier);
         Scope qualifierScope = qualifier == null ? null : derivedScopes.get(qualifier);
         return new CompletionResult(aliases, derivedScopes, qualifier, resolvesTo, qualifierScope);
+    }
+
+    /**
+     * Tên bảng dạng "schema"."table" / "table" (identifier có ngoặc kép) -> bỏ ngoặc kép để tra
+     * được trong schema (SchemaIndex lưu tên không ngoặc kép) và để alias mặc định
+     * (lastPart) là tên bảng sạch, không dính dấu nháy.
+     */
+    private static String tableNameText(org.antlr.v4.runtime.ParserRuleContext ctx) {
+        return ctx.getText().replace("\"", "");
+    }
+
+    /**
+     * Thêm 1 cột vào projectedColumns của scope: bỏ qua placeholder cursor (CursorTokenPatcher
+     * chèn identifier giả tại con trỏ - "select | from t" thành "select zzzcursorzzz from t" nên
+     * placeholder này sẽ bị coi là 1 cột projected của chính subquery/CTE đang gõ, rồi lọt vào
+     * gợi ý qua alias trỏ tới subquery/CTE đó) và bỏ qua trùng lặp (UNION/INTERSECT nhiều vế
+     * cùng dùng chung 1 scope nên cùng tên cột lặp lại ở mỗi vế).
+     */
+    private static void addProjectedColumn(Scope scope, String name) {
+        if (name == null || name.contains(CursorTokenPatcher.CURSOR_PLACEHOLDER)) {
+            return;
+        }
+        if (!scope.projectedColumns.contains(name)) {
+            scope.projectedColumns.add(name);
+        }
     }
 
     private static String lastPart(String q) {

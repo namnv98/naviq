@@ -49,6 +49,8 @@ public class TerminalMenu {
         reader.callWidget(LineReader.REDISPLAY);
 
         Anchor anchor = strategy.resolve(term);
+        if (anchor == null) return; // terminal không trả được vị trí cursor → huỷ vẽ
+
         int cursorAbsRow = anchor.row();
         int cursorAbsCol = anchor.col();
 

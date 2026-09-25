@@ -287,6 +287,43 @@ public class SemanticScope extends PlSqlParserBaseListener {
         popScope(ctx.getStop());
     }
 
+    // ---- CURSOR FOR LOOP - "FOR rec IN (SELECT ...) LOOP ... rec.col ... END LOOP" - record_name
+    //      là alias cho scope derived từ subquery, chỉ visible trong THÂN loop (seq_of_statements),
+    //      không phải cursor_loop_param nó nằm trong đó - nên push scope riêng cho CẢ loop_statement
+    //      (bounded by ctx.getStart()/getStop()), giống cách merge/insert push scope riêng. ----
+
+    @Override
+    public void enterLoop_statement(PlSqlParser.Loop_statementContext ctx) {
+        pushScope(ctx.getStart());
+    }
+
+    @Override
+    public void exitLoop_statement(PlSqlParser.Loop_statementContext ctx) {
+        popScope(ctx.getStop());
+    }
+
+    @Override
+    public void exitCursor_loop_param(PlSqlParser.Cursor_loop_paramContext ctx) {
+        // Chỉ xử lý nhánh "record_name IN (select_statement)" - subquery cho record derived scope.
+        // Nhánh "record_name IN cursor_name" (cursor đã khai báo sẵn) và nhánh "index_name IN
+        // lower_bound..upper_bound" (FOR i IN 1..10, số nguyên trần) bỏ qua có chủ đích - không
+        // có bảng/cột nào để resolve.
+        if (ctx.record_name() == null || ctx.select_statement() == null || isUnreliable(ctx)) {
+            return;
+        }
+        Scope cur = stack.peek();
+        if (cur == null || cur.children.isEmpty()) {
+            return;
+        }
+        // select_statement vừa exit đã tự push/pop scope riêng qua enterQuery_block - scope đó
+        // chính là child CUỐI CÙNG của scope hiện tại (loop_statement), giống cơ chế "(select ...)
+        // alias" ở registerDmlTableExpression.
+        Scope inner = cur.children.get(cur.children.size() - 1);
+        String alias = ctx.record_name().getText();
+        cur.aliases.put(alias, "<subquery#" + inner.id + ">");
+        cur.derivedScopeAliases.put(alias, inner);
+    }
+
     private void registerSelectedTableview(Scope target, PlSqlParser.Selected_tableviewContext stCtx) {
         // selected_tableview : (tableview_name | LEFT_PAREN select_statement RIGHT_PAREN) table_alias? ;
         if (stCtx == null || stCtx.tableview_name() == null || isUnreliable(stCtx)) {

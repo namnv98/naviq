@@ -13,9 +13,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class OracleCompletionEngineTest {
@@ -93,6 +92,31 @@ public class OracleCompletionEngineTest {
                 .map(s -> s.getKey().toLowerCase()).collect(Collectors.toSet());
     }
 
+    /**
+     * Khác {@link #hasKeyOfType} (chỉ check CÓ MẶT) - assert đúng TOÀN BỘ tập key của 1 type,
+     * không thừa không thiếu. Bắt được noise (vd bảng lẫn vào vị trí chỉ nên có cột) mà
+     * hasKeyOfType không bao giờ bắt được vì nó không quan tâm CÁC KEY KHÁC ngoài key đang check.
+     */
+    private static void assertExactKeysOfType(List<Suggest> list, String type, String... expectedKeys) {
+        Set<String> actual = list.stream().filter(s -> s.getType().equals(type))
+                .map(s -> s.getKey().toLowerCase()).collect(Collectors.toCollection(java.util.TreeSet::new));
+        Set<String> expected = java.util.Arrays.stream(expectedKeys)
+                .map(String::toLowerCase).collect(Collectors.toCollection(java.util.TreeSet::new));
+        assertEquals(expected, actual, () -> "Tập '" + type + "' không khớp — mong đợi đúng " + expected + " nhưng thực tế là " + actual);
+    }
+
+    private static void assertExactColumns(List<Suggest> list, String... expectedKeys) {
+        assertExactKeysOfType(list, "column", expectedKeys);
+    }
+
+    private static void assertExactTables(List<Suggest> list, String... expectedKeys) {
+        assertExactKeysOfType(list, "table", expectedKeys);
+    }
+
+    private static void assertExactViews(List<Suggest> list, String... expectedKeys) {
+        assertExactKeysOfType(list, "view", expectedKeys);
+    }
+
     @Test
     @DisplayName("'select |' KHÔNG còn gợi ý lại 'select'/'insert'/'with'/'create' (đã gõ dở SELECT, chưa xong)")
     void noStatementStartKeywordsMidSelect() {
@@ -120,6 +144,9 @@ public class OracleCompletionEngineTest {
         var result = suggest("select * from |");
         var tables = keysOfType(result, "table");
         assertTrue(tables.stream().anyMatch(t -> t.equalsIgnoreCase("public.users")));
+        assertTrue(tables.containsAll(List.of("public.users", "public.orders", "public.contracts", "public.products")));
+        assertTrue(hasKeyOfType(result, "public.orders_summary", "view"));
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
@@ -127,7 +154,7 @@ public class OracleCompletionEngineTest {
             + "(giống Postgres), phải gợi ý được alias nào đó")
     void tableAliasSuggestionAfterTableName() {
         var result = suggest("select * from users |");
-        assertFalse(keysOfType(result, "alias").isEmpty());
+        assertTrue(hasKeyOfType(result, "u", "alias"));
     }
 
     @Test
@@ -138,6 +165,8 @@ public class OracleCompletionEngineTest {
         var result = suggest("select * from users where |");
         assertTrue(hasKeyOfType(result, "users.id", "column"));
         assertTrue(hasKeyOfType(result, "users.email", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertTrue(hasKeyOfType(result, "users.manager_id", "column"));
     }
 
     @Test
@@ -164,6 +193,8 @@ public class OracleCompletionEngineTest {
     void deleteWhereColumnSuggestions() {
         var result = suggest("delete from users where |");
         assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertTrue(hasKeyOfType(result, "users.email", "column"));
     }
 
     @Test
@@ -172,6 +203,8 @@ public class OracleCompletionEngineTest {
     void insertColumnListSuggestions() {
         var result = suggest("insert into users (|");
         assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.email", "column"));
     }
 
     @Test
@@ -179,7 +212,8 @@ public class OracleCompletionEngineTest {
             + "2 bảng JOIN đều visible")
     void joinUsingColumnSuggestions() {
         var result = suggest("select * from users u join orders o using (|)");
-        assertTrue(hasKeyOfType(result, "u.id", "column") || hasKeyOfType(result, "o.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "o.id", "column"));
     }
 
     @Test
@@ -188,6 +222,8 @@ public class OracleCompletionEngineTest {
     void alterTableDropColumnSuggestions() {
         var result = suggest("alter table users drop column |");
         assertTrue(hasKeyOfType(result, "users.email", "column"));
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
     }
 
     @Test
@@ -197,6 +233,9 @@ public class OracleCompletionEngineTest {
     void createIndexColumnSuggestions() {
         var result = suggest("create index idx1 on users (|)");
         assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.email", "column"));
+        assertTrue(keysOfType(result, "table").isEmpty());
     }
 
     @Test
@@ -204,8 +243,8 @@ public class OracleCompletionEngineTest {
             + "(không cần block PL/SQL hoàn chỉnh như DECLARE, an toàn hơn để test)")
     void castExpressionDataTypeSuggestions() {
         var result = suggest("select cast(id as |) from users");
-        var datatypes = keysOfType(result, "datatype");
-        assertTrue(datatypes.contains("text") || datatypes.contains("numeric") || datatypes.contains("int4"));
+        assertTrue(keysOfType(result, "datatype").containsAll(SchemaIndex.DATA_TYPES));
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
@@ -216,6 +255,8 @@ public class OracleCompletionEngineTest {
         var result = suggest("with c as (select id, name from users) select | from c");
         assertTrue(hasKeyOfType(result, "c.id", "column"));
         assertTrue(hasKeyOfType(result, "c.name", "column"));
+        assertFalse(hasKeyOfType(result, "users.id", "column"));
+        assertFalse(hasKeyOfType(result, "c.email", "column"));
     }
 
     @Test
@@ -225,6 +266,8 @@ public class OracleCompletionEngineTest {
         var result = suggest("select | from (select id, name from users) sub");
         assertTrue(hasKeyOfType(result, "sub.id", "column"));
         assertTrue(hasKeyOfType(result, "sub.name", "column"));
+        assertFalse(hasKeyOfType(result, "sub.email", "column"));
+        assertFalse(hasKeyOfType(result, "users.id", "column"));
     }
 
     @Test
@@ -242,8 +285,8 @@ public class OracleCompletionEngineTest {
             + "sau đó chờ ASC/DESC/NULLS - kiểm tra keyword ASC/DESC vẫn gợi ý được")
     void orderByAscDescKeywordSuggestions() {
         var result = suggest("select * from users order by name |");
-        var keywords = allKeywordKeys(result);
-        assertTrue(keywords.contains("asc") || keywords.contains("desc"));
+        assertTrue(allKeywordKeys(result).contains("asc"));
+        assertTrue(allKeywordKeys(result).contains("desc"));
     }
 
     @Test
@@ -263,6 +306,8 @@ public class OracleCompletionEngineTest {
         var result = suggest("select * from users u where u.|");
         assertTrue(hasKeyOfType(result, "u.id", "column"));
         assertTrue(hasKeyOfType(result, "u.email", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(keysOfType(result, "column").stream().allMatch(k -> k.startsWith("u.")));
     }
 
     @Test
@@ -274,6 +319,9 @@ public class OracleCompletionEngineTest {
         var result = suggest("select u.| from users u join orders o on u.id = o.user_id");
         assertTrue(hasKeyOfType(result, "u.name", "column"));
         assertFalse(hasKeyOfType(result, "o.total", "column"));
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+        assertTrue(keysOfType(result, "column").stream().allMatch(k -> k.startsWith("u.")));
     }
 
     @Test
@@ -286,6 +334,7 @@ public class OracleCompletionEngineTest {
         assertTrue(hasKeyOfType(result, "sub.name", "column"));
         // "email" không nằm trong SELECT list của subquery -> không được coi là cột của "sub"
         assertFalse(hasKeyOfType(result, "sub.email", "column"));
+        assertTrue(keysOfType(result, "column").stream().allMatch(k -> k.startsWith("sub.")));
     }
 
     @Test
@@ -296,6 +345,8 @@ public class OracleCompletionEngineTest {
         var result = suggest("with c as (select id, name from users) select c.| from c");
         assertTrue(hasKeyOfType(result, "c.id", "column"));
         assertTrue(hasKeyOfType(result, "c.name", "column"));
+        assertTrue(keysOfType(result, "column").stream().allMatch(k -> k.startsWith("c.")));
+        assertFalse(hasKeyOfType(result, "c.email", "column"));
     }
 
     @Test
@@ -305,6 +356,9 @@ public class OracleCompletionEngineTest {
     void danglingDotInDeleteWhereClause() {
         var result = suggest("delete from users u where u.|");
         assertTrue(hasKeyOfType(result, "u.email", "column"));
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(keysOfType(result, "column").stream().allMatch(k -> k.startsWith("u.")));
     }
 
     @Test
@@ -369,6 +423,8 @@ public class OracleCompletionEngineTest {
     void updateSetRightHandSideSeesTableAlias() {
         var result = suggest("update users u set name = |");
         assertTrue(hasKeyOfType(result, "u.email", "column"));
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
     }
 
     @Test
@@ -376,10 +432,9 @@ public class OracleCompletionEngineTest {
             + "phải chặn đăng ký alias dựa trên dữ liệu không đáng tin, nhưng KHÔNG ĐƯỢC crash, "
             + "và alias 'u' đứng TRƯỚC chỗ lỗi (chưa bị ảnh hưởng) vẫn phải còn nguyên")
     void unterminatedStringLiteralDoesNotCrashAndKeepsPriorAlias() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("select * from users u where u.name = 'unterminated and u.|");
-            assertNotNull(result);
-        });
+        var result = suggest("select * from users u where u.name = 'unterminated and u.|");
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
     }
 
     @Test
@@ -388,10 +443,8 @@ public class OracleCompletionEngineTest {
             + "scope subquery coi như MỞ tới hết input (đúng BUG FIX đã nói ở popScope) thay vì "
             + "đóng non và mất alias")
     void unclosedSubqueryParenDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("select * from (select id, name from users |");
-            assertNotNull(result);
-        });
+        var result = suggest("select * from (select id, name from users |");
+        assertTrue(keysOfType(result, "alias").contains("u"));
     }
 
     @Test
@@ -411,10 +464,9 @@ public class OracleCompletionEngineTest {
             + "được RỖNG hoàn toàn nếu cột đúng là 1 lựa chọn hợp lệ ở vị trí value expression")
     void comparisonRightHandSideAcceptsColumnReference() {
         var result = suggest("select * from users u where u.status = |");
-        assertNotNull(result);
-        // Không assert cứng phải CÓ cột - vì đây là vị trí "biểu thức", có thể gợi ý cả literal/
-        // bind variable/hàm - chỉ đảm bảo không rỗng hoàn toàn và không crash.
-        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "u.id", "column"));
+        assertTrue(hasKeyOfType(result, "count", "function"));
     }
 
     @Test
@@ -437,6 +489,7 @@ public class OracleCompletionEngineTest {
         assertTrue(hasKeyOfType(result, "users.id", "column"));
         assertTrue(hasKeyOfType(result, "users.name", "column"));
         assertTrue(hasKeyOfType(result, "users.email", "column"));
+        assertFalse(hasKeyOfType(result, "orders.id", "column"));
     }
 
     @Test
@@ -455,6 +508,7 @@ public class OracleCompletionEngineTest {
         var result = suggest("select * from users order by |");
         assertTrue(hasKeyOfType(result, "users.id", "column"));
         assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertFalse(hasKeyOfType(result, "orders.id", "column"));
     }
 
     @Test
@@ -522,9 +576,9 @@ public class OracleCompletionEngineTest {
     @DisplayName("'alter table users modify column email |' - MODIFY cột gợi ý kiểu dữ liệu (có thể NULL/NOT NULL nhưng ta chỉ test datatype)")
     void alterTableModifyColumnDataTypeSuggestions() {
         var result = suggest("alter table users modify email |");
-        var datatypes = keysOfType(result, "datatype");
-        assertTrue(datatypes.contains("text"));
-        // Có thể gợi ý thêm NULL/NOT NULL nhưng không bắt buộc
+        assertTrue(keysOfType(result, "datatype").containsAll(SchemaIndex.DATA_TYPES));
+        assertTrue(allKeywordKeys(result).contains("not"));
+        assertTrue(allKeywordKeys(result).contains("null"));
     }
 
     @Test
@@ -595,22 +649,20 @@ public class OracleCompletionEngineTest {
     }
 
     @Test
-    @DisplayName("'select | from users' - gợi ý keyword 'distinct' và 'all'? (nếu có) - kiểm tra từ khóa")
+    @DisplayName("'select | from users' - gợi ý cột của users và hàm, giống selectListFunctionSuggestions")
     void selectKeywordSuggestions() {
         var result = suggest("select | from users");
-        var keywords = allKeywordKeys(result);
-        // Có thể gợi ý distinct/all nếu parser hỗ trợ
-        // Tùy triển khai, nhưng ta kiểm tra nếu có
-        // Không assert cứng, chỉ đảm bảo không crash
-        assertNotNull(result);
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "count", "function"));
     }
 
     @Test
     @DisplayName("'select * from users u where u.id = |' - bên phải so sánh gợi ý cột (có thể), hàm, literal - không rỗng")
     void comparisonRightHandSideGeneralSuggestions() {
         var result = suggest("select * from users u where u.id = |");
-        assertFalse(result.isEmpty());
-        // Có thể có cột, hàm, hoặc keyword NULL
+        assertTrue(hasKeyOfType(result, "u.name", "column"));
+        assertTrue(hasKeyOfType(result, "u.email", "column"));
+        assertTrue(hasKeyOfType(result, "count", "function"));
     }
 
     @Test
@@ -624,19 +676,17 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("ROBUSTNESS: câu lệnh thiếu FROM nhưng có alias - không crash")
     void missingFromDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("select u.|");
-            assertNotNull(result);
-        });
+        var result = suggest("select u.|");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertTrue(hasKeyOfType(result, "count", "function"));
     }
 
     @Test
     @DisplayName("ROBUSTNESS: câu lệnh chỉ có 'select |' - không crash, có thể gợi ý hàm hoặc từ khóa")
     void bareSelectDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("select |");
-            assertNotNull(result);
-        });
+        var result = suggest("select |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertTrue(hasKeyOfType(result, "count", "function"));
     }
 
     @Test
@@ -667,15 +717,14 @@ public class OracleCompletionEngineTest {
     void connectBySuggestsPriorKeywordAndColumns() {
         var result = suggest("SELECT * FROM users CONNECT BY |");
         assertTrue(allKeywordKeys(result).contains("prior"));
-        // Có thể gợi ý cột nếu grammar cho phép expression
-        assertFalse(result.isEmpty());
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.manager_id", "column"));
     }
 
     @Test
     @DisplayName("'SELECT NVL(name, |) FROM users' - second argument of NVL suggests columns or expressions")
     void nvlFunctionSecondArgSuggestsSomething() {
         var result = suggest("SELECT NVL(name, |) FROM users");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "users.email", "column"));
     }
 
@@ -683,7 +732,6 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT DECODE(status, 'A', 'Active', |) FROM orders' - DECODE function argument suggests columns or values")
     void decodeFunctionArgSuggestsSomething() {
         var result = suggest("SELECT DECODE(status, 'A', 'Active', |) FROM orders");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "orders.total", "column"));
     }
 
@@ -716,33 +764,31 @@ public class OracleCompletionEngineTest {
     void forClauseSuggestsUpdateKeyword() {
         var result = suggest("SELECT * FROM users FOR |");
         assertTrue(allKeywordKeys(result).contains("update"));
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
     @DisplayName("'SELECT * FROM users ORDER BY id OFFSET |' - OFFSET should not crash, may suggest number literals?")
     void offsetClauseDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users ORDER BY id OFFSET |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users ORDER BY id OFFSET |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM users FETCH FIRST | ROWS ONLY' - FETCH FIRST should not crash")
     void fetchFirstDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users FETCH FIRST | ROWS ONLY");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users FETCH FIRST | ROWS ONLY");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM users WHERE ROWNUM < |' - ROWNUM comparison should not crash")
     void rownumComparisonDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE ROWNUM < |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users WHERE ROWNUM < |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
     }
 
     @Test
@@ -787,7 +833,6 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT CASE WHEN status = 'A' THEN | END FROM orders' - CASE THEN clause suggests columns or expressions")
     void caseThenClauseSuggestsSomething() {
         var result = suggest("SELECT CASE WHEN status = 'A' THEN | END FROM orders");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "orders.total", "column"));
     }
 
@@ -795,7 +840,6 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT CASE status WHEN 'A' THEN | END FROM orders' - simple CASE THEN suggests something")
     void simpleCaseThenClauseSuggestsSomething() {
         var result = suggest("SELECT CASE status WHEN 'A' THEN | END FROM orders");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "orders.total", "column"));
     }
 
@@ -803,7 +847,6 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT COALESCE(total, |) FROM orders' - COALESCE second arg suggests columns or expressions")
     void coalesceSecondArgSuggestsSomething() {
         var result = suggest("SELECT COALESCE(total, |) FROM orders");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "orders.id", "column"));
     }
 
@@ -811,7 +854,6 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT NULLIF(status, |) FROM orders' - NULLIF second arg suggests something")
     void nullifSecondArgSuggestsSomething() {
         var result = suggest("SELECT NULLIF(status, |) FROM orders");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "orders.total", "column"));
     }
 
@@ -819,7 +861,6 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT GREATEST(total, |) FROM orders' - GREATEST second arg suggests columns or expressions")
     void greatestSecondArgSuggestsSomething() {
         var result = suggest("SELECT GREATEST(total, |) FROM orders");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "orders.id", "column"));
     }
 
@@ -827,7 +868,6 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT LEAST(total, |) FROM orders' - LEAST second arg suggests something")
     void leastSecondArgSuggestsSomething() {
         var result = suggest("SELECT LEAST(total, |) FROM orders");
-        assertFalse(result.isEmpty());
         assertTrue(hasKeyOfType(result, "orders.id", "column"));
     }
 
@@ -835,9 +875,9 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT SUM(total) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND |) FROM orders' - windowing clause ROWS/RANGE suggests keywords CURRENT ROW, etc.")
     void windowFrameBoundSuggestsKeywordsAndColumns() {
         var result = suggest("SELECT SUM(total) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND |) FROM orders");
-        var keywords = allKeywordKeys(result);
-        assertTrue(keywords.contains("current row") || keywords.contains("unbounded preceding"));
-        // Có thể gợi ý cột nếu cho phép expression
+        assertTrue(allKeywordKeys(result).contains("current row"));
+        assertTrue(hasKeyOfType(result, "orders.total", "column"));
+        assertTrue(hasKeyOfType(result, "orders.id", "column"));
     }
 
     @Test
@@ -870,20 +910,14 @@ public class OracleCompletionEngineTest {
     @DisplayName("'INSERT ALL INTO users (id, name) VALUES (1, 'a') INTO orders (id, total) VALUES (2, |) SELECT * FROM DUAL' - INSERT ALL second VALUES suggests expression (no columns expected)")
     void insertAllValuesDoesNotSuggestColumns() {
         var result = suggest("INSERT ALL INTO users (id, name) VALUES (1, 'a') INTO orders (id, total) VALUES (2, |) SELECT * FROM DUAL");
-        // Position is a value expression, not a column list, so column suggestions may be absent or minimal.
-        // We just check no crash.
-        assertNotNull(result);
-        // Optionally ensure not suggesting columns of any table.
-        assertTrue(keysOfType(result, "column").isEmpty() || result.stream().noneMatch(s -> s.getKey().matches("(?i).*\\..*")));
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
     @DisplayName("'INSERT FIRST WHEN total > 100 THEN INTO orders_high VALUES (|) ELSE INTO orders_low VALUES (|)' - multi-table insert, VALUES expression positions")
     void insertFirstValuesDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("INSERT FIRST WHEN total > 100 THEN INTO orders_high VALUES (|) ELSE INTO orders_low VALUES (|) SELECT * FROM orders");
-            assertNotNull(result);
-        });
+        var result = suggest("INSERT FIRST WHEN total > 100 THEN INTO orders_high VALUES (|) ELSE INTO orders_low VALUES (|) SELECT * FROM orders");
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
@@ -892,6 +926,7 @@ public class OracleCompletionEngineTest {
         var result = suggest("WITH c (col1) AS (SELECT id FROM users) SELECT | FROM c");
         assertTrue(hasKeyOfType(result, "c.col1", "column"));
         assertFalse(hasKeyOfType(result, "c.id", "column"));
+        assertFalse(hasKeyOfType(result, "c.name", "column"));
     }
 
     @Test
@@ -899,6 +934,8 @@ public class OracleCompletionEngineTest {
     void recursiveCteSuggestsColumns() {
         var result = suggest("WITH RECURSIVE cte AS (SELECT id FROM users UNION ALL SELECT id FROM orders) SELECT | FROM cte");
         assertTrue(hasKeyOfType(result, "cte.id", "column"));
+        assertFalse(hasKeyOfType(result, "users.name", "column"));
+        assertFalse(hasKeyOfType(result, "orders.total", "column"));
     }
 
     @Test
@@ -934,83 +971,67 @@ public class OracleCompletionEngineTest {
     }
 
     @Test
-    @DisplayName("'SELECT * FROM users WHERE id IN (SELECT orders.id FROM orders)' - subquery with qualified column works")
-    void subqueryQualifiedColumnDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE id IN (SELECT | FROM orders)");
-            assertNotNull(result);
-        });
-    }
-
-    @Test
     @DisplayName("'SELECT * FROM users u, TABLE(orders) o' - TABLE collection expression suggests columns from order table? (if supported) - no crash")
     void tableCollectionExpressionDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users u, TABLE(orders) o WHERE o.|");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users u, TABLE(orders) o WHERE o.|");
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
     @DisplayName("'COMMENT ON TABLE users IS |' - COMMENT literal does not suggest columns, but not crash")
     void commentOnTableDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("COMMENT ON TABLE users IS |");
-            assertNotNull(result);
-        });
+        var result = suggest("COMMENT ON TABLE users IS |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertFalse(allKeywordKeys(result).isEmpty());
     }
 
     @Test
     @DisplayName("'GRANT SELECT ON users TO |' - GRANT TO suggests user/role, not crash")
     void grantToDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("GRANT SELECT ON users TO |");
-            assertNotNull(result);
-        });
+        var result = suggest("GRANT SELECT ON users TO |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertFalse(allKeywordKeys(result).isEmpty());
     }
 
     @Test
     @DisplayName("'REVOKE SELECT ON users FROM |' - REVOKE FROM suggests user/role, not crash")
     void revokeFromDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("REVOKE SELECT ON users FROM |");
-            assertNotNull(result);
-        });
+        var result = suggest("REVOKE SELECT ON users FROM |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertFalse(allKeywordKeys(result).isEmpty());
     }
 
     @Test
     @DisplayName("'ANALYZE TABLE users COMPUTE STATISTICS' - ANALYZE does not crash (no cursor)")
     void analyzeTableDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("ANALYZE TABLE users |");
-            assertNotNull(result);
-        });
+        var result = suggest("ANALYZE TABLE users |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertFalse(allKeywordKeys(result).isEmpty());
     }
 
     @Test
     @DisplayName("'TRUNCATE TABLE users DROP STORAGE' - with storage clause does not crash")
     void truncateTableWithStorageDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("TRUNCATE TABLE users DROP |");
-            assertNotNull(result);
-        });
+        var result = suggest("TRUNCATE TABLE users DROP |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertTrue(keysOfType(result, "table").isEmpty());
     }
 
     @Test
     @DisplayName("'ALTER INDEX idx_name REBUILD |' - ALTER INDEX suggests ONLINE/PARALLEL keywords")
     void alterIndexRebuildSuggestsKeywords() {
         var result = suggest("ALTER INDEX idx_name REBUILD |");
-        var keywords = allKeywordKeys(result);
-        assertTrue(keywords.contains("online") || keywords.contains("parallel"));
+        assertTrue(allKeywordKeys(result).contains("online"));
+        assertTrue(allKeywordKeys(result).contains("parallel"));
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
     @DisplayName("'CREATE SEQUENCE seq_name START WITH |' - START WITH value, not crash")
     void createSequenceStartWithDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("CREATE SEQUENCE seq_name START WITH |");
-            assertNotNull(result);
-        });
+        var result = suggest("CREATE SEQUENCE seq_name START WITH |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertTrue(keysOfType(result, "table").isEmpty());
     }
 
     @Test
@@ -1024,19 +1045,17 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users WHERE SYSDATE > |' - SYSDATE comparison, not crash")
     void sysdateComparisonDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE SYSDATE > |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users WHERE SYSDATE > |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.created_date", "column"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM users WHERE TRUNC(SYSDATE) = |' - function call, not crash")
     void truncFunctionDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE TRUNC(SYSDATE) = |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users WHERE TRUNC(SYSDATE) = |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.created_date", "column"));
     }
 
     @Test
@@ -1050,19 +1069,16 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users WHERE EXTRACT(YEAR FROM created_date) = |' - EXTRACT, not crash")
     void extractFunctionDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE EXTRACT(YEAR FROM created_date) = |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users WHERE EXTRACT(YEAR FROM created_date) = |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.created_date", "column"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM users ORDER BY name NULLS FIRST |' - after NULLS FIRST, no suggestion (end of clause), but not crash")
     void orderByNullsFirstDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users ORDER BY name NULLS FIRST |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users ORDER BY name NULLS FIRST |");
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
@@ -1076,10 +1092,9 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users WHERE CURRENT OF cursor_name' - no cursor defined, but does not crash")
     void whereCurrentOfDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE CURRENT OF |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users WHERE CURRENT OF |");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertFalse(allKeywordKeys(result).isEmpty());
     }
 
     @Test
@@ -1093,11 +1108,10 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'DECLARE v_name users.name%TYPE; BEGIN SELECT name INTO v_name FROM users WHERE id=1; | END;' - variable assignment after SELECT suggests columns? (not crash)")
     void plsqlVariableAssignmentDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("DECLARE v_name users.name%TYPE; BEGIN SELECT name INTO v_name FROM users WHERE id=1; | END;");
-            // Probably no suggestions, but not crash
-            assertNotNull(result);
-        });
+        var result = suggest("DECLARE v_name users.name%TYPE; BEGIN SELECT name INTO v_name FROM users WHERE id=1; | END;");
+        assertTrue(allKeywordKeys(result).contains("select"));
+        assertTrue(allKeywordKeys(result).contains("if"));
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
@@ -1111,19 +1125,16 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'BEGIN IF | THEN NULL; END IF; END;' - IF condition suggests columns? Actually no table visible, but not crash")
     void plsqlIfConditionDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("BEGIN IF | THEN NULL; END IF; END;");
-            assertNotNull(result);
-        });
+        var result = suggest("BEGIN IF | THEN NULL; END IF; END;");
+        assertTrue(keysOfType(result, "column").isEmpty());
+        assertTrue(hasKeyOfType(result, "count", "function"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM users PIVOT (COUNT(*) FOR status IN (|))' - PIVOT IN list suggests values? Not easy, but not crash")
     void pivotInClauseDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM orders PIVOT (COUNT(*) FOR status IN (|))");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM orders PIVOT (COUNT(*) FOR status IN (|))");
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
@@ -1137,18 +1148,16 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users WHERE JSON_EXISTS(json_col, '$.?' (|))' - JSON_EXISTS condition, not crash")
     void jsonExistsDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE JSON_EXISTS(json_col, '$' |)");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users WHERE JSON_EXISTS(json_col, '$' |)");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM users WHERE JSON_VALUE(json_col, '$.name' RETURNING VARCHAR2 |)' - JSON_VALUE returning type suggests datatypes")
     void jsonValueReturningSuggestsDatatypes() {
         var result = suggest("SELECT * FROM users WHERE JSON_VALUE(json_col, '$.name' RETURNING VARCHAR2 |)");
-        var datatypes = keysOfType(result, "datatype");
-        assertTrue(datatypes.contains("varchar") || datatypes.contains("text"));
+        assertTrue(keysOfType(result, "datatype").containsAll(SchemaIndex.DATA_TYPES));
     }
 
     @Test
@@ -1157,6 +1166,7 @@ public class OracleCompletionEngineTest {
         var result = suggest("SELECT XMLELEMENT(\"user\", |) FROM users");
         assertTrue(hasKeyOfType(result, "users.id", "column"));
         assertTrue(hasKeyOfType(result, "users.name", "column"));
+        assertFalse(hasKeyOfType(result, "orders.id", "column"));
     }
 
     @Test
@@ -1170,8 +1180,7 @@ public class OracleCompletionEngineTest {
     @DisplayName("'SELECT * FROM XMLTABLE('/root/row' PASSING xml_col COLUMNS id INT PATH '@id', name VARCHAR2 |)' - XMLTABLE column type suggests datatypes")
     void xmlTableColumnTypeSuggestsDatatypes() {
         var result = suggest("SELECT * FROM XMLTABLE('/root/row' PASSING xml_col COLUMNS id INT, name |)");
-        var datatypes = keysOfType(result, "datatype");
-        assertTrue(datatypes.contains("varchar") || datatypes.contains("text"));
+        assertTrue(keysOfType(result, "datatype").containsAll(SchemaIndex.DATA_TYPES));
     }
 
     @Test
@@ -1184,20 +1193,9 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users WHERE CONTAINS(name, 'keyword', 1) > 0' - Oracle Text, not crash")
     void containsFunctionDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE CONTAINS(name, 'keyword', 1) > |");
-            assertNotNull(result);
-        });
-    }
-
-    @Test
-    @DisplayName("'SELECT * FROM users WHERE condition AND |' - after AND in WHERE suggests more conditions (columns, functions, keywords)")
-    void whereAndContinuationSuggestsColumnsAndKeywords() {
-        var result = suggest("SELECT * FROM users u WHERE u.id = 1 AND |");
-        assertTrue(hasKeyOfType(result, "u.name", "column"));
-        assertTrue(hasKeyOfType(result, "u.email", "column"));
-        // Also might suggest keyword 'NOT', 'EXISTS', etc.
-        assertFalse(result.isEmpty());
+        var result = suggest("SELECT * FROM users WHERE CONTAINS(name, 'keyword', 1) > |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
     }
 
     @Test
@@ -1206,20 +1204,6 @@ public class OracleCompletionEngineTest {
         var result = suggest("SELECT * FROM users WHERE id NOT IN (SELECT | FROM orders)");
         assertTrue(hasKeyOfType(result, "orders.id", "column"));
         assertTrue(hasKeyOfType(result, "orders.total", "column"));
-    }
-
-    @Test
-    @DisplayName("'SELECT * FROM users WHERE id = ANY (SELECT | FROM orders)' - ANY subquery suggests columns")
-    void anySubquerySuggestsColumnsAgain() {
-        var result = suggest("SELECT * FROM users WHERE id = ANY (SELECT | FROM orders)");
-        assertTrue(hasKeyOfType(result, "orders.id", "column"));
-    }
-
-    @Test
-    @DisplayName("'SELECT * FROM users WHERE id > ALL (SELECT | FROM orders)' - ALL subquery suggests columns")
-    void allSubquerySuggestsColumnsAgain() {
-        var result = suggest("SELECT * FROM users WHERE id > ALL (SELECT | FROM orders)");
-        assertTrue(hasKeyOfType(result, "orders.id", "column"));
     }
 
     @Test
@@ -1245,24 +1229,23 @@ public class OracleCompletionEngineTest {
         var result = suggest("SELECT * FROM users WHERE id IN (SELECT id FROM orders MINUS SELECT | FROM products)");
         assertTrue(hasKeyOfType(result, "products.id", "column"));
         assertTrue(hasKeyOfType(result, "products.name", "column"));
+        assertFalse(hasKeyOfType(result, "orders.total", "column"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM users WHERE ROWNUM <= |' - ROWNUM compares to number, not column, but not crash")
     void rownumCompareDoesNotCrash() {
-        assertDoesNotThrow(() -> {
-            var result = suggest("SELECT * FROM users WHERE ROWNUM <= |");
-            assertNotNull(result);
-        });
+        var result = suggest("SELECT * FROM users WHERE ROWNUM <= |");
+        assertTrue(hasKeyOfType(result, "users.id", "column"));
+        assertTrue(hasKeyOfType(result, "users.name", "column"));
     }
 
     @Test
     @DisplayName("'SELECT * FROM (SELECT * FROM users) WHERE |' - subquery in FROM, WHERE suggests columns from subquery alias? (subquery has no alias, table name accessible?)")
     void subqueryWithoutAliasWhereSuggestsColumns() {
         var result = suggest("SELECT * FROM (SELECT * FROM users) WHERE |");
-        // Because subquery has no alias, columns may be exposed as original table name? Or maybe unresolved.
-        // It should not crash.
-        assertNotNull(result);
+        assertTrue(hasKeyOfType(result, "count", "function"));
+        assertTrue(keysOfType(result, "column").isEmpty());
     }
 
     @Test
@@ -1271,6 +1254,8 @@ public class OracleCompletionEngineTest {
         var result = suggest("SELECT * FROM (SELECT * FROM users) sub WHERE sub.|");
         assertTrue(hasKeyOfType(result, "sub.id", "column"));
         assertTrue(hasKeyOfType(result, "sub.name", "column"));
+        assertTrue(hasKeyOfType(result, "sub.email", "column"));
+        assertTrue(keysOfType(result, "column").stream().allMatch(k -> k.startsWith("sub.")));
     }
 
     @Test
@@ -1341,7 +1326,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users u NATURAL JOIN orders o WHERE |' - NATURAL JOIN aliases visible")
     void naturalJoinWhereSuggestsBoth() {
-        var result = suggest("SELECT * FROM1 orders WHERE |");
+        var result = suggest("SELECT * FROM users u NATURAL JOIN orders o WHERE |");
         assertTrue(hasKeyOfType(result, "u.name", "column"));
         assertTrue(hasKeyOfType(result, "o.total", "column"));
     }
@@ -1349,7 +1334,7 @@ public class OracleCompletionEngineTest {
     @Test
     @DisplayName("'SELECT * FROM users u CROSS JOIN orders o WHERE |' - CROSS JOIN aliases visible")
     void crossJoinWhereSuggestsBoth() {
-        var result = suggest("SELECT * FROM emp JOIN dept ON emp.deptno = dept.deptno WHERE |");
+        var result = suggest("SELECT * FROM users u CROSS JOIN orders o WHERE |");
         assertTrue(hasKeyOfType(result, "u.name", "column"));
         assertTrue(hasKeyOfType(result, "o.total", "column"));
     }

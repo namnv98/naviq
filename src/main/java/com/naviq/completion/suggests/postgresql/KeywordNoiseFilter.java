@@ -98,6 +98,20 @@ public class KeywordNoiseFilter {
         return result;
     }
 
+    /**
+     * True nếu rule đã ENTER tại 1 token THẬT nằm trước caret (đã "nuốt" ít nhất 1 token đã gõ) -
+     * caret đang ở BÊN TRONG/SAU rule đó chứ không phải ở vị trí bắt đầu nó. Khác với
+     * genuine-continuation suppression: không cần khoảng trắng trước caret, nên bắt được cả "varchar(|)".
+     */
+    public static boolean isRuleEnteredBeforeCaret(PostgreSQLSyntacticAnalyzer.Result syn, int ruleId) {
+        Integer entry = syn.candidates().ruleEntryTokenIndex.get(ruleId);
+        if (entry == null || entry == RuleCallStack.RuleFrame.NO_TOKEN) {
+            return false;
+        }
+        LastRealInfo lastReal = findLastReal(syn.tokenStream(), syn.caretTokenIndex());
+        return lastReal != null && entry <= lastReal.compactIndex();
+    }
+
     public static Set<String> allRuleNames(Set<Integer> ruleIds) {
         Set<String> result = new HashSet<>();
         for (Integer ruleIndex : ruleIds) {

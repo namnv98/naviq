@@ -52,16 +52,18 @@ public class SemanticAnalyzer {
             // (borrow token thật / chèn token giả) - không cần dò lại lần nữa ở đây.
             var scope = model.scopeAt(patch.caretTokenIndex());
             var result = model.resolveAt(cursorOffset, scope);
+            String ddlTargetAlias = scope != null && scope.isDdlTargetScope ? scope.primaryAlias() : null;
             return new Result(
                     result.danglingQualifier(),
                     result.danglingQualifierResolvesTo(),
                     result.danglingQualifierScope(),
                     result.visibleAliases(),
-                    result.visibleDerivedScopes()
+                    result.visibleDerivedScopes(),
+                    ddlTargetAlias
             );
         } catch (Exception e) {
             e.printStackTrace();
-            return new Result(null, null, null, java.util.Map.of(), java.util.Map.of());
+            return Result.empty();
         }
     }
     public record Result(
@@ -69,11 +71,12 @@ public class SemanticAnalyzer {
         String qualifierResolvesTo,
         Scope qualifierDerivedScope,
         Map<String, String> visibleAliases,
-        Map<String, Scope> visibleDerivedScopes
+        Map<String, Scope> visibleDerivedScopes,
+        String ddlTargetAlias
     ) {
 
         public static Result empty() {
-            return new Result(null, null, null, Map.of(), Map.of());
+            return new Result(null, null, null, Map.of(), Map.of(), null);
         }
     }
 }

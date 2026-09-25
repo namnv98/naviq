@@ -103,6 +103,21 @@ public final class CursorTokenPatcher {
             if (t.getType() == PostgreSQLParser.OPEN_PAREN) openCount++;
             else if (t.getType() == PostgreSQLParser.CLOSE_PAREN) openCount--;
         }
+        // Ngoặc của LỜI GỌI HÀM chưa đóng mà phía sau caret còn cả 1 mệnh đề (vd "count(| from t"):
+        // ")" phải nằm NGAY SAU vùng đang gõ, không phải cuối input - đóng ở cuối làm
+        // "from t" bị nuốt vào trong ngoặc, parse lỗi và mất hẳn bảng FROM. Ngoặc subquery/danh
+        // sách (đứng sau SELECT/FROM/IN/...) vẫn đóng ở cuối như cũ.
+        int closeAfterCaret = Math.min(countFunctionParensToCloseAfterCaret(working, finalCaretIdx), openCount);
+        if (closeAfterCaret > 0) {
+            for (int k = 0; k < closeAfterCaret; k++) {
+                CommonToken closeParen = new CommonToken(
+                        tokenSource, PostgreSQLParser.CLOSE_PAREN, Token.DEFAULT_CHANNEL,
+                        cursorOffset, cursorOffset);
+                closeParen.setText(")");
+                working.add(finalCaretIdx + 1, closeParen);
+            }
+            openCount -= closeAfterCaret;
+        }
         if (openCount > 0) {
             int eofIdx = working.size() - 1;
             for (int k = 0; k < openCount; k++) {
@@ -117,6 +132,48 @@ public final class CursorTokenPatcher {
         CommonTokenStream finalStream = new CommonTokenStream(new ListTokenSource(working));
         finalStream.fill();
         return new PatchResult(finalStream, finalCaretIdx, patched);
+    }
+
+    private static final java.util.Set<Integer> CLAUSE_START_TOKENS = java.util.Set.of(
+            PostgreSQLParser.FROM, PostgreSQLParser.WHERE, PostgreSQLParser.GROUP_P, PostgreSQLParser.ORDER,
+            PostgreSQLParser.HAVING, PostgreSQLParser.LIMIT, PostgreSQLParser.OFFSET, PostgreSQLParser.UNION,
+            PostgreSQLParser.INTERSECT, PostgreSQLParser.EXCEPT, PostgreSQLParser.WINDOW, PostgreSQLParser.RETURNING);
+
+    /**
+     * Số ngoặc "(" chưa đóng bao quanh caret, tính từ ngoặc TRONG CÙNG ra ngoài, mà mỗi ngoặc đứng
+     * ngay sau 1 tên hàm (Identifier) - và token thật kế tiếp sau vùng caret là 1 keyword mở mệnh
+     * đề (FROM/WHERE/...). Dừng ở ngoặc đầu tiên không thỏa (ngoặc subquery/danh sách).
+     */
+    private static int countFunctionParensToCloseAfterCaret(List<Token> working, int caretIdx) {
+        int next = -1;
+        for (int i = caretIdx + 1; i < working.size(); i++) {
+            Token t = working.get(i);
+            if (t.getType() == Token.EOF) break;
+            if (t.getChannel() == Token.DEFAULT_CHANNEL) {
+                next = i;
+                break;
+            }
+        }
+        if (next < 0 || !CLAUSE_START_TOKENS.contains(working.get(next).getType())) {
+            return 0;
+        }
+        java.util.Deque<Integer> unclosed = new java.util.ArrayDeque<>();
+        for (int i = 0; i < working.size(); i++) {
+            Token t = working.get(i);
+            if (t.getType() == Token.EOF) break;
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) continue;
+            if (t.getType() == PostgreSQLParser.OPEN_PAREN) unclosed.push(i);
+            else if (t.getType() == PostgreSQLParser.CLOSE_PAREN && !unclosed.isEmpty()) unclosed.pop();
+        }
+        int count = 0;
+        for (int openIdx : unclosed) { // innermost trước
+            if (openIdx >= caretIdx) continue;
+            int prev = openIdx - 1;
+            while (prev >= 0 && working.get(prev).getChannel() != Token.DEFAULT_CHANNEL) prev--;
+            if (prev < 0 || working.get(prev).getType() != PostgreSQLParser.Identifier) break;
+            count++;
+        }
+        return count;
     }
 
     private static boolean isReusableCaretAnchor(Token t) {

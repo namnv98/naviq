@@ -63,7 +63,17 @@ public class PostgreSQLSyntacticAnalyzer {
         m.put(PostgreSQLParser.GREATER_EQUALS, true);
         m.put(PostgreSQLParser.Numeric, true);
         m.put(PostgreSQLParser.Integral, true);
+        m.put(PostgreSQLParser.BinaryIntegral, true);
+        m.put(PostgreSQLParser.OctalIntegral, true);
+        m.put(PostgreSQLParser.HexadecimalIntegral, true);
         m.put(PostgreSQLParser.StringConstant, true);
+        m.put(PostgreSQLParser.BeginDollarStringConstant, true);
+        m.put(PostgreSQLParser.DollarText, true);
+        m.put(PostgreSQLParser.EndDollarStringConstant, true);
+        m.put(PostgreSQLParser.UnicodeEscapeStringConstant, true);
+        m.put(PostgreSQLParser.EscapeStringConstant, true);
+        m.put(PostgreSQLParser.BinaryStringConstant, true);
+        m.put(PostgreSQLParser.HexadecimalStringConstant, true);
         m.put(PostgreSQLParser.SEMI, true);
         return m;
     }

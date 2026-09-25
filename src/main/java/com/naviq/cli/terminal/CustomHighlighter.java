@@ -2,7 +2,6 @@ package com.naviq.cli.terminal;
 
 import com.naviq.antlr4.postgresql.PostgreSQLLexer;
 import com.naviq.datasource.SchemaIndex;
-import com.naviq.datasource.SchemaLoader;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
@@ -13,14 +12,7 @@ import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
-import java.util.Set;
-import java.util.stream.Collectors;
-
 public class CustomHighlighter implements Highlighter {
-    private static final Set<String> ALL_COLUMNS = SchemaIndex.TABLE_INDEX
-            .values().stream()
-            .flatMap(t -> t.columns().stream().map(SchemaLoader.DBColumnInfo::name))
-            .collect(Collectors.toSet());
 
     @Override
     public AttributedString highlight(LineReader lineReader, String s) {
@@ -144,7 +136,7 @@ public class CustomHighlighter implements Highlighter {
             if (isSchema(text)) {
                 return AttributedStyle.DEFAULT.foreground(109); // cyan nhạt — schema
             }
-            if (ALL_COLUMNS.contains(text)) {
+            if (isColumn(text)) {
                 return AttributedStyle.DEFAULT.foreground(150); // xanh lá nhạt — column
             }
             return AttributedStyle.DEFAULT.foreground(183); // tím nhạt — alias/unknown

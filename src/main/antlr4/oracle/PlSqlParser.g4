@@ -1451,10 +1451,28 @@ hier_attr_name
     ;
 
 create_index
-    : CREATE (UNIQUE | BITMAP)? INDEX index_name
+    // PATCH: bitmap_join_index_clause (dạng "ON table (other_table.col, ...) FROM ... WHERE ...")
+    // TRƯỚC ĐÂY được liệt kê ngang hàng với table_index_clause cho MỌI CREATE INDEX, kể cả không
+    // có từ khóa BITMAP - nhưng cú pháp này CHỈ hợp lệ với "CREATE BITMAP INDEX" thật (Oracle thật
+    // không cho "CREATE INDEX ... ON t (other.col) FROM ..." nếu thiếu BITMAP). Hệ quả completion:
+    // vì table_index_clause VÀ bitmap_join_index_clause đều bắt đầu chung "tableview_name
+    // LEFT_PAREN", tại "CREATE INDEX idx ON users (|" engine coi CẢ 2 đều khả thi -> gợi ý lẫn
+    // "tableview_name" (dành cho vế table.column của bitmap join) VÀO đúng vị trí lẽ ra chỉ nên có
+    // "column_name" (index thường). Tách theo đúng từ khóa UNIQUE/BITMAP/(không có) để
+    // bitmap_join_index_clause chỉ còn khả thi sau BITMAP - loại bỏ nhiễu cho trường hợp phổ biến
+    // (index thường/unique), đồng thời đúng ngữ pháp Oracle thật hơn.
+    : CREATE UNIQUE INDEX index_name
+       ON (cluster_index_clause | table_index_clause)
+       (USABLE | UNUSABLE)?
+       SEMICOLON?
+    | CREATE BITMAP INDEX index_name
        ON (cluster_index_clause | table_index_clause | bitmap_join_index_clause)
        (USABLE | UNUSABLE)?
-       SEMICOLON
+       SEMICOLON?
+    | CREATE INDEX index_name
+       ON (cluster_index_clause | table_index_clause)
+       (USABLE | UNUSABLE)?
+       SEMICOLON?
     ;
 
 cluster_index_clause
@@ -6252,9 +6270,19 @@ error_logging_reject_part
     ;
 
 dml_table_expression_clause
+    // PATCH: "xmltable outer_join_sign?" từng là 1 nhánh LỒNG BÊN TRONG tableview_name - vì
+    // tableview_name nằm trong preferredRules (completion cần nó để suggest tên bảng), nên khi ATN
+    // đi sâu vào bên trong XMLTABLE(... COLUMNS col type_spec ...) để tới vị trí type_spec (cũng
+    // preferred), PreferredRuleResolver (dùng chung, ưu tiên mê cung đặc biệt NGOÀI CÙNG khi lồng
+    // nhau - xem PreferredRuleResolver.java) luôn dừng lại ở tableview_name trước, khiến type_spec
+    // không bao giờ được ghi nhận -> gợi ý sai thành "tên bảng" thay vì "kiểu dữ liệu". Tách xmltable
+    // ra thành nhánh RIÊNG ở đây (đúng hơn về ngữ nghĩa: XMLTABLE chỉ hợp lệ làm table nguồn trong
+    // FROM, không hợp lệ ở ALTER TABLE/CREATE INDEX - các chỗ khác cũng dùng tableview_name) để nó
+    // không còn là ancestor của type_spec nữa, KHÔNG đụng gì tới PreferredRuleResolver dùng chung.
     : table_collection_expression
     | LEFT_PAREN select_statement subquery_restriction_clause? RIGHT_PAREN
     | tableview_name sample_clause?
+    | xmltable outer_join_sign?
     | json_table_clause (AS identifier)?
     ;
 
@@ -6959,7 +6987,6 @@ column_name
 tableview_name
     : identifier (PERIOD id_expression)?
           (AT_SIGN link_name (PERIOD link_name)* | /*TODO{!(input.LA(2) == BY)}?*/ partition_extension_clause)?
-    | xmltable outer_join_sign?
     ;
 
 xmltable

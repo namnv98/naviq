@@ -60,7 +60,10 @@ public class CompletionEngine {
 
         Set<String> matchedRuleNames = KeywordNoiseFilter.computeMatchedRuleNames(syntacticResults, syntacticCursor);
 
-        if (matchedRuleNames.contains("typename")) {
+        // typename đã ENTER từ trước caret (vd "varchar(|)": đang đứng TRONG type modifier của kiểu đã
+        // gõ xong tên) thì vị trí này chỉ nhận literal, không phải tên kiểu dữ liệu mới.
+        if (matchedRuleNames.contains("typename")
+                && !KeywordNoiseFilter.isRuleEnteredBeforeCaret(syntacticResults, PostgreSQLParser.RULE_typename)) {
             addDataTypeSuggestions(suggests);
         }
 
@@ -68,16 +71,29 @@ public class CompletionEngine {
             addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
         }
 
-        if (matchedRuleNames.contains("any_name")) {
+        // any_name/qualified_name được grammar dùng chung cho MỌI loại đối tượng (sequence, index,
+        // collation...), nhưng engine chỉ có registry bảng/view - nên ở vị trí tên của đối tượng
+        // KHÔNG phải bảng thì không được gợi ý tên bảng.
+        boolean nameFollowsNonTableKeyword = followsNonTableObjectKeyword(syntacticResults);
+
+        if (matchedRuleNames.contains("any_name")
+                && !nameFollowsNonTableKeyword
+                && !isNonTableAnyNameContext(syntacticResults)) {
             addTableNameSuggestions(suggests, syntacticResults);
         }
 
-        if (matchedRuleNames.contains("qualified_name")) {
+        if (matchedRuleNames.contains("qualified_name") && !nameFollowsNonTableKeyword) {
             addTableNameSuggestions(suggests, syntacticResults);
         }
 
+        // FOR VALUES FROM (|) / TO (|) của partition bound chỉ nhận biểu thức hằng, không có cột nào
+        // trong scope để tham chiếu.
         if (matchedRuleNames.contains("columnref")) {
-            addColumnSuggestions(suggests, semanticResult);
+            if (isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_columnref, PostgreSQLParser.RULE_partitionboundspec)) {
+                SchemaIndex.FUNCTIONS.forEach(fn -> suggests.add(Suggest.of(fn, "function")));
+            } else {
+                addColumnSuggestions(suggests, semanticResult);
+            }
         }
 
         boolean isColidAlias = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_relation_expr_opt_alias); // DELETE FROM ... (colid = alias)
@@ -88,11 +104,87 @@ public class CompletionEngine {
         boolean isColidUsingClauseColumn = isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_join_qual); // JOIN ... USING (col1, col2) (colid = cột chung 2 bảng)
         boolean isColidInsert = isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_insertstmt); // JOIN ... USING (col1, col2) (colid = cột chung 2 bảng)
 
-        if (matchedRuleNames.contains("colid") && (isColidDropTarget || isColumnrefColumn || isColidIndexColumn || isColidSetTarget || isColidUsingClauseColumn || isColidInsert)) {
+        // MERGE ... WHEN MATCHED THEN UPDATE SET | - vế TRÁI của phép gán chỉ được là cột bảng TARGET
+        // (bảng USING/source cùng visible trong scope của mergestmt nhưng không thể là đích gán).
+        // Vế phải (a_expr sau dấu "=") đi qua columnref chứ không qua set_target nên KHÔNG bị giới
+        // hạn này - vẫn thấy cả 2 bảng.
+        boolean isMergeSetTarget = isColidSetTarget
+                && isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_merge_update_clause)
+                && semanticResult.ddlTargetAlias() != null;
+
+        // JOIN ... USING (|) - chỉ tên cột CHUNG của các bảng trong join mới hợp lệ (name_list của
+        // USING), không phải mọi cột của mọi bảng. Phân biệt với "JOIN ... ON a_expr" (cũng nằm
+        // dưới join_qual) bằng việc colid nằm trong name_list.
+        boolean isJoinUsingColumn = isColidUsingClauseColumn
+                && isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_name_list);
+
+        // Danh sách cột trong ngoặc NGAY SAU tên bảng: COPY t (a, |), GRANT UPDATE (a, |) ON t,
+        // ANALYZE t (a, |), REFERENCES t (a, |). colid nằm dưới opt_column_list/opt_name_list; bảng
+        // tương ứng được SemanticScope đăng ký riêng cho từng statement.
+        boolean isColidTableColumnList =
+                (isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_opt_column_list)
+                        && (isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_copystmt)
+                        || isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_privilege)
+                        || isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_colconstraintelem)
+                        || isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_constraintelem)))
+                        || (isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_opt_name_list)
+                        && isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_vacuum_relation));
+
+        if (matchedRuleNames.contains("colid") && isMergeSetTarget) {
+            addTargetOnlyColumnSuggestions(suggests, semanticResult);
+        } else if (matchedRuleNames.contains("colid") && isJoinUsingColumn) {
+            addCommonColumnSuggestions(suggests, semanticResult);
+        } else if (matchedRuleNames.contains("colid") && (isColidDropTarget || isColumnrefColumn || isColidIndexColumn || isColidSetTarget || isColidUsingClauseColumn || isColidInsert || isColidTableColumnList)) {
             addColumnSuggestions(suggests, semanticResult);
         }
 
         return suggests;
+    }
+
+    /**
+     * any_name đứng ở vị trí chỉ nhận tên đối tượng KHÔNG phải bảng: COLLATE any_name (cột/index),
+     * operator class trong index_elem, và mọi any_name dưới definestmt (CREATE COLLATION ... FROM
+     * any_name, CREATE AGGREGATE/OPERATOR/TYPE...).
+     */
+    private static boolean isNonTableAnyNameContext(PostgreSQLSyntacticAnalyzer.Result syn) {
+        return isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_colconstraint)
+                || isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_index_elem_options)
+                || isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_opt_class)
+                || isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_opt_collate)
+                || isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_opt_collate_clause)
+                || isRuleAncestorAnywhere(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_definestmt);
+    }
+
+    /**
+     * Token thật gần nhất trước caret (bỏ qua IF [NOT] EXISTS / CONCURRENTLY / ONLY và cặp
+     * "schema.") là SEQUENCE / INDEX / COLLATION / COLLATE -> đang đặt tên sequence/index/collation,
+     * không phải tên bảng (vd "DROP SEQUENCE |", "ALTER SEQUENCE |", "REINDEX INDEX CONCURRENTLY |").
+     */
+    private static boolean followsNonTableObjectKeyword(PostgreSQLSyntacticAnalyzer.Result syn) {
+        var ts = syn.tokenStream();
+        int i = syn.caretTokenIndex() - 1;
+        while (i >= 0) {
+            Token t = ts.get(i);
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                i--;
+                continue;
+            }
+            int type = t.getType();
+            if (type == PostgreSQLParser.DOT) {
+                i--;
+                while (i >= 0 && ts.get(i).getChannel() != Token.DEFAULT_CHANNEL) i--;
+                i--; // bỏ tên schema đứng trước dấu chấm
+                continue;
+            }
+            if (type == PostgreSQLParser.IF_P || type == PostgreSQLParser.EXISTS || type == PostgreSQLParser.NOT
+                    || type == PostgreSQLParser.CONCURRENTLY || type == PostgreSQLParser.ONLY) {
+                i--;
+                continue;
+            }
+            return type == PostgreSQLParser.SEQUENCE || type == PostgreSQLParser.INDEX
+                    || type == PostgreSQLParser.COLLATION || type == PostgreSQLParser.COLLATE;
+        }
+        return false;
     }
 
     private static boolean isRuleInContext(PostgreSQLSyntacticAnalyzer.Result syn, int ruleId, int expectedParentRuleId) {
@@ -133,6 +225,47 @@ public class CompletionEngine {
             String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
             suggests.add(Suggest.of(alias, "alias"));
         }
+    }
+
+    /** Cột của TỪNG alias visible (alias -> danh sách suggest cột), dùng chung cho các kiểu lọc theo alias. */
+    private static java.util.Map<String, List<Suggest>> columnsPerVisibleAlias(SemanticAnalyzer.Result sem) {
+        var perAlias = new java.util.LinkedHashMap<String, List<Suggest>>();
+        sem.visibleAliases().forEach((alias, table) -> {
+            var cols = new ArrayList<Suggest>();
+            var derived = sem.visibleDerivedScopes().get(alias);
+            if (derived != null) {
+                DerivedColumnExpander.addDerivedColumns(cols, alias, derived);
+            } else {
+                SchemaIndex.getColumnsOfTable(table).forEach(c -> cols.add(Suggest.of(alias + "." + c.name(), "column", c.dataType())));
+            }
+            perAlias.put(alias, cols);
+        });
+        return perAlias;
+    }
+
+    /** Như addColumnSuggestions nhưng chỉ cột của alias {@link SemanticAnalyzer.Result#ddlTargetAlias()}. */
+    private static void addTargetOnlyColumnSuggestions(List<Suggest> suggests, SemanticAnalyzer.Result sem) {
+        SchemaIndex.FUNCTIONS.forEach(fn -> suggests.add(Suggest.of(fn, "function")));
+        var cols = columnsPerVisibleAlias(sem).get(sem.ddlTargetAlias());
+        if (cols != null) {
+            suggests.addAll(cols);
+        }
+    }
+
+    /**
+     * JOIN ... USING (|): chỉ gợi ý cột có TÊN xuất hiện ở ít nhất 2 alias visible (cột chung
+     * giữa các bảng tham gia join), mỗi alias đóng góp 1 gợi ý dạng alias.cột.
+     */
+    private static void addCommonColumnSuggestions(List<Suggest> suggests, SemanticAnalyzer.Result sem) {
+        var perAlias = columnsPerVisibleAlias(sem);
+        var aliasCountByColumn = new java.util.HashMap<String, Integer>();
+        perAlias.values().forEach(cols -> cols.stream()
+                .map(s -> s.getKey().substring(s.getKey().indexOf('.') + 1).toLowerCase())
+                .distinct()
+                .forEach(name -> aliasCountByColumn.merge(name, 1, Integer::sum)));
+        perAlias.values().forEach(cols -> cols.stream()
+                .filter(s -> aliasCountByColumn.get(s.getKey().substring(s.getKey().indexOf('.') + 1).toLowerCase()) >= 2)
+                .forEach(suggests::add));
     }
 
     private static void addColumnSuggestions(List<Suggest> suggests, SemanticAnalyzer.Result sem) {

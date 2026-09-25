@@ -21,14 +21,21 @@ public class RuleTextRangeResolver {
                                 Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache,
                                 List<InputToken> tokens,
                                 CandidatesResult result) {
-        for (int ruleId : preferredRules.keySet()) {
-            Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.get(ruleId);
-            if (exitsByEntryToken == null || exitsByEntryToken.isEmpty()) continue;
+        // Chỉ tính vị trí cho những rule THẬT SỰ được gợi ý tại caret (đã có
+        // trong result.rules/ruleEntryTokenIndex), không phải mọi rule nằm
+        // trong ruleExitCache — cache này chứa cả những lần enterRule KHÔNG
+        // tại caret (ví dụ bảng/alias đã gõ xong trước đó trong câu).
+        for (Map.Entry<Integer, Integer> entry : result.ruleEntryTokenIndex.entrySet()) {
+            int ruleId = entry.getKey();
+            int startToken = entry.getValue();
+            if (startToken == RuleCallStack.RuleFrame.NO_TOKEN) continue;
 
-            // Điểm vào mê cung ở vị trí muộn nhất (gần caret nhất) trong input.
-            int startToken = Collections.max(exitsByEntryToken.keySet());
-            Set<Integer> endSet = exitsByEntryToken.get(startToken);
-            int endToken = endSet.isEmpty() ? tokens.size() - 1 : Collections.max(endSet);
+            // Rule được vào ngay tại caret (computeExitsAtCaret) thì không có
+            // mặt trong ruleExitCache (cache chỉ ghi ở nhánh !atCaret) -> coi
+            // như chưa "ăn" token nào, range rỗng ngay tại vị trí bắt đầu.
+            Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.get(ruleId);
+            Set<Integer> endSet = exitsByEntryToken == null ? null : exitsByEntryToken.get(startToken);
+            int endToken = (endSet == null || endSet.isEmpty()) ? startToken : Collections.max(endSet);
 
             result.rulePositions.put(ruleId, Arrays.asList(
                     tokens.get(startToken).startPosition(),

@@ -29,7 +29,18 @@ stmtmulti
    // (stmtmulti: stmtmulti ';' stmt | stmt - dấu ";" BẮT BUỘC giữa 2 statement, chỉ
    // TÙY CHỌN ở cuối cùng). Sửa lại đúng cấu trúc: 1+ statement, các statement Ở GIỮA
    // bắt buộc phải có ";", chỉ statement CUỐI mới được phép bỏ ";".
-   : (stmt (SEMI stmt)* SEMI?)?
+   //
+   // PATCH 2: Postgres thật còn cho phép STATEMENT RỖNG giữa 2 dấu ";" (rule "stmt" gốc
+   // của Postgres có nhánh rỗng) - vd ";;; select ..." hợp lệ. "stmt" ở đây là 1 alternation
+   // khổng lồ không có nhánh rỗng (và còn được dùng lại ở chỗ khác - PL/pgSQL embedded
+   // statement - nên không thêm nhánh rỗng thẳng vào "stmt"), nên bọc riêng qua
+   // "stmtOrEmpty" chỉ dùng trong "stmtmulti".
+   : (stmtOrEmpty (SEMI stmtOrEmpty)*)?
+   ;
+
+stmtOrEmpty
+   : stmt
+   |
    ;
 
 stmt
@@ -2719,7 +2730,14 @@ returning_clause
 // https://www.postgresql.org/docs/current/sql-merge.html
 mergestmt
    : with_clause? MERGE INTO ONLY? qualified_name alias_clause? USING (select_with_parens|qualified_name) alias_clause? ON a_expr
-        (merge_insert_clause merge_update_clause? | merge_update_clause merge_insert_clause?) merge_delete_clause?
+        (merge_insert_clause merge_update_clause? | merge_update_clause merge_insert_clause? | merge_nothing_clause) (merge_delete_clause | merge_nothing_clause)?
+   ;
+
+// PATCH: "WHEN [NOT] MATCHED [AND cond] THEN DO NOTHING" (hợp lệ từ PostgreSQL 15) - grammar cũ
+// chỉ có INSERT/UPDATE/DELETE nên "MERGE ... WHEN MATCHED THEN DO NOTHING" là lỗi cú pháp, làm hỏng
+// luôn việc resolve alias/qualifier cho phần ON phía trước nó.
+merge_nothing_clause
+   : WHEN NOT? MATCHED (AND a_expr)? THEN? DO NOTHING
    ;
 
 merge_insert_clause
@@ -3642,7 +3660,7 @@ func_expr_common_subexpr
    | JSON_QUERY '('
 				json_value_expr ',' a_expr json_passing_clause?
 				json_returning_clause?
-				json_wrapper_behavior
+				json_wrapper_behavior?
 				json_quotes_clause?
 				json_behavior_clause?
 			')'

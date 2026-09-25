@@ -2132,6 +2132,14 @@ GREATER_GREATER
    : '>>'
    ;
 
+Arrow
+   : '->' -> type(Operator)
+   ;
+
+DoubleArrow
+   : '->>' -> type(Operator)
+   ;
+
 COLON_EQUALS
    : ':='
    ;
@@ -2587,15 +2595,15 @@ Integral
    ;
 
 BinaryIntegral
-   : '0b' Digits
+   : '0b' [01]+
    ;
 
 OctalIntegral
-   : '0o' Digits
+   : '0o' [0-7]+
    ;
 
 HexadecimalIntegral
-   : '0x' Digits
+   : '0x' [0-9a-fA-F]+
    ;
 
 NumericFail
