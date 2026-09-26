@@ -1,87 +1,80 @@
 package com.naviq.completion.syntactic.engine;
 
 import com.naviq.completion.syntactic.engine.support.FollowSetsByState;
+import com.naviq.completion.syntactic.engine.support.FollowSetsByState.FollowSetWithPath;
+import com.naviq.completion.syntactic.engine.support.FollowSetsByState.FollowSetsHolder;
 import com.naviq.completion.syntactic.engine.support.PreferredRuleResolver;
 import com.naviq.completion.syntactic.engine.support.RuleCallStack;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.atn.ATNState;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * CHẾ ĐỘ BẬT FOLLOW-SET. Sau khi gộp khung {@code enterRule} chung lên
- * {@code CompletionEngineBase}, file này giờ CHỈ còn đúng phần thật sự khác
- * biệt so với {@code CompletionEngineDefault}: cách tính "exits" dựa vào
- * follow-set đã tính trước, thay vì luôn dò cửa sống.
+ * Chế độ dùng follow-set tính trước ({@link FollowSetsByState}): với mỗi state đầu rule, biết sẵn toàn bộ
+ * token có thể đi ra từ đó. Nhờ vậy:
+ * <ul>
+ *   <li>trước caret: nếu token kế tiếp không nằm trong follow-set (và rule không rỗng được) thì bỏ luôn nhánh,
+ *       khỏi đi trong thân rule;</li>
+ *   <li>tại caret: sinh gợi ý thẳng từ follow-set, không phải đi trong thân rule;</li>
+ *   <li>"rule rỗng được không" là tra O(1) (follow-set chứa EPSILON).</li>
+ * </ul>
  */
 public class CompletionEngineWithFlowSet extends CompletionEngineBase {
 
-    // FEATURE — xem FollowSetsByState.java. Field này chỉ là 1 "tay cầm" gọi
-    // ra feature đó; engine core không quan tâm nó tính follow-set thế nào.
     private static final FollowSetsByState followSetsByState = new FollowSetsByState();
 
     public CompletionEngineWithFlowSet(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         super(parser, ignoredTokens, preferredRules);
     }
 
-    /**
-     * Còn lời để nói: tra follow-set trước — nếu chắc chắn token kế tiếp
-     * không khớp đâu cả (và cũng không nullable), khỏi cần gọi walkRuleBody
-     * cho tốn công lặn qua bao nhiêu mê cung con.
-     */
     @Override
     protected Set<Integer> computeExitsNotAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
-        followSetsByState.ensureComputed(parser, start, ignoredTokens);
-        FollowSetsByState.FollowSetsHolder followSets = followSetsByState.get(start.stateNumber, ignoredTokens);
-
+        FollowSetsHolder followSets = followSetsOf(start);
         boolean mayMatch = followSets.combined().contains(Token.EPSILON) || followSets.combined().contains(tokens.get(tokenIndex).type());
         return mayMatch ? walkRuleBody(start, tokenIndex, entered) : Collections.emptySet();
     }
 
-    /**
-     * Đúng tại caret: dùng thẳng follow-set đã tính sẵn để sinh gợi ý, KHÔNG
-     * cần dò cửa sống.
-     */
     @Override
     protected Set<Integer> computeExitsAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
-        followSetsByState.ensureComputed(parser, start, ignoredTokens);
-        FollowSetsByState.FollowSetsHolder followSets = followSetsByState.get(start.stateNumber, ignoredTokens);
-
-        handleReachedCaretInsideRule(start.ruleIndex, entered, followSets);
+        FollowSetsHolder followSets = followSetsOf(start);
+        suggestFromFollowSets(start.ruleIndex, entered, followSets);
         return followSets.combined().contains(Token.EPSILON) ? Collections.singleton(tokenIndex) : Collections.emptySet();
     }
 
-    /**
-     * Override hook của Base: đọc thẳng {@code combined().contains(EPSILON)}
-     * từ follow-set đã tính sẵn (O(1)) — thay vì dò sống như bản mặc định
-     * ({@code NullableRuleChecker}) mà {@code Default} đang dùng. Đây chính
-     * là lý do 2 chế độ tồn tại 2 cách trả lời khác nhau cho cùng 1 câu hỏi:
-     * WithFlowSet đã buộc phải tính follow-set cho state đó rồi (để check
-     * mayMatch), nên đọc luôn từ đó là miễn phí; Default không hề có gì để
-     * đọc, phải dò sống.
-     */
     @Override
     protected boolean isNullable(ATNState state) {
-        followSetsByState.ensureComputed(parser, state, ignoredTokens);
-        return followSetsByState.get(state.stateNumber, ignoredTokens).combined().contains(Token.EPSILON);
+        return followSetsOf(state).combined().contains(Token.EPSILON);
+    }
+
+    private FollowSetsHolder followSetsOf(ATNState state) {
+        return followSetsByState.getOrCompute(parser, state, ignoredTokens);
     }
 
     /**
-     * Caret rơi ĐÚNG NGAY khi vừa bước vào mê cung {@code ruleIndex} — dùng
-     * thẳng follow-set đã tính sẵn để sinh gợi ý, KHÔNG cần dò cửa sống.
-     * <p>
-     * Nhánh không-đặc-biệt uỷ thác thẳng cho FollowSetsByState — core ở đây
-     * không cần biết cấu trúc FollowSetWithPath/path/following là gì cả.
+     * Caret vừa chạm rule {@code ruleIndex}. Nếu rule đó là preferred thì ghi thành rule. Ngược lại xét từng
+     * đường trong follow-set: đường nào đi qua 1 preferred rule thì ghi thành rule đó, còn lại mới thêm token.
      */
-    private void handleReachedCaretInsideRule(int ruleIndex, RuleCallStack stack, FollowSetsByState.FollowSetsHolder followSets) {
+    private void suggestFromFollowSets(int ruleIndex, RuleCallStack stack, FollowSetsHolder followSets) {
         if (preferredRules.containsKey(ruleIndex)) {
-            // FEATURE: gộp về đúng mê cung đặc biệt ngoài cùng (nếu lồng nhau).
             PreferredRuleResolver.resolve(stack, preferredRules, result);
             return;
         }
-        FollowSetsByState.generateSuggestionsFromFollowSets(stack, followSets, ignoredTokens, preferredRules, result);
+        for (FollowSetWithPath set : followSets.sets()) {
+            RuleCallStack fullPath = stack.copy();
+            fullPath.appendPath(set.path());
+            if (PreferredRuleResolver.resolve(fullPath, preferredRules, result)) {
+                continue;
+            }
+            for (int type : set.intervals().toList()) {
+                if (!ignoredTokens.containsKey(type)) {
+                    result.addToken(type, new ArrayList<>(set.following()));
+                }
+            }
+        }
     }
 }

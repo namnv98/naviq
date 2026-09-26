@@ -5,26 +5,16 @@ import com.naviq.completion.model.CandidatesResult;
 import java.util.*;
 
 /**
- * FEATURE: khi caret rơi vào 1 mê cung "đặc biệt" (preferredRules), ghi nhận nó làm gợi ý thay vì
- * liệt kê từng token trần trụi bên trong.
- * <p>
- * SỬA LẦN NÀY: thêm {@link #recordMatch}, dùng bởi {@code handleRuleDoor} - nơi ĐÃ TỰ BIẾT
- * {@code rt.target.ruleIndex} khớp preferredRules TRƯỚC KHI đệ quy vào rule đó (xem
- * CompletionEngineBase), nên không cần quét lại {@code frames} tìm match như {@link #resolve}.
- * <p>
- * {@link #resolve} vẫn giữ nguyên - dùng làm lưới an toàn dự phòng cho rule GỐC (index 0, được
- * gọi trực tiếp từ collectCandidates(), KHÔNG đi qua bất kỳ RuleTransition/handleRuleDoor nào cả,
- * nên không có cơ hội chặn sớm) và cho các đường BFS cũ (RULE_STOP, password-door, wildcard-door)
- * vẫn còn gọi tới nó như trước.
+ * Khi caret rơi vào 1 rule "ưu tiên" (preferredRules, ví dụ tên bảng, tên cột), ghi rule đó thành gợi ý
+ * thay vì liệt kê từng token bên trong nó.
  */
 public class PreferredRuleResolver {
 
     /**
-     * Quét {@code stack} từ mê cung NGOÀI CÙNG vào trong; nếu tìm thấy 1 mê
-     * cung đặc biệt trên đường đi, ghi nhận nó vào {@code result} rồi dừng
-     * NGAY — không xét các mê cung đặc biệt nằm sâu hơn bên trong nó.
+     * Quét {@code stack} từ rule NGOÀI CÙNG vào trong; gặp preferred rule đầu tiên thì ghi vào {@code result}
+     * và dừng ngay (không xét các preferred rule lồng sâu hơn).
      *
-     * @return true nếu đã tìm thấy và ghi nhận 1 mê cung đặc biệt trên đường đi.
+     * @return true nếu đã tìm thấy và ghi nhận 1 preferred rule.
      */
     public static boolean resolve(RuleCallStack stack, Map<Integer, Boolean> preferredRules, CandidatesResult result) {
         if (preferredRules.isEmpty()) {
@@ -38,7 +28,7 @@ public class PreferredRuleResolver {
             }
             List<RuleCallStack.RuleFrame> pathToRule = new ArrayList<>(frames.subList(0, i));
             recordIfMoreRelevant(frame.ruleId(), pathToRule, frame.tokenIndex(), result);
-            return true; // dừng ngay tại match ngoài cùng nhất
+            return true;
         }
         return false;
     }
@@ -52,8 +42,8 @@ public class PreferredRuleResolver {
     }
 
     /**
-     * Khi 1 mê cung đặc biệt được chạm tới từ nhiều nhánh khác nhau, chỉ ghi
-     * đè nếu lần này "liên quan hơn" — ví dụ vào rule ở vị trí token muộn hơn.
+     * Preferred rule được chạm tới từ nhiều nhánh: chỉ ghi đè khi lần này "liên quan hơn" — vào rule ở token muộn hơn.
+     * Quy ước cho {@link RuleCallStack.RuleFrame#NO_TOKEN} giữ nguyên như cũ (xem các MatchedRuleResolver dùng nó).
      */
     private static boolean isMoreRelevant(int candidateTokenIndex, Integer existingTokenIndex) {
         if (existingTokenIndex == null) {
@@ -65,6 +55,6 @@ public class PreferredRuleResolver {
         if (existingTokenIndex == RuleCallStack.RuleFrame.NO_TOKEN) {
             return false;
         }
-        return candidateTokenIndex > existingTokenIndex; // ưu tiên tokenIndex MUỘN HƠN
+        return candidateTokenIndex > existingTokenIndex;
     }
 }

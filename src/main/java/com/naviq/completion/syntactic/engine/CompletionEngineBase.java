@@ -1,13 +1,12 @@
 package com.naviq.completion.syntactic.engine;
 
+import com.naviq.completion.model.CandidatesResult;
+import com.naviq.completion.model.InputToken;
+import com.naviq.completion.syntactic.engine.support.AtnPredicates;
 import com.naviq.completion.syntactic.engine.support.FollowingTokensFinder;
 import com.naviq.completion.syntactic.engine.support.PreferredRuleResolver;
 import com.naviq.completion.syntactic.engine.support.RuleCallStack;
-import com.naviq.completion.syntactic.engine.support.RuleTextRangeResolver;
-import com.naviq.completion.model.CandidatesResult;
-import com.naviq.completion.model.InputToken;
 import org.antlr.v4.runtime.Parser;
-import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.TokenStream;
 import org.antlr.v4.runtime.atn.*;
@@ -15,6 +14,26 @@ import org.antlr.v4.runtime.misc.IntervalSet;
 
 import java.util.*;
 
+/**
+ * Tìm các token / rule có thể đứng tại vị trí con trỏ (caret) bằng cách đi trực tiếp trên ATN của parser.
+ * <p>
+ * Ý tưởng:
+ * <ul>
+ *   <li><b>Token đã gõ</b> là các token từ đầu câu tới trước caret. <b>Token caret</b> (phần tử cuối của
+ *       {@link #tokens}) là token đang được gõ dở — nó KHÔNG được "ăn", ta hỏi xem chỗ đó có thể là gì.</li>
+ *   <li>{@link #enterRule} trả lời câu hỏi: "vào rule R tại token i thì ra khỏi R được ở những token nào?"
+ *       (tập <i>exit</i>). Kết quả chỉ phụ thuộc (R, i), nên được nhớ lại trong {@link #ruleExitCache}.</li>
+ *   <li>{@link #walkRuleBody} đi trong thân 1 rule: gặp transition khớp token đã gõ thì tiến 1 token,
+ *       gặp lời gọi rule con thì hỏi {@link #enterRule}, gặp epsilon thì đi tiếp không tốn token.</li>
+ *   <li>Khi tới caret không còn token nào để khớp: mọi token mà transition chấp nhận chính là gợi ý
+ *       (ghi vào {@code result.tokens}); rule nằm trong {@code preferredRules} được ghi thành rule thay vì
+ *       bung ra từng token (xem {@link PreferredRuleResolver}).</li>
+ * </ul>
+ * Không có phục hồi lỗi: token đã gõ không khớp ATN thì nhánh đó chết, cho 0 gợi ý.
+ * <p>
+ * Hai lớp con chỉ khác nhau ở 3 hook: cách tính tập exit (còn token / tại caret) và "rule rỗng được không".
+ * Instance giữ trạng thái của lần gọi hiện tại nên KHÔNG dùng chung giữa nhiều luồng.
+ */
 public abstract class CompletionEngineBase {
 
     protected final Parser parser;
@@ -23,12 +42,12 @@ public abstract class CompletionEngineBase {
     protected final Map<Integer, Boolean> ignoredTokens;
     protected final Map<Integer, Boolean> preferredRules;
 
+    /** Token từ đầu câu tới token caret (bao gồm token caret ở cuối). */
     protected List<InputToken> tokens;
-    protected int tokenStartIndex;
-
     protected CandidatesResult result;
-    protected final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
 
+    /** ruleIndex -> (token index lúc vào rule -> các token index có thể ra khỏi rule). Chỉ lưu khi chưa tới caret. */
+    protected final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
 
     public CompletionEngineBase(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         this.parser = parser;
@@ -42,21 +61,12 @@ public abstract class CompletionEngineBase {
     // ════════════════════════════════════════════════════════════════
 
     public CandidatesResult collectCandidates(int caretTokenIndex) {
-        return collectCandidates(caretTokenIndex, null);
-    }
-
-    public CandidatesResult collectCandidates(int caretTokenIndex, ParserRuleContext context) {
         result = new CandidatesResult();
         ruleExitCache.clear();
+        tokens = readTokens(parser.getTokenStream(), caretTokenIndex);
 
-        tokenStartIndex = context != null ? context.start.getTokenIndex() : 0;
-        int startRuleIndex = context != null ? context.getRuleIndex() : 0;
-        tokens = readTokens(parser.getTokenStream(), tokenStartIndex, caretTokenIndex);
-
+        int startRuleIndex = 0;
         enterRule(atn.ruleToStartState[startRuleIndex], 0, new RuleCallStack());
-
-        // FEATURE: RuleTextRangeResolver.java — chạy sau khi mọi thứ đã xong.
-        RuleTextRangeResolver.resolve(preferredRules, ruleExitCache, tokens, result);
         return result;
     }
 
@@ -65,144 +75,151 @@ public abstract class CompletionEngineBase {
     }
 
     // ════════════════════════════════════════════════════════════════
-    // BƯỚC 1 — Bước vào 1 mê cung, tại 1 vị trí lời nói cho trước
+    // BƯỚC 1 — vào 1 rule tại 1 token: tính các token index có thể thoát ra
     // ════════════════════════════════════════════════════════════════
-    protected final Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack stack) {
-        boolean atCaret = isAtCaret(tokenIndex);
 
-        RuleCallStack entered = stack.copy();
-        entered.push(start.ruleIndex, tokenIndex);
-
-        if (!atCaret) {
-            Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
-            Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
-            if (cached != null) {
-                return cached;
-            }
-            exitsByEntryToken.put(tokenIndex, Collections.emptySet()); // chặn đệ quy vô hạn trong lúc tính dở
-
-            Set<Integer> exits = computeExitsNotAtCaret(start, tokenIndex, entered);
-            exitsByEntryToken.put(tokenIndex, exits);
-            return exits;
+    protected final Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack caller) {
+        if (isAtCaret(tokenIndex)) {
+            return computeExitsAtCaret(start, tokenIndex, callStackInto(start, tokenIndex, caller));
         }
 
-        return computeExitsAtCaret(start, tokenIndex, entered);
+        Map<Integer, Set<Integer>> exitsByEntryToken = ruleExitCache.computeIfAbsent(start.ruleIndex, k -> new HashMap<>());
+        Set<Integer> cached = exitsByEntryToken.get(tokenIndex);
+        if (cached != null) {
+            return cached;
+        }
+        // Grammar ANTLR không có đệ quy trái nên không thể quay lại đúng (rule, token) này trong lúc đang tính;
+        // đặt tạm tập rỗng chỉ để chắc chắn không lặp vô hạn nếu điều đó xảy ra.
+        exitsByEntryToken.put(tokenIndex, Collections.emptySet());
+
+        Set<Integer> exits = computeExitsNotAtCaret(start, tokenIndex, callStackInto(start, tokenIndex, caller));
+        exitsByEntryToken.put(tokenIndex, exits);
+        return exits;
+    }
+
+    private static RuleCallStack callStackInto(ATNState ruleStart, int tokenIndex, RuleCallStack caller) {
+        RuleCallStack entered = caller.copy();
+        entered.push(ruleStart.ruleIndex, tokenIndex);
+        return entered;
+    }
+
+    // ── 3 hook: chỗ 2 chế độ khác nhau ────────────────────────────────
+
+    /** Còn token để khớp: các token index có thể thoát khỏi rule. Mặc định đi thẳng trong thân rule. */
+    protected Set<Integer> computeExitsNotAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
+        return walkRuleBody(start, tokenIndex, entered);
     }
 
     /**
-     * Còn lời để nói: tính xem mê cung này thoát ra ở những vị trí nào (chế độ tự quyết định cách tính).
+     * Rule được vào ngay tại caret: sinh gợi ý (ghi vào {@code result}) rồi trả về {@code {tokenIndex}}
+     * nếu rule có thể rỗng, ngược lại tập rỗng. Mặc định đi thẳng trong thân rule.
      */
-    protected abstract Set<Integer> computeExitsNotAtCaret(ATNState start, int tokenIndex, RuleCallStack entered);
+    protected Set<Integer> computeExitsAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
+        return walkRuleBody(start, tokenIndex, entered);
+    }
 
-    /**
-     * Đúng tại caret: sinh gợi ý (tác dụng phụ ghi vào {@code result}), rồi trả về xem mê cung có "rỗng" được không.
-     */
-    protected abstract Set<Integer> computeExitsAtCaret(ATNState start, int tokenIndex, RuleCallStack entered);
-
-    /**
-     * Mê cung {@code state} có "rỗng" được không — ra khỏi được mà không cần nói thêm gì?
-     */
+    /** Từ {@code state} có tới được cuối rule mà không cần khớp token nào không. */
     protected abstract boolean isNullable(ATNState state);
 
-    /**
-     * Quét {@code stack} tìm mê cung đặc biệt (ngoài cùng nhất nếu lồng nhau), ghi nhận vào {@code result} nếu tìm thấy.
-     */
-    protected boolean handlePreferredRules(RuleCallStack stack, CandidatesResult result) {
-        return PreferredRuleResolver.resolve(stack, preferredRules, result);
+    // ════════════════════════════════════════════════════════════════
+    // BƯỚC 2 — đi trong thân 1 rule: duyệt rộng (BFS) các transition của ATN
+    // ════════════════════════════════════════════════════════════════
+
+    /** Vị trí trong lúc đi: đang ở state nào của ATN, đã "ăn" tới token nào. */
+    private record Position(ATNState state, int tokenIndex) {
+        long key() {
+            return ((long) state.stateNumber << 32) | tokenIndex;
+        }
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // BƯỚC 2 — Dò từng cửa trong 1 phòng: BFS trên các transition của ATN
-    // ════════════════════════════════════════════════════════════════
-
+    /**
+     * Đi trong thân rule bắt đầu ở {@code start}; trả về các token index mà tại đó tới được cuối rule.
+     * {@code stack} là đường gọi tới rule này, cố định trong suốt lần đi.
+     */
     protected Set<Integer> walkRuleBody(ATNState start, int startTokenIndex, RuleCallStack stack) {
-        Set<Integer> ruleExits = new HashSet<>();
-        Set<String> visited = new HashSet<>();
-        Deque<PipelineEntry> queue = new ArrayDeque<>();
-        queue.push(new PipelineEntry(start, startTokenIndex, stack));
+        Set<Integer> exits = new HashSet<>();
+        Set<Long> visited = new HashSet<>();
+        Deque<Position> queue = new ArrayDeque<>();
+        queue.push(new Position(start, startTokenIndex));
+
         while (!queue.isEmpty()) {
-            PipelineEntry cur = queue.pop();
-            if (!visited.add(cur.state().stateNumber + ":" + cur.tokenIndex())) {
+            Position cur = queue.pop();
+            if (!visited.add(cur.key())) {
                 continue;
             }
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
-                boolean atCaretHere = isAtCaret(cur.tokenIndex());
-                if (atCaretHere) {
-                    handlePreferredRules(cur.stack(), result);
+                if (isAtCaret(cur.tokenIndex())) {
+                    reportPreferredRule(stack);
                 }
-                ruleExits.add(cur.tokenIndex());
+                exits.add(cur.tokenIndex());
                 continue;
             }
 
-            boolean atCaret = isAtCaret(cur.tokenIndex());
             for (Transition t : cur.state().getTransitions()) {
-                if (t instanceof RuleTransition rt) {
-                    handleRuleDoor(rt, cur, atCaret, queue);
-                } else if (t instanceof PredicateTransition pt) {
-                    handleFreeDoorWithCondition(pt, cur, queue);
-                } else if (t instanceof WildcardTransition wt) {
-                    handleWildcardDoor(wt, cur, atCaret, queue);
-                } else if (t.isEpsilon()) {
-                    handleFreeDoor(t, cur, queue);
-                } else {
-                    handlePasswordDoor(t, cur, atCaret, queue);
-                }
+                followTransition(t, cur, stack, queue);
             }
         }
-        return ruleExits;
+        return exits;
     }
 
-    protected void handleRuleDoor(RuleTransition rt, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
-        if (atCaret) {
-            RuleCallStack withTarget = cur.stack().copy();
-            withTarget.push(rt.target.ruleIndex, cur.tokenIndex());
-            if (PreferredRuleResolver.resolve(withTarget, preferredRules, result)) {
+    private void followTransition(Transition t, Position cur, RuleCallStack stack, Deque<Position> queue) {
+        if (t instanceof RuleTransition rt) {
+            followRuleCall(rt, cur, stack, queue);
+        } else if (t instanceof PredicateTransition pt) {
+            if (AtnPredicates.holds(parser, pt)) {
+                queue.push(new Position(pt.target, cur.tokenIndex()));
+            }
+        } else if (t instanceof WildcardTransition) {
+            followWildcard(t, cur, stack, queue);
+        } else if (t.isEpsilon()) {
+            queue.push(new Position(t.target, cur.tokenIndex()));
+        } else {
+            followTokenMatch(t, cur, stack, queue);
+        }
+    }
+
+    /** Ghi {@code stack} vào {@code result} nếu nó đi qua 1 preferred rule; true nếu đã ghi. */
+    private boolean reportPreferredRule(RuleCallStack stack) {
+        return PreferredRuleResolver.resolve(stack, preferredRules, result);
+    }
+
+    /** Transition gọi rule con: đi qua rule con rồi tiếp tục từ {@code followState} ở mọi token index thoát ra được. */
+    private void followRuleCall(RuleTransition rt, Position cur, RuleCallStack stack, Deque<Position> queue) {
+        if (isAtCaret(cur.tokenIndex())) {
+            RuleCallStack withCallee = stack.copy();
+            withCallee.push(rt.target.ruleIndex, cur.tokenIndex());
+            if (reportPreferredRule(withCallee)) {
+                // Preferred rule được báo thành rule, không bung thành token. Chỉ đi tiếp qua nó khi nó có thể rỗng.
                 if (isNullable(rt.target)) {
-                    queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
+                    queue.push(new Position(rt.followState, cur.tokenIndex()));
                 }
-                // Không nullable -> rule con này còn "nợ" ít nhất 1 token, không thể hoàn thành ngay tại caret -> không push gì thêm, dừng ở đây.
                 return;
             }
-            // resolve() không tìm thấy preferred-rule nào (kể cả rt.target không preferred) -> đi tiếp bình thường, đệ quy vào enterRule như dưới.
         }
-
-        for (int exitTok : enterRule(rt.target, cur.tokenIndex(), cur.stack())) {
-            queue.push(new PipelineEntry(rt.followState, exitTok, cur.stack()));
+        for (int exit : enterRule(rt.target, cur.tokenIndex(), stack)) {
+            queue.push(new Position(rt.followState, exit));
         }
     }
 
-    protected void handleFreeDoorWithCondition(PredicateTransition pt, PipelineEntry cur, Deque<PipelineEntry> queue) {
-        if (pt.getPredicate().eval(parser, ParserRuleContext.EMPTY)) {
-            queue.push(new PipelineEntry(pt.target, cur.tokenIndex(), cur.stack()));
-        }
-    }
-
-    protected void handleFreeDoor(Transition t, PipelineEntry cur, Deque<PipelineEntry> queue) {
-        queue.push(new PipelineEntry(t.target, cur.tokenIndex(), cur.stack()));
-    }
-
-    /**
-     * Cửa "gõ gì cũng được" (dấu `.` trong grammar) — label() của nó luôn null,
-     * nên cần xử lý riêng thay vì rơi vào handlePasswordDoor.
-     */
-    protected void handleWildcardDoor(WildcardTransition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
-        if (!atCaret) {
-            queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
+    /** Dấu {@code .} trong grammar (khớp token bất kỳ) — {@code label()} của nó là null nên không đi qua {@link #followTokenMatch}. */
+    private void followWildcard(Transition t, Position cur, RuleCallStack stack, Deque<Position> queue) {
+        if (!isAtCaret(cur.tokenIndex())) {
+            queue.push(new Position(t.target, cur.tokenIndex() + 1));
             return;
         }
-        if (handlePreferredRules(cur.stack(), result)) {
+        if (reportPreferredRule(stack)) {
             return;
         }
-        IntervalSet all = IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
-        for (int sym : all.toList()) {
-            if (!ignoredTokens.containsKey(sym)) {
-                result.tokens.putIfAbsent(sym, Collections.emptyList());
+        for (int type : IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType).toList()) {
+            if (!ignoredTokens.containsKey(type)) {
+                result.tokens.putIfAbsent(type, Collections.emptyList());
             }
         }
     }
 
-    protected void handlePasswordDoor(Transition t, PipelineEntry cur, boolean atCaret, Deque<PipelineEntry> queue) {
+    /** Transition khớp token (Atom / Set / NotSet): trước caret thì phải khớp token đã gõ, tại caret thì là gợi ý. */
+    private void followTokenMatch(Transition t, Position cur, RuleCallStack stack, Deque<Position> queue) {
         IntervalSet label = t.label();
         if (label == null || label.size() == 0) {
             return;
@@ -211,35 +228,33 @@ public abstract class CompletionEngineBase {
             label = label.complement(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType);
         }
 
-        if (atCaret) {
-            if (handlePreferredRules(cur.stack(), result)) {
-                return;
+        if (!isAtCaret(cur.tokenIndex())) {
+            if (label.contains(tokens.get(cur.tokenIndex()).type())) {
+                queue.push(new Position(t.target, cur.tokenIndex() + 1));
             }
-            List<Integer> syms = label.toList();
-            List<Integer> following = syms.size() == 1 ? FollowingTokensFinder.getFollowingTokens(t, ignoredTokens) : Collections.emptyList();
-            for (int sym : syms) {
-                if (ignoredTokens.containsKey(sym)) {
-                    continue;
-                }
-                if (!result.tokens.containsKey(sym)) {
-                    result.tokens.put(sym, following);
-                } else if (!result.tokens.get(sym).equals(following)) {
-                    result.tokens.put(sym, Collections.emptyList());
-                }
+            return;
+        }
+
+        if (reportPreferredRule(stack)) {
+            return;
+        }
+        List<Integer> types = label.toList();
+        // Chỉ khi transition có đúng 1 token thì mới biết chắc chuỗi token đi liền sau nó.
+        List<Integer> following = types.size() == 1 ? FollowingTokensFinder.getFollowingTokens(t, ignoredTokens) : Collections.emptyList();
+        for (int type : types) {
+            if (!ignoredTokens.containsKey(type)) {
+                result.addToken(type, following);
             }
-        } else if (label.contains(tokens.get(cur.tokenIndex()).type())) {
-            queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
-        } else {
-            // Sai mật khẩu -> nhánh này chết ở đây, không push gì cả (giữ nguyên hành vi thuật toán).
         }
     }
 
     // ════════════════════════════════════════════════════════════════
-    // Đọc trước "những lời đã nói" — token từ tokenStartIndex tới caret
+    // Đọc các token từ đầu câu tới token caret
     // ════════════════════════════════════════════════════════════════
-    protected static List<InputToken> readTokens(TokenStream stream, int tokenStartIndex, int caretTokenIndex) {
+
+    protected static List<InputToken> readTokens(TokenStream stream, int caretTokenIndex) {
         int saved = stream.index();
-        stream.seek(tokenStartIndex);
+        stream.seek(0);
         List<InputToken> result = new ArrayList<>();
         for (int i = 1; ; i++) {
             var t = stream.LT(i);
@@ -248,8 +263,5 @@ public abstract class CompletionEngineBase {
         }
         stream.seek(saved);
         return result;
-    }
-
-    protected record PipelineEntry(ATNState state, int tokenIndex, RuleCallStack stack) {
     }
 }

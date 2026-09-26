@@ -1,29 +1,23 @@
 package com.naviq.completion.syntactic.engine.support;
 
-import lombok.Getter;
-
 import java.util.*;
 
 /**
- * FEATURE: dữ liệu phụ trợ cho việc "gộp gợi ý về mê cung đặc biệt NGOÀI CÙNG"
- * (xem PreferredRuleResolver). KHÔNG thuộc lõi thuật toán — nếu bỏ hẳn feature
- * này đi, engine vẫn chạy đúng, chỉ là không gộp được các mê cung đặc biệt lồng
- * nhau về đúng cái ngoài cùng.
- * <p>
- * Ngăn xếp (bất biến) ghi lại "đang lồng trong những mê cung nào, tại vị trí
- * lời nói nào". Dùng linked-list chia sẻ (structural sharing) qua copy(): push()
- * ở nhánh này không ảnh hưởng nhánh khác.
+ * Đường gọi rule: "đang lồng trong những rule nào, mỗi rule được vào ở token index nào".
+ * Là linked-list dùng chung phần đuôi (structural sharing): {@link #copy()} là O(1) và {@link #push}
+ * trên bản copy không ảnh hưởng bản gốc.
  */
-@Getter
 public final class RuleCallStack {
 
     public record RuleFrame(int ruleId, int tokenIndex) {
+        /** Rule đến từ follow-set tính trước nên không có token index thật. */
         public static final int NO_TOKEN = -1;
     }
 
     private static final class Node {
         final RuleFrame frame;
         final Node parent;
+
         Node(RuleFrame frame, Node parent) {
             this.frame = frame;
             this.parent = parent;
@@ -46,14 +40,6 @@ public final class RuleCallStack {
         size++;
     }
 
-    public RuleFrame pop() {
-        if (head == null) throw new NoSuchElementException("RuleCallStack is empty");
-        RuleFrame f = head.frame;
-        head = head.parent;
-        size--;
-        return f;
-    }
-
     public boolean contains(int ruleId) {
         for (Node n = head; n != null; n = n.parent) {
             if (n.frame.ruleId() == ruleId) return true;
@@ -73,7 +59,6 @@ public final class RuleCallStack {
         for (RuleFrame f : other.frames()) push(f.ruleId(), f.tokenIndex());
     }
 
-    /** "Nhân bản" nhẹ: chỉ chia sẻ lại con trỏ head hiện tại, O(1), không copy sâu. */
     public RuleCallStack copy() {
         return new RuleCallStack(head, size);
     }

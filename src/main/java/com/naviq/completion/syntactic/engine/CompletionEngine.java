@@ -7,13 +7,13 @@ import java.util.Map;
 
 public class CompletionEngine {
 
-    private final CompletionEngineBase antlrCompletionEngineBase;
+    private final CompletionEngineBase engine;
 
     public CompletionEngine(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
-        this.antlrCompletionEngineBase = new CompletionEngineDefault(parser, ignoredTokens, preferredRules);
+        this.engine = new CompletionEngineDefault(parser, ignoredTokens, preferredRules);
     }
 
     public CandidatesResult collectCandidates(int caretTokenIndex) {
-        return antlrCompletionEngineBase.collectCandidates(caretTokenIndex, null);
+        return engine.collectCandidates(caretTokenIndex);
     }
 }

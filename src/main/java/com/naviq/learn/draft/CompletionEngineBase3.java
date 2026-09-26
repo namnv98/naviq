@@ -3,7 +3,6 @@ package com.naviq.learn.draft;
 import com.naviq.completion.syntactic.engine.support.FollowingTokensFinder;
 import com.naviq.completion.syntactic.engine.support.PreferredRuleResolver;
 import com.naviq.completion.syntactic.engine.support.RuleCallStack;
-import com.naviq.completion.syntactic.engine.support.RuleTextRangeResolver;
 import com.naviq.completion.model.CandidatesResult;
 import com.naviq.completion.model.InputToken;
 import org.antlr.v4.runtime.Parser;
@@ -99,8 +98,6 @@ public abstract class CompletionEngineBase3 {
 
         enterRule(atn.ruleToStartState[startRuleIndex], 0, new RuleCallStack());
 
-        // FEATURE: RuleTextRangeResolver.java — chạy sau khi mọi thứ đã xong.
-        RuleTextRangeResolver.resolve(preferredRules, ruleExitCache, tokens, result);
         return result;
     }
 

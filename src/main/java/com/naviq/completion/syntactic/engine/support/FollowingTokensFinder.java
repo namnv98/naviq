@@ -11,11 +11,8 @@ import java.util.*;
  * cửa cụ thể, để IDE có thể tự gõ giúp cả cụm 1 lần thay vì bắt người dùng
  * gõ từng từ (ví dụ chọn gợi ý "NOT" thì tự gõ luôn "NOT EXISTS").
  * <p>
- * KHÔNG liên quan gì tới cờ {@code useFollowSets} — đây là 1 lượt dò ATN tại
- * chỗ (on-demand), không cache, không tính trước, không phụ thuộc
- * {@code FollowSetsByState} hay bất kỳ cơ chế bật/tắt nào. Trước đây nằm
- * chung trong FollowSetsByState.java, tách riêng ra đây để tránh hiểu lầm là
- * nó bị chi phối bởi cờ follow-set — nó luôn chạy, dù bật hay tắt cờ đó.
+ * Chỉ đi theo chuỗi AtomTransition liền nhau (ANTLR nối thẳng các token liên tiếp
+ * trong 1 sequence), gặp epsilon/rule/nhánh là dừng — nên luôn kết thúc, không cần visited.
  */
 public class FollowingTokensFinder {
 

@@ -1,8 +1,7 @@
 package com.naviq.completion.syntactic.engine;
 
-import com.naviq.completion.syntactic.engine.support.RuleCallStack;
+import com.naviq.completion.syntactic.engine.support.AtnPredicates;
 import org.antlr.v4.runtime.Parser;
-import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.atn.ATNState;
 import org.antlr.v4.runtime.atn.PredicateTransition;
 import org.antlr.v4.runtime.atn.RuleTransition;
@@ -11,11 +10,8 @@ import org.antlr.v4.runtime.atn.Transition;
 import java.util.*;
 
 /**
- * CHẾ ĐỘ TẮT FOLLOW-SET: luôn dò cửa sống ({@code walkRuleBody}), không
- * tra/tính follow-set gì cả. Sau khi gộp khung {@code enterRule} (đọc/ghi
- * cache, dựng RuleCallStack) lên {@code CompletionEngineBase}, file này giờ
- * chỉ còn đúng phần khác biệt duy nhất: "cách tính exits" — với chế độ này,
- * luôn luôn là gọi thẳng {@code walkRuleBody}, dù còn lời hay tại caret.
+ * Chế độ đơn giản: luôn đi thẳng trong thân rule ({@code walkRuleBody}, là cài đặt mặc định của Base),
+ * và tự dò ATN để biết 1 rule có rỗng được không.
  */
 public class CompletionEngineDefault extends CompletionEngineBase {
 
@@ -24,28 +20,15 @@ public class CompletionEngineDefault extends CompletionEngineBase {
     }
 
     @Override
-    protected Set<Integer> computeExitsNotAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
-        return walkRuleBody(start, tokenIndex, entered);
-    }
-
-    @Override
-    protected Set<Integer> computeExitsAtCaret(ATNState start, int tokenIndex, RuleCallStack entered) {
-        return walkRuleBody(start, tokenIndex, entered);
-    }
-
-    @Override
     protected boolean isNullable(ATNState state) {
-        return canExitWithoutConsumingToken(parser, state);
+        return canReachRuleEndWithoutToken(state);
     }
 
     /**
-     * true nếu, xuất phát từ {@code start}, có thể đi tới RULE_STOP mà không
-     * cần khớp bất kỳ token nào — chỉ qua epsilon, predicate (đánh giá true),
-     * hoặc RuleTransition (đệ quy hỏi lại đúng câu hỏi này cho rule con).
-     * Cửa mật khẩu (Atom/Set/NotSet/Wildcard) bị bỏ qua vì đi qua nó bắt buộc
-     * phải tốn 1 token.
+     * Từ {@code start} có tới được RULE_STOP chỉ qua epsilon, predicate đúng, hoặc rule con cũng rỗng được không.
+     * Transition khớp token (Atom/Set/NotSet/Wildcard) bị bỏ qua vì đi qua nó bắt buộc tốn 1 token.
      */
-    public static boolean canExitWithoutConsumingToken(Parser parser, ATNState start) {
+    private boolean canReachRuleEndWithoutToken(ATNState start) {
         Set<Integer> visited = new HashSet<>();
         Deque<ATNState> queue = new ArrayDeque<>();
         queue.push(start);
@@ -57,22 +40,20 @@ public class CompletionEngineDefault extends CompletionEngineBase {
             if (s.getStateType() == ATNState.RULE_STOP) {
                 return true;
             }
-            for (Transition transition : s.getTransitions()) {
-                if (transition instanceof RuleTransition ruleTransition) {
-                    if (canExitWithoutConsumingToken(parser, ruleTransition.target)) {
-                        queue.push(ruleTransition.followState);
+            for (Transition t : s.getTransitions()) {
+                if (t instanceof RuleTransition rt) {
+                    if (canReachRuleEndWithoutToken(rt.target)) {
+                        queue.push(rt.followState);
                     }
-                } else if (transition instanceof PredicateTransition predicateTransition) {
-                    if (predicateTransition.getPredicate().eval(parser, ParserRuleContext.EMPTY)) {
-                        queue.push(transition.target);
+                } else if (t instanceof PredicateTransition pt) {
+                    if (AtnPredicates.holds(parser, pt)) {
+                        queue.push(pt.target);
                     }
-                } else if (transition.isEpsilon()) {
-                    queue.push(transition.target);
+                } else if (t.isEpsilon()) {
+                    queue.push(t.target);
                 }
-                // cửa mật khẩu -> bỏ qua, nhánh này bắt buộc phải nói thêm
             }
         }
         return false;
     }
-
 }
