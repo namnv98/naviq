@@ -1,6 +1,6 @@
 package com.naviq.completion.syntactic.engine;
 
-import com.naviq.completion.syntactic.engine.feature.RuleCallStack;
+import com.naviq.completion.syntactic.engine.support.RuleCallStack;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.atn.ATNState;

@@ -1,11 +1,11 @@
 package com.naviq.cli;
 
-import com.naviq.cli.layout.BottomStatusBar;
-import com.naviq.cli.layout.DataViewTable;
-import com.naviq.cli.terminal.CustomHighlighter;
+import com.naviq.cli.view.BottomStatusBar;
+import com.naviq.cli.view.DataViewTable;
+import com.naviq.cli.terminal.SqlHighlighter;
 import com.naviq.cli.terminal.MenuCompleter;
 import com.naviq.datasource.PostgresDataSource;
-import com.naviq.datasource.SchemaIndex;
+import com.naviq.schema.SchemaIndex;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.*;
 import org.jline.reader.impl.DefaultParser;
@@ -47,7 +47,7 @@ public class NaviQCli {
             .encoding(StandardCharsets.UTF_8)
             .build();
 
-        Highlighter highlighter = new CustomHighlighter();
+        Highlighter highlighter = new SqlHighlighter();
 
         BottomStatusBar statusBar = new BottomStatusBar(terminal);
         Path historyFile = Paths.get("/home/namnv/Downloads/demo-antlr/sql_history.txt");

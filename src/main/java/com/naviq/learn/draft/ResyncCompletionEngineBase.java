@@ -1,8 +1,7 @@
 package com.naviq.learn.draft;
 
 import com.naviq.completion.syntactic.engine.CompletionEngineBase;
-import com.naviq.completion.syntactic.engine.feature.RuleResyncSkipper;
-import com.naviq.completion.syntactic.engine.model.CandidatesResult;
+import com.naviq.completion.model.CandidatesResult;
 import org.antlr.v4.runtime.Parser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.atn.RuleTransition;

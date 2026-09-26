@@ -1,6 +1,6 @@
 package com.naviq.completion.syntactic.engine;
 
-import com.naviq.completion.syntactic.engine.model.CandidatesResult;
+import com.naviq.completion.model.CandidatesResult;
 import org.antlr.v4.runtime.Parser;
 
 import java.util.Map;

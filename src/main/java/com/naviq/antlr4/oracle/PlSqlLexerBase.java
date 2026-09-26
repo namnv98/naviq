@@ -3,9 +3,7 @@ package com.naviq.antlr4.oracle;
 import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.Lexer;
 
-import org.antlr.v4.runtime.CharStream;
 import org.antlr.v4.runtime.IntStream;
-import org.antlr.v4.runtime.Lexer;
 import org.antlr.v4.runtime.Token;
 
 import java.util.HashSet;

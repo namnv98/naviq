@@ -1,12 +1,11 @@
 package com.naviq.cli.terminal;
 
-import com.naviq.completion.suggests.CompletionHistory;
-import com.naviq.completion.suggests.CompletionInputPreparer;
-import com.naviq.completion.suggests.SuggestFilter;
-import com.naviq.completion.suggests.postgresql.CompletionEngine;
-import com.naviq.model.Suggest;
-import com.naviq.cli.anchor.AnchorStrategyUtil;
-import com.naviq.cli.layout.TerminalMenu;
+import com.naviq.completion.suggestion.CompletionHistory;
+import com.naviq.completion.suggestion.CompletionInputPreparer;
+import com.naviq.completion.suggestion.SuggestFilter;
+import com.naviq.completion.suggestion.postgresql.PostgresSuggestionService;
+import com.naviq.completion.model.Suggestion;
+import com.naviq.cli.anchor.AnchorStrategies;
 import org.jline.keymap.BindingReader;
 import org.jline.keymap.KeyMap;
 import org.jline.reader.Binding;
@@ -180,14 +179,14 @@ public class MenuCompleter {
         }
 
         CompletionInputPreparer.PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
-        List<Suggest> suggests = CompletionEngine.suggests(prepareCompletionInput);
+        List<Suggestion> suggests = PostgresSuggestionService.suggests(prepareCompletionInput);
 
         if (suggests.isEmpty()) {
             hide();
             return;
         }
         List<AttributedString> lines = render(suggests, -1, 0, prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
-        terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE), 1, 1, linesBelowCursor(reader, sql, cursor));
+        terminalMenu.show(lines, AnchorStrategies.smart(lines, PAGE_SIZE), 1, 1, linesBelowCursor(reader, sql, cursor));
         autosuggestionOpen = true;
     }
 
@@ -198,7 +197,7 @@ public class MenuCompleter {
         String sql = reader.getBuffer().toString();
         int cursor = reader.getBuffer().cursor();
         CompletionInputPreparer.PrepareCompletionInput prepareCompletionInput = CompletionInputPreparer.buildInput(sql, cursor);
-        List<Suggest> suggests = CompletionEngine.suggests(prepareCompletionInput);
+        List<Suggestion> suggests = PostgresSuggestionService.suggests(prepareCompletionInput);
 
         if (suggests.isEmpty()) {
             return;
@@ -219,7 +218,7 @@ public class MenuCompleter {
         try {
             while (true) {
 
-                List<Suggest> filtered = SuggestFilter.filter(suggests, prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
+                List<Suggestion> filtered = SuggestFilter.filter(suggests, prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
 
                 if (filtered.isEmpty()) {
                     selected = 0;
@@ -237,10 +236,10 @@ public class MenuCompleter {
                 List<AttributedString> lines = render(filtered, selected, scroll, prepareCompletionInput.prefix(),
                         prepareCompletionInput.dotMode());
 
-                terminalMenu.show(lines, AnchorStrategyUtil.smart(lines, PAGE_SIZE + 1), 1, 1,
+                terminalMenu.show(lines, AnchorStrategies.smart(lines, PAGE_SIZE + 1), 1, 1,
                         linesBelowCursor(reader, sql, cursor));
 
-                Suggest current = filtered.isEmpty() ? null : filtered.get(selected);
+                Suggestion current = filtered.isEmpty() ? null : filtered.get(selected);
                 if (current != null) {
                     String ghost = buildGhost(current.getKey(), prepareCompletionInput.prefix(), prepareCompletionInput.dotMode());
                     renderGhost(reader, ghost);
@@ -295,7 +294,7 @@ public class MenuCompleter {
 
     // ───────────────────────────────────────────────────
     private static List<AttributedString> render(
-            List<Suggest> items,
+            List<Suggestion> items,
             int selected,
             int scroll,
             String prefix,
@@ -312,12 +311,12 @@ public class MenuCompleter {
 
         for (int i = 0; i < visible; i++) {
             int idx = scroll + i;
-            Suggest s = items.get(idx);
+            Suggestion s = items.get(idx);
 
             boolean sel = idx == selected;
 
             String key = SuggestFilter.display(s.getKey(), dot);
-            String type = s.getType();
+            String type = s.getType().label();
 
             AttributedStringBuilder row = new AttributedStringBuilder();
 
@@ -385,7 +384,7 @@ public class MenuCompleter {
     }
 
     // ───────────────────────────────────────────────────
-    private static void insert(LineReaderImpl reader, Suggest s, String prefix, boolean dot) {
+    private static void insert(LineReaderImpl reader, Suggestion s, String prefix, boolean dot) {
         CompletionHistory.record(s.getKey()); // ghi nhận lựa chọn - dùng để ưu tiên lần sau
         reader.getBuffer().move(-prefix.length());
         for (int i = 0; i < prefix.length(); i++) {
@@ -452,14 +451,14 @@ public class MenuCompleter {
         return s + " ".repeat(w - s.length());
     }
 
-    private static int[] calcWidth(List<Suggest> items, boolean dot) {
+    private static int[] calcWidth(List<Suggestion> items, boolean dot) {
         int valueW = 0;
         int typeW = 0;
         int columnTypeW = 0;
 
-        for (Suggest s : items) {
+        for (Suggestion s : items) {
             valueW = Math.max(valueW, SuggestFilter.display(s.getKey(), dot).length());
-            typeW = Math.max(typeW, s.getType().length());
+            typeW = Math.max(typeW, s.getType().label().length());
 
             String colType = s.getColumnType() == null ? "" : s.getColumnType();
             columnTypeW = Math.max(columnTypeW, colType.length());
