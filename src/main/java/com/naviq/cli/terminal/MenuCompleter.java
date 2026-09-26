@@ -84,8 +84,12 @@ public class MenuCompleter {
 
         impl.getWidgets().put("enter-autosuggestion", () -> {
             hide();
+            int lengthBefore = impl.getBuffer().length();
             impl.callWidget(LineReader.ACCEPT_LINE);
-            if (multiLine) {
+            // Multi-line chưa gặp ';' -> JLine chèn '\n' và vẫn đang nhập (buffer dài ra): vẽ lại menu cho dòng mới.
+            // Đã chấp nhận câu lệnh thì KHÔNG vẽ menu nữa, kẻo nó đè lên kết quả in ra sau đó.
+            boolean stillEditing = impl.getBuffer().length() != lengthBefore;
+            if (multiLine && stillEditing) {
                 autosuggestion(impl);
             }
             return true;
