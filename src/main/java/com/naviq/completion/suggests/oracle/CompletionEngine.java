@@ -128,9 +128,17 @@ public class CompletionEngine {
         boolean isOrderByElementsWithoutComma = isImmediatelyAfterOrderByElementsNoComma(syntacticResults);
         boolean isRegularIdOrderByWithoutComma = isOrderByElementsWithoutComma;
 
+        // "JSON_VALUE(col, path RETURNING VARCHAR2 |)" - general_element khớp ở 1 derivation HOÀN
+        // TOÀN KHÁC (ancestor tận atom của expression NGOÀI CÙNG, không hề đi qua
+        // json_value_return_clause/json_value_return_type) cùng lúc với json_value_return_type -
+        // đây là vị trí chỉ nên gợi ý datatype, cột lọt vào là noise. Suppress general_element khi
+        // json_value_return_type/json_query_return_type CŨNG được match cùng lúc.
+        boolean isGeneralElementJsonReturnType = matchedRuleNames.contains("json_value_return_type")
+                || matchedRuleNames.contains("json_query_return_type");
+
         boolean shouldSuggestColumnsViaGeneralElement = matchedRuleNames.contains("general_element")
                 && !isGeneralElementCursorName && !isGeneralElementAssignTarget && !isGeneralElementInsertValues
-                && !isOrderByElementsWithoutComma;
+                && !isOrderByElementsWithoutComma && !isGeneralElementJsonReturnType;
 
         // "regular_id" cũng bị overload giống "general_element" - trong VALUES (|), ATN còn
         // khớp cả nhánh other_function (hàm không có tham số, vd COUNT) đi qua regular_id, nên
@@ -149,6 +157,38 @@ public class CompletionEngine {
                 && semanticResult.ddlTargetAlias() != null
                 && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_merge_element);
 
+        // "MERGE ... WHEN NOT MATCHED THEN INSERT (|)" - paren_column_list ở đây (khác VALUES(...))
+        // chỉ nên gợi ý cột bảng TARGET (bảng đang INSERT vào), không phải bảng USING/source - y hệt
+        // lý do isColumnNameMergeUpdateTarget, chỉ khác ancestor rule (merge_insert_clause thay vì
+        // merge_element).
+        boolean isColumnNameMergeInsertTarget = matchedRuleNames.contains("column_name")
+                && semanticResult.ddlTargetAlias() != null
+                && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_merge_insert_clause);
+
+        // "JOIN ... USING (|)" - paren_column_list dùng chung y hệt INSERT column-list, nhưng theo
+        // đúng ngữ nghĩa Oracle USING chỉ CỘT CHUNG TÊN giữa các bảng tham gia join mới hợp lệ,
+        // không phải mọi cột của mọi bảng.
+        boolean isColumnNameJoinUsing = matchedRuleNames.contains("column_name")
+                && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_join_using_part);
+
+        // "ALTER TABLE ... ADD new_col |" / "... MODIFY existing_col |" - column_name/regular_id
+        // của chính add_column_clause/modify_column_clauses lại xuất hiện làm candidate NGAY TẠI vị
+        // trí đang chờ datatype (sau khi tên cột đã gõ xong) - đây là artifact của việc ATN dò được
+        // NHIỀU alternative cùng bắt đầu bằng column_name (column_definition/virtual_column_definition
+        // cho ADD; modify_col_properties/modify_col_visibility/modify_col_substitutable cho MODIFY),
+        // ghi đè lẫn nhau qua PreferredRuleResolver.recordIfMoreRelevant (chỉ giữ 1 path "gần nhất"
+        // mỗi rule id). KHÔNG thể loại trừ bằng ancestor đơn thuần vì CÙNG ancestor đó (vd
+        // modify_col_visibility) cũng là path hợp lệ DUY NHẤT được ghi nhận cho vị trí ĐẦU (chưa gõ
+        // tên cột - lúc đó ĐÚNG là cần gợi ý cột có sẵn để chọn sửa/xoá). Phân biệt bằng tín hiệu
+        // đáng tin cậy hơn: "datatype" CŨNG được match cùng lúc CHỈ xảy ra khi tên cột đã gõ xong
+        // (đang chờ kiểu dữ liệu) - ở vị trí đầu, "datatype" không thể là candidate hợp lệ.
+        boolean isAlterColumnAwaitingDatatype = matchedRuleNames.contains("datatype")
+                && (isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_add_column_clause)
+                        || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_modify_column_clauses));
+        boolean isAlterRegularIdAwaitingDatatype = matchedRuleNames.contains("datatype")
+                && (isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_add_column_clause)
+                        || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_modify_column_clauses));
+
         // "u." đứng ngay trước 1 lỗi cú pháp khác (vd chuỗi chưa đóng phía trước) - PlSqlParser.g4
         // KHÔNG patch general_element_part cho phép PERIOD cụt (id_expression bắt buộc ngay sau
         // PERIOD, xem javadoc đầu SemanticScope.java) nên walk ATN cú pháp không tìm được rule nào
@@ -158,9 +198,15 @@ public class CompletionEngine {
         // qualifier đó, không thể chờ matchedRuleNames vì nó không bao giờ khớp trong case này.
         boolean qualifierResolvedByDanglingDot = semanticResult.qualifier() != null;
 
-        if (isColumnNameMergeUpdateTarget) {
+        boolean shouldSuggestColumnsViaColumnName = matchedRuleNames.contains("column_name")
+                && !isColumnNameMergeInsertTarget && !isColumnNameJoinUsing && !isAlterColumnAwaitingDatatype;
+
+        if (isColumnNameMergeUpdateTarget || isColumnNameMergeInsertTarget) {
             addTargetOnlyColumnSuggestions(suggests, semanticResult);
-        } else if (qualifierResolvedByDanglingDot || matchedRuleNames.contains("column_name") || shouldSuggestColumnsViaGeneralElement || shouldSuggestColumnsViaRegularId) {
+        } else if (isColumnNameJoinUsing) {
+            addCommonColumnSuggestions(suggests, semanticResult);
+        } else if (qualifierResolvedByDanglingDot || shouldSuggestColumnsViaColumnName || shouldSuggestColumnsViaGeneralElement
+                || (shouldSuggestColumnsViaRegularId && !isAlterRegularIdAwaitingDatatype)) {
             addColumnSuggestions(suggests, semanticResult);
         }
 
@@ -257,6 +303,38 @@ public class CompletionEngine {
             String alias = AliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
             suggests.add(Suggest.of(alias, "alias"));
         }
+    }
+
+    private static java.util.Map<String, List<Suggest>> columnsPerVisibleAlias(SemanticAnalyzer.Result sem) {
+        var perAlias = new java.util.LinkedHashMap<String, List<Suggest>>();
+        sem.visibleAliases().forEach((alias, table) -> {
+            var cols = new ArrayList<Suggest>();
+            var derived = sem.visibleDerivedScopes().get(alias);
+            if (derived != null) {
+                DerivedColumnExpander.addDerivedColumns(cols, alias, derived);
+            } else {
+                SchemaIndex.getColumnsOfTable(table).forEach(c -> cols.add(Suggest.of(alias + "." + c.name(), "column", c.dataType())));
+            }
+            perAlias.put(alias, cols);
+        });
+        return perAlias;
+    }
+
+    /**
+     * JOIN ... USING (|): chỉ gợi ý cột có TÊN xuất hiện ở ít nhất 2 alias visible (cột chung
+     * giữa các bảng tham gia join), mỗi alias đóng góp 1 gợi ý dạng alias.cột. Mirror y hệt
+     * Postgres CompletionEngine.addCommonColumnSuggestions.
+     */
+    private static void addCommonColumnSuggestions(List<Suggest> suggests, SemanticAnalyzer.Result sem) {
+        var perAlias = columnsPerVisibleAlias(sem);
+        var aliasCountByColumn = new java.util.HashMap<String, Integer>();
+        perAlias.values().forEach(cols -> cols.stream()
+                .map(s -> s.getKey().substring(s.getKey().indexOf('.') + 1).toLowerCase())
+                .distinct()
+                .forEach(name -> aliasCountByColumn.merge(name, 1, Integer::sum)));
+        perAlias.values().forEach(cols -> cols.stream()
+                .filter(s -> aliasCountByColumn.get(s.getKey().substring(s.getKey().indexOf('.') + 1).toLowerCase()) >= 2)
+                .forEach(suggests::add));
     }
 
     /** Như addColumnSuggestions, nhưng chỉ gợi ý cột của đúng 1 alias - {@link SemanticAnalyzer.Result#ddlTargetAlias()}. */
