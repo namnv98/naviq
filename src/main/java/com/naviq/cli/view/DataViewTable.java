@@ -13,6 +13,7 @@ import org.jline.builtins.Options;
 import org.jline.builtins.Source;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
+import org.jline.utils.WCWidth;
 
 public class DataViewTable {
 
@@ -49,23 +50,25 @@ public class DataViewTable {
 
         Attributes savedAttrs = terminal.enterRawMode();
         try {
-            while (true) {
-                int ch = terminal.input().read();
-
-                if (ch == 'f' || ch == 'F') {
-                    out.print("\r\u001b[2K");
-                    out.flush();
-                    paginate(terminal, "\n\n" + render(columns, rows, widths));
-                    break;
-                }
-                if (ch == 'q' || ch == 'Q' || ch == 13 || ch == 3 || ch == 4 || ch < 0) {
-                    break;
-                }
+            int ch = terminal.reader().read();
+            if (ch == 'f' || ch == 'F') {
+                out.print("\r\u001b[2K");
+                out.flush();
+                paginate(terminal, "\n\n" + render(columns, rows, widths));
+            } else if (ch == 27) {
+                discardEscapeSequence(terminal);
             }
         } finally {
             terminal.setAttributes(savedAttrs);
             out.print("\r\u001b[2K");
             out.flush();
+        }
+    }
+
+    /** Phím mũi tên / F-key gửi cả chuỗi ESC[...; bỏ phần đuôi để nó không lọt vào dòng lệnh kế tiếp. */
+    private static void discardEscapeSequence(Terminal terminal) throws Exception {
+        while (terminal.reader().peek(30) >= 0) {
+            terminal.reader().read();
         }
     }
 
@@ -272,11 +275,20 @@ public class DataViewTable {
     // Clean
     // -------------------------------------------------------------------------
 
+    /** Xuống dòng / tab -> 1 khoảng trắng; bỏ mọi ký tự điều khiển khác (kể cả ESC) để không phá vỡ bảng. */
     private static String clean(String s) {
         if (s == null) {
             return "";
         }
-        return s.replace("\n", " ").replace("\r", "");
+        StringBuilder sb = new StringBuilder(s.length());
+        s.codePoints().forEach(cp -> {
+            if (cp == '\n' || cp == '\t') {
+                sb.append(' ');
+            } else if (!Character.isISOControl(cp)) {
+                sb.appendCodePoint(cp);
+            }
+        });
+        return sb.toString();
     }
 
     // -------------------------------------------------------------------------
@@ -293,7 +305,7 @@ public class DataViewTable {
 
         for (int i = 0; i < s.length(); ) {
             int cp = s.codePointAt(i);
-            int cw = isFullWidth(cp) ? 2 : 1;
+            int cw = charWidth(cp);
 
             // 🔥 dùng ASCII "..." thay vì "…"
             if (w + cw > maxWidth - 3) {
@@ -317,24 +329,14 @@ public class DataViewTable {
         int width = 0;
         for (int i = 0; i < s.length(); ) {
             int cp = s.codePointAt(i);
-            width += isFullWidth(cp) ? 2 : 1;
+            width += charWidth(cp);
             i += Character.charCount(cp);
         }
         return width;
     }
 
-    private static boolean isFullWidth(int cp) {
-        Character.UnicodeBlock b = Character.UnicodeBlock.of(cp);
-        return b == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
-                || b == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS
-                || b == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
-                || b == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B
-                || b == Character.UnicodeBlock.HANGUL_SYLLABLES
-                || b == Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO
-                || b == Character.UnicodeBlock.HIRAGANA
-                || b == Character.UnicodeBlock.KATAKANA
-                || b == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS
-                || (cp >= 0xFF01 && cp <= 0xFF60)
-                || (cp >= 0x1F300 && cp <= 0x1F9FF);
+    /** Số ô terminal mà 1 ký tự chiếm: 0 cho dấu kết hợp (ZWJ, dấu tiếng Việt tách rời), 2 cho CJK / emoji. */
+    private static int charWidth(int cp) {
+        return Math.max(0, WCWidth.wcwidth(cp));
     }
 }

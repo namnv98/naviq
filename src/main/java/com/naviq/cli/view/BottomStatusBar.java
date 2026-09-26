@@ -1,6 +1,5 @@
 package com.naviq.cli.view;
 
-import org.jline.reader.impl.LineReaderImpl;
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
@@ -53,14 +52,6 @@ public class BottomStatusBar {
 
     public void setQueryStatus(String s) {
         this.queryStatus = s;
-    }
-
-    private void updateAndRender(LineReaderImpl impl) {
-        var c = impl.getTerminal().getCursorPosition(null);
-        if (c != null) {
-            updateCursor(c.getY() + 1, c.getX() + 1);
-        }
-        render();
     }
 
     /**

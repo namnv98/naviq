@@ -2,6 +2,7 @@ package com.naviq.cli;
 
 import com.naviq.cli.view.BottomStatusBar;
 import com.naviq.cli.view.DataViewTable;
+import com.naviq.cli.terminal.CursorProbe;
 import com.naviq.cli.terminal.SqlHighlighter;
 import com.naviq.cli.terminal.MenuCompleter;
 import com.naviq.datasource.PostgresDataSource;
@@ -56,7 +57,7 @@ public class NaviQCli {
             @Override
             public boolean redisplay() {
                 var result = super.redisplay();
-                var c = getTerminal().getCursorPosition(null);
+                var c = CursorProbe.query(getTerminal());
                 if (c != null) {
                     statusBar.updateCursor(c.getY() + 1, c.getX() + 1);
                 }
@@ -65,6 +66,7 @@ public class NaviQCli {
             }
         };
 
+        CursorProbe.bind(impl);
         impl.setHighlighter(highlighter);
         impl.setVariable(LineReader.HISTORY_FILE, historyFile);
         impl.setVariable(LineReader.HISTORY_SIZE, 1000);

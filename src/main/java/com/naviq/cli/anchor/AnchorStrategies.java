@@ -1,5 +1,6 @@
 package com.naviq.cli.anchor;
 
+import com.naviq.cli.terminal.CursorProbe;
 import org.jline.terminal.Cursor;
 import org.jline.utils.AttributedString;
 
@@ -9,7 +10,7 @@ public class AnchorStrategies {
     public static AnchorStrategy smart(List<AttributedString> lines, int maxVisible) {
         return term -> {
             term.writer().flush();
-            Cursor c = term.getCursorPosition(null);
+            Cursor c = CursorProbe.query(term);
             if (c == null) return null;
 
             int cursorRow = c.getY() + 1;
@@ -31,7 +32,7 @@ public class AnchorStrategies {
     public static AnchorStrategy at(Position position, List<AttributedString> lines, int maxVisible) {
         return term -> {
             term.writer().flush();
-            Cursor c = term.getCursorPosition(null);
+            Cursor c = CursorProbe.query(term);
             if (c == null) return null;
 
             // cursor: 0-based từ JLine → convert 1-based
