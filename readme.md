@@ -1,4 +1,4 @@
-# 🚀 NaviQ CLI
+# 🚀 sqlctx CLI
 https://github.com/bytebase/parser/tree/57b6ef7a2640481d8734cd63af0c7b781fa85f22/postgresql
 https://github.com/spring-projects/spring-tools/tree/46a3b356d75d4575c0345bdaf046ae37e3cb1510/headless-services/commons/jpql/grammars
 
@@ -53,7 +53,7 @@ Most SQL autocomplete tools work by prefix-matching against a list of known name
 works — until the query gets a subquery, a CTE that references an earlier CTE, or an alias three levels deep, and
 suddenly the tool is just guessing again.
 
-**NaviQ CLI** takes a different approach: it asks ANTLR's own grammar what's valid at the cursor, and asks a real
+**sqlctx CLI** takes a different approach: it asks ANTLR's own grammar what's valid at the cursor, and asks a real
 scope-resolution pass what an alias actually points to — the same two questions a database engine would ask, just
 answered early enough to suggest something useful mid-keystroke.
 
@@ -116,7 +116,7 @@ literally answer different questions.
 Naive autocomplete asks one question: *what starts with what the user just typed?* That's a string-matching
 problem, and it treats SQL as flat text.
 
-NaviQ CLI asks two narrower questions instead, and only combines the answers at the end:
+sqlctx CLI asks two narrower questions instead, and only combines the answers at the end:
 
 **Is this grammatically valid?** ANTLR's ATN (Augmented Transition Network) already encodes every legal path
 through the grammar. At the caret's token index, walking that network directly yields every token and rule that
@@ -223,7 +223,7 @@ pgcli is a great tool, and this isn't trying to replace it. Its autocomplete lea
 than grammar traversal, which is fast and usually good enough — but it doesn't resolve scope through nested
 subqueries or CTEs the way a real parser does, so complex queries eventually outrun it.
 
-NaviQ CLI exists because I wanted to understand *why* that gap exists, and to see how far a two-layer,
+sqlctx CLI exists because I wanted to understand *why* that gap exists, and to see how far a two-layer,
 grammar-driven approach could close it. It's a side project for learning, not a pgcli replacement — though on
 deeply nested queries, it does noticeably better.
 

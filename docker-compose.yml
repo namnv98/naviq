@@ -1,0 +1,54 @@
+# DB test cho sqlctx (Postgres + Oracle) - tham số kết nối khớp ĐÚNG với run.sh, chỉ cần
+# "docker compose up -d" là chạy được ngay, không cần setup tay như trước.
+#
+# LƯU Ý: nếu máy đang có sẵn Postgres/Oracle khác chiếm port 54329/1521 (vd cài native, hoặc
+# container cũ chạy tay bằng "docker run"), phải dừng cái cũ trước khi "docker compose up",
+# nếu không sẽ xung đột port.
+services:
+  postgres:
+    image: postgres:18
+    container_name: sqlctx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: naviq
+      POSTGRES_USER: tester
+      POSTGRES_PASSWORD: x
+    ports:
+      - "54329:5432"
+    # postgres:18 đổi quy ước mount: khuyến nghị mount NGUYÊN "/var/lib/postgresql" (không phải
+    # ".../data" như các bản 17 trở về trước) - image tự tạo thư mục con theo version bên trong.
+    # Mount nhầm ".../data" sẽ crash-loop ngay từ lần start đầu (đã tự kiểm chứng lỗi này khi test).
+    volumes:
+      - sqlctx_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tester -d naviq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  oracle:
+    # gvenzl/oracle-free: image community phổ biến nhất cho Oracle chạy trên Docker (Oracle không
+    # phát hành image chính thức public) - đã dùng bản này để test Oracle trong dự án từ trước.
+    image: gvenzl/oracle-free:23-slim
+    container_name: sqlctx-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: Oracle123
+      # APP_USER/APP_USER_PASSWORD: image tự tạo user này trong PDB mặc định (FREEPDB1) lúc khởi
+      # tạo lần đầu, đúng tham số --user=/--password= run.sh đang dùng - không cần script tay.
+      APP_USER: naviq
+      APP_USER_PASSWORD: Naviq123
+    ports:
+      - "1521:1521"
+    volumes:
+      - sqlctx_oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  sqlctx_postgres_data:
+  sqlctx_oracle_data:

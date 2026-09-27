@@ -26,7 +26,7 @@ options {
 }
 @header
 {
-package com.naviq.antlr4.oracle;
+package com.sqlctx.antlr4.oracle;
 }
 
 sql_script

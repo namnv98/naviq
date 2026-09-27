@@ -40,7 +40,7 @@ options {
 
 @header
 {
-package com.naviq.antlr4.postgresql;
+package com.sqlctx.antlr4.postgresql;
 }
 @members
 {

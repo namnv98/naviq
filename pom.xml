@@ -5,8 +5,8 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.naviq</groupId>
-    <artifactId>naviq</artifactId>
+    <groupId>com.sqlctx</groupId>
+    <artifactId>sqlctx</artifactId>
     <version>1.0.0</version>
 
     <properties>
@@ -32,6 +32,11 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <version>42.7.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc11</artifactId>
+            <version>23.8.0.25.04</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -75,7 +80,7 @@
                             <listener>true</listener>
                             <sourceDirectory>src/main/antlr4/postgresql</sourceDirectory>
                             <outputDirectory>
-                                ${project.build.directory}/generated-sources/antlr4/com/naviq/antlr4/postgresql
+                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/antlr4/postgresql
                             </outputDirectory>
                         </configuration>
                     </execution>
@@ -90,7 +95,7 @@
                             <listener>true</listener>
                             <sourceDirectory>src/main/antlr4/oracle</sourceDirectory>
                             <outputDirectory>
-                                ${project.build.directory}/generated-sources/antlr4/com/naviq/antlr4/oracle
+                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/antlr4/oracle
                             </outputDirectory>
                         </configuration>
                     </execution>
@@ -111,8 +116,21 @@
                             <transformers>
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.naviq.cli.NaviQCli</mainClass>
+                                    <mainClass>com.sqlctx.cli.SqlctxCli</mainClass>
+                                    <manifestEntries>
+                                        <!-- JLine's FFM terminal provider dùng java.lang.foreign (restricted API) -
+                                             thiếu dòng này thì MỌI lần chạy đều in ra 3-4 dòng WARNING native access
+                                             ra stderr. Khai báo thẳng trong manifest (thay vì bắt người dùng luôn
+                                             phải nhớ gõ cờ enable native access) để chạy kiểu gì
+                                             (java -jar trực tiếp, script cài qua install.sh, run.sh...) cũng im lặng. -->
+                                        <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+                                    </manifestEntries>
                                 </transformer>
+                                <!-- postgresql VÀ ojdbc11 đều tự đăng ký qua META-INF/services/java.sql.Driver -
+                                     không gộp thì shade chỉ giữ lại 1 trong 2 file (đè lên nhau), driver còn lại
+                                     "biến mất" (DriverManager báo "No suitable driver found") dù jar vẫn có mặt. -->
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                         </configuration>
                     </execution>
