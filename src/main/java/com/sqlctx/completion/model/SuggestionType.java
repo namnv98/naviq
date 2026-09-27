@@ -12,6 +12,7 @@ public enum SuggestionType {
     DATATYPE("datatype", 7),
     MATERIALIZED_VIEW("materialized view", 99),
     SCHEMA("schema", 99),
+    ROLE("role", 99),
     OTHER("other", 99),
     COMMAND("command", 0),
     DATABASE("database", 1);

@@ -205,8 +205,15 @@ public class OracleSuggestionService implements SuggestionService {
         // qualifier đó, không thể chờ matchedRuleNames vì nó không bao giờ khớp trong case này.
         boolean qualifierResolvedByDanglingDot = semanticResult.qualifier() != null;
 
+        // "column_name" là rule PHỤ TRÁCH CHÍNH cột trần trong ORDER BY (xem chú thích ở khối
+        // check "column_name" phía trên) - THIẾU "!isOrderByElementsWithoutComma" ở đây là bug
+        // thật (phát hiện lúc viết test đi đúng đường production): "order by name |" (đã gõ xong
+        // 1 cột, có khoảng trắng) vẫn cứ gợi ý lại cột dù đây chính xác là vị trí biến suppress
+        // này sinh ra để xử lý - general_element/regular_id đã check đúng, chỉ riêng nhánh này bị
+        // bỏ sót khi "column_name" được thêm vào sau.
         boolean shouldSuggestColumnsViaColumnName = matchedRuleNames.contains("column_name")
-                && !isColumnNameMergeInsertTarget && !isColumnNameJoinUsing && !isAlterColumnAwaitingDatatype;
+                && !isColumnNameMergeInsertTarget && !isColumnNameJoinUsing && !isAlterColumnAwaitingDatatype
+                && !isOrderByElementsWithoutComma;
 
         if (isColumnNameMergeUpdateTarget || isColumnNameMergeInsertTarget) {
             addTargetOnlyColumnSuggestions(suggests, semanticResult);
@@ -251,6 +258,7 @@ public class OracleSuggestionService implements SuggestionService {
      */
     private static boolean isImmediatelyAfterOrderByElementsNoComma(OracleSyntacticAnalyzer.Result syn) {
         var tokenStream = syn.tokenStream();
+        var lexer = (com.sqlctx.antlr4.oracle.PlSqlLexer) tokenStream.getTokenSource();
         int i = syn.caretTokenIndex() - 1;
 
         while (i >= 0 && tokenStream.get(i).getChannel() != Token.DEFAULT_CHANNEL) {
@@ -273,7 +281,12 @@ public class OracleSuggestionService implements SuggestionService {
             }
             return j >= 0 && tokenStream.get(j).getType() == PlSqlParser.NULLS;
         }
-        if (immediateType != PlSqlParser.REGULAR_ID && immediateType != PlSqlParser.DELIMITED_ID) {
+        // SỬA (bug thật, phát hiện lúc viết test đi đúng đường production): dùng
+        // lexer.isIdentifier() thay vì chỉ check REGULAR_ID/DELIMITED_ID - y hệt lý do đã sửa ở
+        // OracleAliasNameSuggester. Tên cột hoàn toàn BÌNH THƯỜNG như "name" lại được lexer gán
+        // token type RIÊNG (1 trong ~2300 non-reserved keyword của Oracle), KHÔNG PHẢI REGULAR_ID -
+        // "order by name |" (cột tên "name") không được nhận diện, cột bị gợi ý lại dù đã gõ xong.
+        if (!lexer.isIdentifier(immediateType)) {
             return false;
         }
 

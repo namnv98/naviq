@@ -63,6 +63,29 @@ public final class OracleAdapter implements DialectAdapter {
     }
 
     @Override
+    public List<String> loadRoles() throws Exception {
+        // Oracle không tách biệt user/role rõ ràng ở tầng gợi ý như Postgres (GRANT ... TO <user hoặc
+        // role> đều hợp lệ) - ALL_USERS đủ cho phần lớn trường hợp thực tế (không cần quyền DBA như
+        // DBA_ROLES). Vị trí gõ tương ứng bên Oracle chưa lộ noise nghiêm trọng như Postgres (đã audit
+        // riêng), nên đây chỉ để đồng bộ interface, có sẵn data khi cần wire vào sau.
+        try (var stmt = connection().createStatement();
+             var rs = stmt.executeQuery("SELECT username FROM all_users ORDER BY username")) {
+            var roles = new java.util.ArrayList<String>();
+            while (rs.next()) {
+                roles.add(rs.getString(1));
+            }
+            return roles;
+        }
+    }
+
+    @Override
+    public List<String> loadLanguages() throws Exception {
+        // Oracle không có khái niệm "procedural language" như Postgres (chỉ có PL/SQL) - không có
+        // gì thật để nạp, trả rỗng để đồng bộ interface.
+        return List.of();
+    }
+
+    @Override
     public DatabaseList listDatabases() throws Exception {
         try (Statement stmt = connection().createStatement();
              ResultSet rs = stmt.executeQuery("SELECT name FROM v$pdbs ORDER BY name")) {

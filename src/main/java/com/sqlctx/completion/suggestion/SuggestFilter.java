@@ -43,7 +43,17 @@ public final class SuggestFilter {
             if (schemaPrefix != null && !s.getKey().toLowerCase().startsWith(schemaPrefix + ".")) {
                 continue;
             }
-            String word = display(s.getKey(), dot);
+            // LUÔN so khớp trên phần SAU dấu chấm cuối của key (nếu có) - KHÔNG chỉ khi
+            // dot=true như display() bên dưới. Key của 1 suggestion (table/column) có thể tự
+            // mang tiền tố "schema."/"alias." để hiển thị đầy đủ ngay cả khi người dùng CHƯA
+            // gõ dấu chấm (vd bảng "users" không alias vẫn có key "users.id" ở addColumnSuggestions),
+            // nhưng người dùng đang gõ "i" thì rõ ràng đang match "id" chứ không phải "users.id".
+            // Trước đây match thẳng trên display(key, dot) - khi dot=false thì display() trả
+            // NGUYÊN key, khiến match prefix so với "users.id"/"public.users" luôn thất bại (vì
+            // không bắt đầu bằng "i"/"us"), rớt xuống fuzzy tier và THUA cả keyword ("int",
+            // "user"...) vốn match prefix thật - bug thật, phát hiện qua test đi ĐÚNG đường
+            // production (suggests(PrepareCompletionInput), có filter) thay vì overload thô.
+            String word = matchWord(s.getKey());
             Rank r = rank(word, m, mLower);
             if (r == null) {
                 continue; // không match được (kể cả subsequence) -> loại
@@ -177,6 +187,18 @@ public final class SuggestFilter {
      * Gom về 1 chỗ vì trước đây bị copy-paste y hệt ở 3 nơi (filter(), highlight(),
      * buildGhost()) - gộp lại để tránh 3 nơi lệch nhau khi sửa sau này.
      */
+    /**
+     * Phần Ý NGHĨA để so khớp của 1 key - luôn là phần SAU dấu chấm CUỐI nếu key có mang
+     * tiền tố schema/alias (vd "users.id" -> "id", "public.users" -> "users"), BẤT KỂ người
+     * dùng đã gõ dấu chấm hay chưa. Tách riêng khỏi {@link #display} (chi phối MENU HIỂN THỊ
+     * gì, vẫn cần phân biệt dot/không-dot vì browse-mode không-dot muốn thấy rõ schema) - đây
+     * chỉ quyết định KHỚP gì, 2 việc khác nhau.
+     */
+    private static String matchWord(String key) {
+        int i = key.lastIndexOf('.');
+        return i == -1 ? key : key.substring(i + 1);
+    }
+
     public static String matchPart(String prefixOrKey, boolean dot) {
         return dot && prefixOrKey.contains(".")
                 ? prefixOrKey.substring(prefixOrKey.lastIndexOf('.') + 1)

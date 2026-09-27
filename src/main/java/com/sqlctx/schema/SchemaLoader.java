@@ -79,6 +79,30 @@ public class SchemaLoader {
         return functions;
     }
 
+    public static List<String> loadRoles(Connection conn) throws Exception {
+        String sql = "SELECT rolname FROM pg_catalog.pg_roles ORDER BY rolname";
+        List<String> roles = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                roles.add(rs.getString("rolname"));
+            }
+        }
+        return roles;
+    }
+
+    public static List<String> loadLanguages(Connection conn) throws Exception {
+        String sql = "SELECT lanname FROM pg_catalog.pg_language ORDER BY lanname";
+        List<String> languages = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                languages.add(rs.getString("lanname"));
+            }
+        }
+        return languages;
+    }
+
     public static List<String> loadDataTypes(Connection conn) throws Exception {
         String sql = """
                     SELECT typname

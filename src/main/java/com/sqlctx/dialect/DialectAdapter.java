@@ -33,6 +33,8 @@ public interface DialectAdapter {
     List<SchemaInfo> loadSchema() throws Exception;
     List<String> loadFunctions() throws Exception;
     List<String> loadDataTypes() throws Exception;
+    List<String> loadRoles() throws Exception;
+    List<String> loadLanguages() throws Exception;
 
     /** note != null: dòng giải thích thêm (Oracle không thấy PDB thì liệt kê schema/user thay thế). */
     record DatabaseList(String note, List<String> names) {

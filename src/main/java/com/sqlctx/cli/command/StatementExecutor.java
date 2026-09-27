@@ -20,6 +20,7 @@ import static com.sqlctx.cli.session.SqlctxSession.RED;
 import static com.sqlctx.cli.session.SqlctxSession.RESET;
 import static com.sqlctx.cli.session.SqlctxSession.YELLOW;
 import static com.sqlctx.cli.session.SqlctxSession.connection;
+import static com.sqlctx.cli.session.SqlctxSession.currentStatement;
 import static com.sqlctx.cli.session.SqlctxSession.lastOutput;
 import static com.sqlctx.cli.session.SqlctxSession.lastStatement;
 import static com.sqlctx.cli.session.SqlctxSession.outputFile;
@@ -172,7 +173,16 @@ public final class StatementExecutor {
             // có ResultSet hay không, tránh phải đoán bằng cách so khớp tiền tố (từng bỏ sót ALTER/CREATE
             // INDEX/GRANT... khiến các lệnh đó rơi vào nhánh executeQuery() và luôn báo lỗi "not a result set").
             try (Statement stmt = connection(dialect).createStatement()) {
-                boolean hasResultSet = stmt.execute(execLine);
+                // Ctrl+C ngoài readLine (xem terminal.handle(INT) ở ReplLineReaderFactory) đọc field này để
+                // gọi Statement.cancel() thay vì thoát cả process - xoá lại NGAY dù execute() thành công hay
+                // ném lỗi, để lần Ctrl+C kế tiếp (lúc không còn query nào chạy) không cancel nhầm statement cũ.
+                currentStatement = stmt;
+                boolean hasResultSet;
+                try {
+                    hasResultSet = stmt.execute(execLine);
+                } finally {
+                    currentStatement = null;
+                }
                 // "Query" = tới lúc DB trả về xong (round-trip execute), TÁCH RIÊNG khỏi "Fetch" = thời gian
                 // đọc hết ResultSet phía client - phân biệt được chậm do DB hay do fetch/network nhiều dòng.
                 long queryElapsed = System.currentTimeMillis() - startTime;

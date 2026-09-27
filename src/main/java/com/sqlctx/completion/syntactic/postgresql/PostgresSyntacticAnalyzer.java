@@ -87,6 +87,21 @@ public class PostgresSyntacticAnalyzer {
         m.put(PostgreSQLParser.RULE_func_name, true);       // tên hàm (không phải
         m.put(PostgreSQLParser.RULE_table_alias, true);     // tableAlias
         m.put(PostgreSQLParser.RULE_colid, true);
+        // role/user (GRANT/REVOKE/ALTER ROLE/OWNER TO/ALTER GROUP/DROP ROLE/DROP OWNED BY...) - THIẾU
+        // rule này trước đây khiến engine tụt xuống liệt kê MỌI token nguyên thuỷ (400-500+ keyword
+        // dùng-được-làm-identifier) thay vì dừng lại ở đúng 1 rule để gợi ý role thật (phát hiện qua
+        // audit noise sau khi viết bộ test phủ rộng toàn bộ grammar).
+        m.put(PostgreSQLParser.RULE_rolespec, true);
+        // Rule DÙNG CHUNG cho nhiều vị trí khác nhau (CREATE DATABASE OWNER/TEMPLATE/ENCODING, DO
+        // LANGUAGE, ALTER EXTENSION VERSION/FROM...) - PostgresSuggestionService tự phân biệt bằng
+        // keyword ĐỨNG NGAY TRƯỚC (OWNER -> role thật, LANGUAGE -> tên ngôn ngữ, còn lại -> không có
+        // dữ liệu thật để gợi ý, chỉ cần ngừng tràn keyword rác). Cùng lý do với rolespec ở trên.
+        m.put(PostgreSQLParser.RULE_nonreservedword_or_sconst, true);
+        // "type_function_name" (func_name/typename đều dựa vào rule này ở lõi) - vị trí tham chiếu
+        // TÊN HÀM/KIỂU DỮ LIỆU ĐÃ CÓ (vd RESTRICT/JOIN của CREATE OPERATOR, sfunc/finalfunc của
+        // CREATE AGGREGATE) - cùng lý do rolespec/nonreservedword_or_sconst: thiếu rule này khiến
+        // engine tụt xuống liệt kê hết token nguyên thuỷ thay vì dừng ở 1 rule để gợi ý hàm/kiểu thật.
+        m.put(PostgreSQLParser.RULE_type_function_name, true);
 
         return m;
     }

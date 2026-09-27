@@ -38,6 +38,24 @@
             <artifactId>ojdbc11</artifactId>
             <version>23.8.0.25.04</version>
         </dependency>
+        <!-- Cần cho SSL/TLS qua Oracle wallet (oracle.net.wallet_location, xem OracleDataSource.applySsl) -
+             ojdbc11 KHÔNG tự kéo theo các jar này, thiếu thì driver ném "SSO KeyStore not available" dù
+             cwallet.sso tồn tại và đúng định dạng (đã kiểm chứng bằng thực nghiệm). -->
+        <dependency>
+            <groupId>com.oracle.database.security</groupId>
+            <artifactId>oraclepki</artifactId>
+            <version>23.8.0.25.04</version>
+        </dependency>
+        <dependency>
+            <groupId>com.oracle.database.security</groupId>
+            <artifactId>osdt_cert</artifactId>
+            <version>21.18.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.oracle.database.security</groupId>
+            <artifactId>osdt_core</artifactId>
+            <version>21.18.0.0</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>

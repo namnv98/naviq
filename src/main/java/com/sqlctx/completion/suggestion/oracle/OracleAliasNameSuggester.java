@@ -131,9 +131,15 @@ public class OracleAliasNameSuggester {
     /**
      * Xử lý case KHÁC HẲN {@link #extractTableBeforeAs} — chưa gõ {@code AS}, thậm chí chưa gõ
      * alias nào cả, caret đứng NGAY SAU tên bảng vừa gõ xong. Vd {@code "select * from users |"}
-     * (caret sau khoảng trắng, ngay sau {@code users}) -> trả về {@code "users"}.
+     * (caret sau khoảng trắng, ngay sau {@code users}) -> trả về {@code "users"}. Áp dụng cho
+     * CẢ bảng đầu tiên (biên là {@code FROM}) LẪN bảng thứ 2 trở đi (biên là {@code COMMA}/
+     * {@code JOIN} gần nhất) - vd {@code "from a, users |"} hay {@code "from a join users |"} đều
+     * phải gợi ý alias được y hệt bảng đầu tiên (self-join/multi-table join là thao tác rất
+     * thường gặp, không có lý do gì chỉ hỗ trợ mỗi bảng đầu). TRƯỚC ĐÂY gặp COMMA/JOIN trước khi
+     * gặp FROM thì trả về {@code null} ngay (bug thật - phát hiện lúc viết test đi đúng đường
+     * production, so với Postgres đã hỗ trợ đúng case này từ trước).
      * <p>
-     * Đọc TIẾN từ ngay sau {@code FROM}, gom {@code identifier (PERIOD identifier)*} (schema.table),
+     * Đọc TIẾN từ ngay sau biên đó, gom {@code identifier (PERIOD identifier)*} (schema.table),
      * rồi kiểm tra: nếu đã đọc hết đúng tới {@code caretTokenIndex} (không còn token thật nào khác
      * xen giữa, kể cả 1 alias đã gõ dở) thì mới coi là hợp lệ - nếu KHÔNG (vd đã có thêm 1 token
      * khác như alias/COMMA/JOIN trước khi chạm caret), trả {@code null} vì lúc này không còn đúng
@@ -143,28 +149,23 @@ public class OracleAliasNameSuggester {
         List<Token> tokens = tokenStream.getTokens();
         PlSqlLexer lexer = (PlSqlLexer) tokenStream.getTokenSource();
 
-        int fromIdx = -1;
+        int boundaryIdx = -1;
         for (int i = caretTokenIndex - 1; i >= 0; i--) {
             Token t = tokens.get(i);
             if (t.getChannel() != Token.DEFAULT_CHANNEL) {
                 continue;
             }
-            if (t.getType() == PlSqlParser.FROM) {
-                fromIdx = i;
+            if (t.getType() == PlSqlParser.FROM || t.getType() == PlSqlParser.COMMA || t.getType() == PlSqlParser.JOIN) {
+                boundaryIdx = i;
                 break;
             }
-            // Gặp COMMA/JOIN trước khi gặp FROM -> đang ở bảng thứ 2+ hoặc sau join, không phải
-            // ngay-sau-FROM nữa -> không thuộc phạm vi hàm này, dừng sớm.
-            if (t.getType() == PlSqlParser.COMMA || t.getType() == PlSqlParser.JOIN) {
-                return null;
-            }
         }
-        if (fromIdx < 0) {
+        if (boundaryIdx < 0) {
             return null;
         }
 
         StringBuilder sb = new StringBuilder();
-        int i = fromIdx + 1;
+        int i = boundaryIdx + 1;
         boolean expectIdentifier = true; // xen kẽ: identifier, PERIOD, identifier, PERIOD, ...
         while (i < caretTokenIndex) {
             Token t = tokens.get(i);

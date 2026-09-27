@@ -43,6 +43,13 @@ public final class SqlctxSession {
      */
     public static volatile ConnectionProfile previousConnection = null;
 
+    /**
+     * Statement đang chạy dở (null nếu không có) - để Ctrl+C ngoài readLine (xem terminal.handle(INT) ở
+     * ReplLineReaderFactory) gọi được Statement.cancel() thay vì phải thoát hẳn process mới dừng được 1
+     * query đang treo.
+     */
+    public static volatile java.sql.Statement currentStatement = null;
+
     public static final String RED = "\u001b[31m";
     public static final String YELLOW = "\u001b[33m";
     public static final String RESET = "\u001b[0m";

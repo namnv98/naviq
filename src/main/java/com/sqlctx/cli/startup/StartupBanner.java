@@ -47,9 +47,7 @@ public final class StartupBanner {
                 DIM + "Time:       " + RESET + "server " + serverTime + " (" + serverZone + ")" + DIM + "  ·  " + RESET + "client " + clientZone + "\n" +
                 "\n" +
                 DIM + "Schema:     " + RESET + schemaCount + " schema(s), " + tableCount + " table/view(s), " + columnCount + " column(s) indexed\n" +
-                DIM + "Suggest:    " + RESET + SchemaIndex.functions.size() + " function(s), " + SchemaIndex.dataTypes.size() + " data type(s)\n" +
-                "\n" +
-                DIM + "Home:       http://your-cli.dev" + RESET + "\n";
+                DIM + "Suggest:    " + RESET + SchemaIndex.functions.size() + " function(s), " + SchemaIndex.dataTypes.size() + " data type(s)\n";
 
         reader.printAbove(info);
     }

@@ -43,6 +43,19 @@ public final class CompletionHistory {
     private static volatile boolean loaded = false;
 
     /**
+     * CHỈ dùng trong test - xoá sạch lịch sử đã nạp và đánh dấu "đã load" (chặn
+     * {@link #ensureLoaded} đọc lại file thật ở {@code FILE}). Không có cách này, test nào gọi
+     * qua {@code SuggestFilter.filter()} (đường thật của production) sẽ vô tình đọc phải lịch
+     * sử dùng THẬT của người dùng đang chạy test trên máy đó (vd đếm số lần gõ "select") - làm
+     * kết quả xếp hạng khác nhau giữa các máy/lần chạy, phát hiện được khi viết test đi đúng
+     * đường thật thay vì overload thô bỏ qua SuggestFilter.
+     */
+    public static void resetForTests() {
+        stats.clear();
+        loaded = true;
+    }
+
+    /**
      * Gọi khi người dùng THẬT SỰ chọn 1 gợi ý (Enter/click trong menu) - KHÔNG gọi khi chỉ
      * đang duyệt qua (up/down) hay khi menu tự hiện lúc gõ, vì đó chưa phải "lựa chọn".
      */

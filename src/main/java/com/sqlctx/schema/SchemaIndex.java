@@ -33,6 +33,10 @@ public class SchemaIndex {
     public static volatile Map<String, TableInfo> schemaTableIndex = Map.of();
     public static volatile List<String> functions = List.of();
     public static volatile List<String> dataTypes = List.of();
+    /** Role/user thật của server (pg_roles) - dùng gợi ý ở GRANT/REVOKE/ALTER ROLE/OWNER TO... (rỗng ở Oracle). */
+    public static volatile List<String> roles = List.of();
+    /** Ngôn ngữ thủ tục thật đã cài (pg_language) - dùng gợi ý ở DO/CREATE FUNCTION ... LANGUAGE |. */
+    public static volatile List<String> languages = List.of();
 
     static {
         try {
@@ -55,6 +59,8 @@ public class SchemaIndex {
             schemas = adapter.loadSchema();
             dataTypes = adapter.loadDataTypes();
             functions = adapter.loadFunctions();
+            roles = adapter.loadRoles();
+            languages = adapter.loadLanguages();
             tableIndex = buildIndex(schemas);
             schemaTableIndex = buildSchemaTableIndex(schemas);
         } catch (Exception e) {

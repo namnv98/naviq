@@ -69,7 +69,12 @@ public class PostgresSuggestionService implements SuggestionService {
 
         // typename đã ENTER từ trước caret (vd "varchar(|)": đang đứng TRONG type modifier của kiểu đã
         // gõ xong tên) thì vị trí này chỉ nhận literal, không phải tên kiểu dữ liệu mới.
+        // "colid" CÙNG khớp lúc này là bug thật (phát hiện qua đọc grammar columnDef: colid typename
+        // ... - 2 rule này TUẦN TỰ, không bao giờ cùng hợp lệ 1 lúc): "ALTER TABLE t ADD COLUMN |"
+        // (tên cột MỚI - colid - chưa gõ) lại gợi ý datatype ngay, sai thứ tự. c3 completion-core báo
+        // "typename" ở đây là ảo (cùng loại lỗi sibling-ambiguity đã gặp ở createfunctionstmt/definestmt).
         if (matchedRuleNames.contains("typename")
+                && !matchedRuleNames.contains("colid")
                 && !PostgresMatchedRuleResolver.isRuleEnteredBeforeCaret(syntacticResults, PostgreSQLParser.RULE_typename)) {
             addDataTypeSuggestions(suggests);
         }
@@ -93,13 +98,45 @@ public class PostgresSuggestionService implements SuggestionService {
             addTableNameSuggestions(suggests, syntacticResults);
         }
 
+        // GRANT/REVOKE .. TO/FROM, ALTER ROLE/GROUP, OWNER TO, DROP ROLE, DROP OWNED BY,
+        // REASSIGN OWNED BY .. TO - role/user thật từ pg_roles (SchemaIndex.roles).
+        if (matchedRuleNames.contains("rolespec")) {
+            SchemaIndex.roles.forEach(r -> suggests.add(Suggestion.of(r, SuggestionType.ROLE)));
+        }
+
+        // "func_name"/"type_function_name" - tham chiếu tên HÀM ĐÃ CÓ (CREATE OPERATOR
+        // RESTRICT/JOIN=, CREATE AGGREGATE sfunc/finalfunc=, DROP FUNCTION...) hoặc tên KIỂU
+        // (RETURNS SETOF|%TYPE của func_type) - gợi ý cả 2 nguồn thật đã có sẵn (SchemaIndex.functions/
+        // dataTypes) vì rule dùng CHUNG, không tách được ngữ nghĩa chỉ từ tên rule. "func_name" đã là
+        // preferred rule từ trước (chặn được tràn keyword) nhưng CHƯA TỪNG được nối để thêm gợi ý
+        // thật - phát hiện qua audit noise, cùng đợt với type_function_name.
+        if (matchedRuleNames.contains("func_name") || matchedRuleNames.contains("type_function_name")) {
+            SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
+            SchemaIndex.dataTypes.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.DATATYPE, t)));
+        }
+
+        // "nonreservedword_or_sconst" dùng chung cho NHIỀU vị trí khác nhau (CREATE DATABASE OWNER/
+        // TEMPLATE/ENCODING, DO/CREATE FUNCTION ... LANGUAGE, ALTER EXTENSION VERSION/FROM...) -
+        // phải tự phân biệt bằng keyword đứng NGAY TRƯỚC caret, vì rule KHÔNG cho biết ngữ nghĩa
+        // thật (chỉ "1 định danh hoặc chuỗi"). OWNER -> role thật; LANGUAGE -> ngôn ngữ thật; còn lại
+        // KHÔNG có dữ liệu thật để gợi ý (TEMPLATE/ENCODING/VERSION/FROM là tên DB mẫu/encoding/số
+        // hiệu bản mở rộng - không model hoá trong SchemaIndex) - chỉ cần KHÔNG bịa, không thêm gì.
+        if (matchedRuleNames.contains("nonreservedword_or_sconst")) {
+            int precedingKeyword = lastRealTokenTypeBefore(syntacticResults);
+            if (precedingKeyword == PostgreSQLParser.OWNER) {
+                SchemaIndex.roles.forEach(r -> suggests.add(Suggestion.of(r, SuggestionType.ROLE)));
+            } else if (precedingKeyword == PostgreSQLParser.LANGUAGE) {
+                SchemaIndex.languages.forEach(l -> suggests.add(Suggestion.of(l, SuggestionType.OTHER)));
+            }
+        }
+
         // FOR VALUES FROM (|) / TO (|) của partition bound chỉ nhận biểu thức hằng, không có cột nào
         // trong scope để tham chiếu.
         if (matchedRuleNames.contains("columnref")) {
             if (isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_columnref, PostgreSQLParser.RULE_partitionboundspec)) {
                 SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
             } else {
-                addColumnSuggestions(suggests, semanticResult);
+                addColumnSuggestions(suggests, semanticResult, true);
             }
         }
 
@@ -137,12 +174,22 @@ public class PostgresSuggestionService implements SuggestionService {
                         || (isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_opt_name_list)
                         && isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_vacuum_relation));
 
+        // colid ở đây LÀ định danh THUẦN (colid opt_indirection - xem insert_column_item,
+        // set_target, opt_column_list...) - KHÔNG phải a_expr, nên KHÔNG được gợi ý hàm (bug thật,
+        // phát hiện ở insertstmt: "INSERT INTO t (|" gợi ý cả count/sum/avg/now trong khi grammar
+        // chỉ nhận đúng 1 tên cột, không nhận lời gọi hàm). isColumnrefColumn/isColidIndexColumn giữ
+        // nguyên gợi ý hàm vì đó là vị trí BIỂU THỨC thật (WHERE u.|, index trên biểu thức
+        // lower(col)) - chỉ 4 case dưới đây là định danh thuần.
+        boolean isColidPureIdentifierList = isColidDropTarget || isColidSetTarget || isColidUsingClauseColumn || isColidInsert || isColidTableColumnList;
+
         if (matchedRuleNames.contains("colid") && isMergeSetTarget) {
             addTargetOnlyColumnSuggestions(suggests, semanticResult);
         } else if (matchedRuleNames.contains("colid") && isJoinUsingColumn) {
             addCommonColumnSuggestions(suggests, semanticResult);
-        } else if (matchedRuleNames.contains("colid") && (isColidDropTarget || isColumnrefColumn || isColidIndexColumn || isColidSetTarget || isColidUsingClauseColumn || isColidInsert || isColidTableColumnList)) {
-            addColumnSuggestions(suggests, semanticResult);
+        } else if (matchedRuleNames.contains("colid") && isColidPureIdentifierList) {
+            addColumnSuggestions(suggests, semanticResult, false);
+        } else if (matchedRuleNames.contains("colid") && (isColumnrefColumn || isColidIndexColumn)) {
+            addColumnSuggestions(suggests, semanticResult, true);
         }
 
         return suggests;
@@ -159,7 +206,12 @@ public class PostgresSuggestionService implements SuggestionService {
                 || isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_opt_class)
                 || isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_opt_collate)
                 || isRuleInContext(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_opt_collate_clause)
-                || isRuleAncestorAnywhere(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_definestmt);
+                || isRuleAncestorAnywhere(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_definestmt)
+                // CREATE CONVERSION conv_name FOR ... TO ... FROM any_name - CẢ 2 any_name ở đây
+                // đều không phải bảng (any_name đầu = tên conversion MỚI đang đặt, any_name sau FROM
+                // = tên hàm chuyển đổi encoding có sẵn, vd utf8_to_latin1) - bug thật phát hiện qua
+                // GrammarBreadthTest (any_name mặc định gợi ý bảng vô điều kiện).
+                || isRuleAncestorAnywhere(syn, PostgreSQLParser.RULE_any_name, PostgreSQLParser.RULE_createconversionstmt);
     }
 
     /**
@@ -207,6 +259,23 @@ public class PostgresSuggestionService implements SuggestionService {
         List<RuleCallStack.RuleFrame> path = syn.candidates().rules.get(ruleId);
         if (path == null) return false;
         return path.stream().anyMatch(f -> f.ruleId() == ancestorRuleIdToFind);
+    }
+
+    /**
+     * Token type THẬT (bỏ qua hidden channel) đứng NGAY TRƯỚC caret - dùng để phân biệt ngữ nghĩa
+     * cho các rule dùng-chung (vd "nonreservedword_or_sconst") khi bản thân rule không đủ thông tin.
+     * Trả -1 nếu chưa gõ gì trước caret.
+     */
+    private static int lastRealTokenTypeBefore(PostgresSyntacticAnalyzer.Result syn) {
+        var ts = syn.tokenStream();
+        for (int i = syn.caretTokenIndex() - 1; i >= 0; i--) {
+            Token t = ts.get(i);
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
+            return t.getType();
+        }
+        return -1;
     }
 
     private static void addKeywordSuggestions(List<Suggestion> suggests, Integer key, List<Integer> following) {
@@ -275,8 +344,10 @@ public class PostgresSuggestionService implements SuggestionService {
                 .forEach(suggests::add));
     }
 
-    private static void addColumnSuggestions(List<Suggestion> suggests, PostgresSemanticAnalyzer.Result sem) {
-        SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
+    private static void addColumnSuggestions(List<Suggestion> suggests, PostgresSemanticAnalyzer.Result sem, boolean includeFunctions) {
+        if (includeFunctions) {
+            SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
+        }
         if (sem.qualifier() != null) {
             String qualifier = sem.qualifier();
             if (sem.qualifierDerivedScope() != null) {

@@ -63,6 +63,16 @@ public final class PostgresAdapter implements DialectAdapter {
     }
 
     @Override
+    public List<String> loadRoles() throws Exception {
+        return SchemaLoader.loadRoles(connection());
+    }
+
+    @Override
+    public List<String> loadLanguages() throws Exception {
+        return SchemaLoader.loadLanguages(connection());
+    }
+
+    @Override
     public DatabaseList listDatabases() throws Exception {
         try (Statement stmt = connection().createStatement();
              ResultSet rs = stmt.executeQuery(

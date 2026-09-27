@@ -150,9 +150,40 @@ public final class ReplLineReaderFactory {
         // Ctrl+C ngoài readLine (đang chạy query) không được readLine bắt thành UserInterruptException -
         // terminal (thư viện JLine) tự xử lý SIGINT theo cách riêng, không đi qua vòng đời JVM bình thường
         // nên shutdown hook phía trên KHÔNG chạy, để lại terminal hỏng (đã kiểm chứng bằng thực nghiệm).
-        // Đăng ký thẳng handler ở đây để tự dọn dẹp rồi thoát - readLine tự thay/trả lại handler này khi chạy,
-        // nên Ctrl+C lúc đang gõ vẫn đi theo đường UserInterruptException như cũ, không bị handler này giành mất.
-        terminal.handle(Terminal.Signal.INT, signal -> System.exit(130));
+        // Đăng ký thẳng handler ở đây - readLine tự thay/trả lại handler này khi chạy, nên Ctrl+C lúc đang
+        // gõ vẫn đi theo đường UserInterruptException như cũ, không bị handler này giành mất.
+        // Có query đang chạy (currentStatement != null) thì HUỶ QUERY ĐÓ (Statement.cancel() - JDBC cho gọi
+        // an toàn từ thread khác trong lúc execute() đang block) thay vì thoát cả process; execute() sẽ tự
+        // ném lỗi "cancel" và rơi vào đúng đường báo lỗi bình thường (reportError). Không có gì đang chạy
+        // (đang treo ở chỗ khác, vd chờ phím "press any key"/xác nhận huỷ) thì vẫn thoát như cũ - không có
+        // gì để "huỷ" ở đó.
+        //
+        // BUG PHÁT HIỆN LÚC TEST: gọi thẳng System.exit() ở NHÁNH NÀY từng bị TREO CẢ PROCESS khi main
+        // thread đang block trong chính 1 lần đọc phím raw khác (confirmProceed()'s terminal.reader().read()
+        // ở prompt xác nhận huỷ, hoặc vòng chờ "press any key" của bảng bị cắt) - shutdown hook (đóng
+        // Status/terminal) tranh lock với lần đọc raw đó, System.exit() không bao giờ quay lại. Chạy exit()
+        // trên 1 thread riêng kèm timeout: dọn dẹp sạch (đúng ý ban đầu) nếu kịp, không thì halt() cưỡng
+        // chế thoát ngay - thà terminal bẩn còn hơn treo process phải kill -9 từ bên ngoài.
+        terminal.handle(Terminal.Signal.INT, signal -> {
+            java.sql.Statement running = com.sqlctx.cli.session.SqlctxSession.currentStatement;
+            if (running != null) {
+                try {
+                    running.cancel();
+                } catch (Exception ignored) {
+                }
+            } else {
+                Thread exitThread = new Thread(() -> System.exit(130));
+                exitThread.setDaemon(true);
+                exitThread.start();
+                try {
+                    exitThread.join(500);
+                } catch (InterruptedException ignored) {
+                }
+                if (exitThread.isAlive()) {
+                    Runtime.getRuntime().halt(130);
+                }
+            }
+        });
 
         KeyMap<Binding> keyMap = impl.getKeyMaps().get(LineReader.MAIN);
 
