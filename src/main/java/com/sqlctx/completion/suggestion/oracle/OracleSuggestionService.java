@@ -68,11 +68,21 @@ public class OracleSuggestionService implements SuggestionService {
 
         Set<String> matchedRuleNames = OracleMatchedRuleResolver.computeMatchedRuleNamesV1(syntacticResults, syntacticCursor);
 
+        // "cursor_name: general_element | bind_variable" (CLOSE/OPEN cursor_name) - bug thật phát
+        // hiện qua GrammarBreadthTest: general_element ở đây bị ATN báo ẢO thêm "type_spec"/
+        // "datatype" (cùng loại sibling-ambiguity đã gặp ở Postgres createfunctionstmt), khiến
+        // "CLOSE |"/"OPEN |" gợi ý nhầm NUMBER/VARCHAR2... trong khi cursor_name không liên quan gì
+        // tới kiểu dữ liệu. Tính TRƯỚC (không đợi tới khối general_element phía dưới) để dùng chặn
+        // ở đây luôn.
+        boolean isGeneralElementCursorName =
+                isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_general_element, PlSqlParser.RULE_cursor_name);
+
         // typename (Postgres) -> Oracle KHÔNG có rule tên "typename": type_spec là rule bao ngoài
         // (gồm cả REF/%ROWTYPE/%TYPE), datatype là kiểu dữ liệu "thuần" (NUMBER/VARCHAR2/...) -
         // check cả 2 vì tuỳ vị trí trong grammar sẽ khớp rule nào.
-        if (matchedRuleNames.contains("type_spec") || matchedRuleNames.contains("datatype")
-                || matchedRuleNames.contains("json_value_return_type") || matchedRuleNames.contains("json_query_return_type")) {
+        if ((matchedRuleNames.contains("type_spec") || matchedRuleNames.contains("datatype")
+                || matchedRuleNames.contains("json_value_return_type") || matchedRuleNames.contains("json_query_return_type"))
+                && !isGeneralElementCursorName) {
             addDataTypeSuggestions(suggests);
         }
 
@@ -106,8 +116,6 @@ public class OracleSuggestionService implements SuggestionService {
         // "general_element" thì NGƯỢC LẠI vẫn bị overload giống "colid" (dùng cả cho cursor_name
         // và assignable_element - biến PL/SQL cục bộ, KHÔNG phải cột bảng) - vẫn cần loại trừ 2
         // trường hợp đó bằng parent-context giống cơ chế Postgres đã dùng.
-        boolean isGeneralElementCursorName =
-                isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_general_element, PlSqlParser.RULE_cursor_name);
         boolean isGeneralElementAssignTarget =
                 isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_general_element, PlSqlParser.RULE_assignable_element);
         // INSERT INTO t VALUES (|) - "expression" ở values_clause route qua general_element,
@@ -396,6 +404,13 @@ public class OracleSuggestionService implements SuggestionService {
     }
 
     private static void addTableNameSuggestions(List<Suggestion> suggests, OracleSyntacticAnalyzer.Result syn) {
+        // "tableview_name" dùng CHUNG cho mọi vị trí tham chiếu bảng/view (xem comment ở nơi gọi) -
+        // nhưng DROP VIEW chỉ nên gợi ý VIEW thật, không phải bảng (bug thật phát hiện qua
+        // GrammarBreadthTest: "DROP VIEW |" gợi ý cả TABLE, dù DROP VIEW một bảng thật là câu lệnh
+        // vô nghĩa/sai ngữ nghĩa). Tương tự, DROP TABLE chỉ nên gợi ý TABLE, không phải VIEW.
+        boolean isDropView = isRuleAncestorAnywhere(syn, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_drop_view);
+        boolean isDropTable = isRuleAncestorAnywhere(syn, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_drop_table);
+
         int caretTokenIndex = syn.caretTokenIndex();
         var tokenStream = syn.tokenStream();
         if (caretTokenIndex >= 2) {
@@ -407,11 +422,17 @@ public class OracleSuggestionService implements SuggestionService {
                 // quote) và DELIMITED_ID (có quote "..."), tên schema có thể là 1 trong 2.
                 if (prev.getType() == PlSqlParser.REGULAR_ID || prev.getType() == PlSqlParser.DELIMITED_ID) {
                     String schema = prev.getText();
-                    SchemaIndex.getTablesBySchema(schema).forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+                    SchemaIndex.getTablesBySchema(schema).stream()
+                            .filter(t -> !isDropView || "view".equalsIgnoreCase(t.kind()))
+                            .filter(t -> !isDropTable || "table".equalsIgnoreCase(t.kind()))
+                            .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
                     return;
                 }
             }
         }
-        SchemaIndex.schemaTableIndex.values().forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+        SchemaIndex.schemaTableIndex.values().stream()
+                .filter(t -> !isDropView || "view".equalsIgnoreCase(t.kind()))
+                .filter(t -> !isDropTable || "table".equalsIgnoreCase(t.kind()))
+                .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
     }
 }
