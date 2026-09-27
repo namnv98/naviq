@@ -12,9 +12,6 @@ public abstract class PlSqlParserBase extends Parser {
         super(input);
     }
 
-//    public boolean isTableAlias() {
-//        return getCurrentToken().getTokenIndex() != PlSqlLexer.JOIN;
-//    }
 
     protected boolean isTableAlias() {
         String text = getCurrentToken().getText().toUpperCase();

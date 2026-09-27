@@ -101,9 +101,6 @@ public class TerminalMenu {
         int drawCol = Math.min(cursorAbsCol, width - menuWidth);
         if (drawCol < 1) drawCol = 1;
 
-//        Cursor savedCursor = term.getCursorPosition(null);
-//        int savedRow = savedCursor.getY() + 1;
-//        int savedCol = savedCursor.getX() + 1;
         out.print("\u001b[s");
 
         // Xóa dòng thừa ở VỊ TRÍ CŨ trước khi vẽ mới
@@ -122,7 +119,6 @@ public class TerminalMenu {
             lastRendered.clear();
         }
 
-        // Diff update
         for (int i = 0; i < height; i++) {
             String ansi = lines.get(i).toAnsi();
             String cached = i < lastRendered.size() ? lastRendered.get(i) : null;
@@ -144,10 +140,8 @@ public class TerminalMenu {
             }
         }
 
-//        out.print("\u001b[" + savedRow + ";" + savedCol + "H");
         out.print("\u001b[u");
 
-        // Cập nhật cache
         lastRendered = new ArrayList<>();
         for (int i = 0; i < height; i++) {
             lastRendered.add(lines.get(i).toAnsi());
@@ -197,7 +191,6 @@ public class TerminalMenu {
         out.flush();
     }
 
-    // ─── clearMenu ────────────────────────────────────────────────────────────
     public void clearMenu(PrintWriter out) {
         if (lastHeight <= 0 || menuRow < 0) return;
         out.print("\u001b[s");

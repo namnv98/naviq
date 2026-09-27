@@ -20,7 +20,6 @@ public class DataViewTable {
 
     private static final int DEFAULT_MAX_FIELD_WIDTH = 5000;
 
-    // 🔥 detect Windows → dùng ASCII
     private static final boolean ASCII =
         System.getProperty("os.name").toLowerCase().contains("win");
 
@@ -155,9 +154,6 @@ public class DataViewTable {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Pager
-    // -------------------------------------------------------------------------
 
     private static void paginate(Terminal terminal, String content) throws Exception {
         Less less =
@@ -178,23 +174,7 @@ public class DataViewTable {
         less.run(sources);
     }
 
-//    private static void paginate(Terminal terminal, String content) throws Exception {
-//        ProcessBuilder pb = new ProcessBuilder("less", "-S", "-R", "-X", "+1");
-//        pb.redirectInput(ProcessBuilder.Redirect.PIPE);
-//        pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-//        pb.redirectError(ProcessBuilder.Redirect.INHERIT);
-//
-//        Process p = pb.start();
-//        try (OutputStream os = p.getOutputStream()) {
-//            os.write(content.getBytes(StandardCharsets.UTF_8));
-//            os.flush();
-//        }
-//        p.waitFor();
-//    }
 
-    // -------------------------------------------------------------------------
-    // Render
-    // -------------------------------------------------------------------------
 
     private static String render(
         List<String> columns,
@@ -268,10 +248,10 @@ public class DataViewTable {
             java.util.regex.Pattern.compile("-?\\d+(\\.\\d+)?");
     private static final java.util.regex.Pattern DATE_PATTERN =
             java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}([ T].*)?");
-    private static final String NUM_COLOR = "\u001b[38;5;215m"; // số - cam nhạt
-    private static final String NULL_COLOR = "\u001b[38;5;242m"; // NULL - xám mờ, rõ ràng khác dữ liệu thật
-    private static final String BOOL_COLOR = "\u001b[38;5;140m"; // boolean - tím nhạt
-    private static final String DATE_COLOR = "\u001b[38;5;108m"; // ngày giờ - xanh lá nhạt
+    private static final String NUM_COLOR = "\u001b[38;5;215m";
+    private static final String NULL_COLOR = "\u001b[38;5;242m";
+    private static final String BOOL_COLOR = "\u001b[38;5;140m";
+    private static final String DATE_COLOR = "\u001b[38;5;108m";
 
     private static String styleForValue(String cell) {
         if ("<null>".equals(cell)) {
@@ -341,7 +321,7 @@ public class DataViewTable {
         return sb.toString();
     }
 
-    private static final String HEADER_COLOR = "\u001b[1;36m"; // bold cyan
+    private static final String HEADER_COLOR = "\u001b[1;36m";
     private static final String RESET = "\u001b[0m";
 
     private static String formatHeader(List<String> cells, int[] widths) {
@@ -351,7 +331,6 @@ public class DataViewTable {
             String raw = i < cells.size() ? clean(cells.get(i)) : "";
             String cell = truncate(raw, widths[i]);
 
-            // 🔥 bọc màu
             String colored = HEADER_COLOR + cell + RESET;
 
             sb.append(" ").append(colored);

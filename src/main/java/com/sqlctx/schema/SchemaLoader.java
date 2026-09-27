@@ -28,7 +28,6 @@ public class SchemaLoader {
                     ORDER BY n.nspname, c.relname, a.attnum
                 """;
 
-        // schema → table → columns
         Map<String, Map<String, TableBuilder>> builders = new LinkedHashMap<>();
 
         try (PreparedStatement ps = conn.prepareStatement(sql);
@@ -220,7 +219,6 @@ public class SchemaLoader {
         };
     }
 
-    // builder nội bộ để gom columns
     private static class TableBuilder {
         final String schema, name, kind;
         final List<ColumnInfo> columns = new ArrayList<>();

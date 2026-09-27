@@ -978,13 +978,9 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
 
     @Override
     public void visitErrorNode(ErrorNode node) {
-        // Lưu lại thông tin lỗi
         Token symbol = (Token) node.getSymbol();
         if (symbol != null) {
             offendingTokenIndices.add(symbol.getTokenIndex());
         }
-
-        // TIẾP TỤC duyệt các node khác (không throw)
-        // ParseTreeWalker mặc định sẽ tiếp tục
     }
 }

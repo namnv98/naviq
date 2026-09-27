@@ -42,11 +42,11 @@ public class BottomStatusBar {
     private static final AttributedStyle BAR_BG = AttributedStyle.DEFAULT.background(36, 36, 36);
     // foregroundRgb() nhận 1 số hex 24-bit thật (0xRRGGBB) - khác foreground(int) là màu THEO PALETTE 256
     // màu (chỉ dùng byte thấp làm index), dùng nhầm hàm đó với hex 0xffd166 từng ra màu index 102 sai bét.
-    private static final AttributedStyle KEY_STYLE = BAR_BG.foregroundRgb(0xffd166).bold(); // phím tắt - vàng nổi bật, kiểu "keycap"
-    private static final AttributedStyle LABEL_STYLE = BAR_BG.foreground(150, 150, 150); // tên hành động - mờ hơn phím
-    private static final AttributedStyle SEP_STYLE = BAR_BG.foreground(90, 90, 90); // dấu "│" ngăn cách - chỉ làm nền, không cần nổi bật
-    private static final AttributedStyle INFO_STYLE = BAR_BG.foregroundRgb(0x7fd8ff); // db/host đang kết nối - xanh dương nhạt
-    private static final AttributedStyle CURSOR_STYLE = BAR_BG.foreground(150, 150, 150); // Ln/Col - thông tin phụ, mờ
+    private static final AttributedStyle KEY_STYLE = BAR_BG.foregroundRgb(0xffd166).bold();
+    private static final AttributedStyle LABEL_STYLE = BAR_BG.foreground(150, 150, 150);
+    private static final AttributedStyle SEP_STYLE = BAR_BG.foreground(90, 90, 90);
+    private static final AttributedStyle INFO_STYLE = BAR_BG.foregroundRgb(0x7fd8ff);
+    private static final AttributedStyle CURSOR_STYLE = BAR_BG.foreground(150, 150, 150);
 
     // Query status đổi màu THEO TRẠNG THÁI - trước đây luôn trắng nên không phân biệt được RUNNING/ERROR/idle
     // qua màu, phải đọc chữ. Đây là chỗ có giá trị thực tế nhất trong cả thanh status.

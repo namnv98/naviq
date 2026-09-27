@@ -58,7 +58,6 @@ public abstract class PostgreSQLLexerBase extends Lexer {
         super(input);
     }
 
-    // ---- dollar-quoted string tag tracking ($tag$ ... $tag$) ----
 
     /**
      * Stack of open dollar-quote tags, mirroring the lexer's pushMode/popMode stack for
@@ -86,7 +85,6 @@ public abstract class PostgreSQLLexerBase extends Lexer {
         return !tagStack.isEmpty() && tagStack.peek().equals(currentTag());
     }
 
-    // ---- operator / identifier disambiguation predicates ----
 
     public boolean checkLA(char c) {
         return false;
@@ -100,7 +98,6 @@ public abstract class PostgreSQLLexerBase extends Lexer {
         return false;
     }
 
-    // ---- misc lexing edge cases ----
 
     public void HandleLessLessGreaterGreater() {
         // no-op stand-in - see class javadoc

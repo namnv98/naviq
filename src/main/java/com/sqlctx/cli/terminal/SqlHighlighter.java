@@ -1,7 +1,6 @@
 package com.sqlctx.cli.terminal;
 
-import com.sqlctx.antlr4.oracle.PlSqlLexer;
-import com.sqlctx.antlr4.postgresql.PostgreSQLLexer;
+import com.sqlctx.dialect.DialectAdapters;
 import com.sqlctx.schema.Dialect;
 import com.sqlctx.schema.SchemaIndex;
 import org.antlr.v4.runtime.CharStream;
@@ -47,7 +46,7 @@ public class SqlHighlighter implements Highlighter {
         AttributedStringBuilder sb = new AttributedStringBuilder();
 
         CharStream input = CharStreams.fromString(s);
-        Lexer lexer = dialect == Dialect.ORACLE ? new PlSqlLexer(input) : new PostgreSQLLexer(input);
+        Lexer lexer = DialectAdapters.of(dialect).createLexer(input);
         lexer.removeErrorListeners();
 
         CommonTokenStream tokens = new CommonTokenStream(lexer);
@@ -57,7 +56,6 @@ public class SqlHighlighter implements Highlighter {
         for (Token t : tokens.getTokens()) {
             if (t.getType() == Token.EOF) break;
 
-            // Điền khoảng trắng giữa các token
             if (t.getStartIndex() > pos) {
                 sb.append(s.substring(pos, t.getStartIndex()));
             }
@@ -69,7 +67,6 @@ public class SqlHighlighter implements Highlighter {
             pos = t.getStopIndex() + 1;
         }
 
-        // Phần còn lại
         if (pos < s.length()) {
             sb.append(s.substring(pos));
         }
@@ -84,10 +81,7 @@ public class SqlHighlighter implements Highlighter {
      * khác mà danh sách trên chưa liệt kê tới.
      */
     private boolean isIdentifierToken(Token t) {
-        int type = t.getType();
-        return dialect == Dialect.ORACLE
-                ? type == PlSqlLexer.REGULAR_ID
-                : (type == PostgreSQLLexer.Identifier || type == PostgreSQLLexer.QuotedIdentifier);
+        return DialectAdapters.of(dialect).isIdentifierToken(t.getType());
     }
 
     private static AttributedStyle styleForText(String text, boolean isIdentifierToken) {
@@ -98,13 +92,13 @@ public class SqlHighlighter implements Highlighter {
         char c0 = text.charAt(0);
 
         if (c0 == '\'') {
-            return AttributedStyle.DEFAULT.foreground(114); // xanh lá - string literal
+            return AttributedStyle.DEFAULT.foreground(114);
         }
         if (Character.isDigit(c0)) {
-            return AttributedStyle.DEFAULT.foreground(220); // vàng - number
+            return AttributedStyle.DEFAULT.foreground(220);
         }
         if (OPERATORS.contains(text)) {
-            return AttributedStyle.DEFAULT.foreground(203); // đỏ nhạt
+            return AttributedStyle.DEFAULT.foreground(203);
         }
         if (text.equals(".")) {
             return AttributedStyle.DEFAULT.foreground(244);
@@ -112,19 +106,19 @@ public class SqlHighlighter implements Highlighter {
 
         String upper = text.toUpperCase();
         if (DML.contains(upper)) {
-            return AttributedStyle.BOLD.foreground(75); // xanh dương đậm
+            return AttributedStyle.BOLD.foreground(75);
         }
         if (DDL.contains(upper)) {
-            return AttributedStyle.BOLD.foreground(208); // cam
+            return AttributedStyle.BOLD.foreground(208);
         }
         if (CLAUSE.contains(upper)) {
-            return AttributedStyle.DEFAULT.foreground(75); // xanh dương
+            return AttributedStyle.DEFAULT.foreground(75);
         }
         if (JOIN.contains(upper)) {
-            return AttributedStyle.DEFAULT.foreground(111); // xanh nhạt
+            return AttributedStyle.DEFAULT.foreground(111);
         }
         if (LOGIC.contains(upper)) {
-            return AttributedStyle.DEFAULT.foreground(141); // tím
+            return AttributedStyle.DEFAULT.foreground(141);
         }
         if (ORDERING.contains(upper)) {
             return AttributedStyle.DEFAULT.foreground(75);
@@ -133,15 +127,15 @@ public class SqlHighlighter implements Highlighter {
         if (isIdentifierToken) {
             String key = text.toLowerCase();
             if (SchemaIndex.tableIndex.containsKey(key)) {
-                return AttributedStyle.DEFAULT.foreground(214); // cam — table
+                return AttributedStyle.DEFAULT.foreground(214);
             }
             if (isSchema(key)) {
-                return AttributedStyle.DEFAULT.foreground(109); // cyan nhạt — schema
+                return AttributedStyle.DEFAULT.foreground(109);
             }
             if (isColumn(key)) {
-                return AttributedStyle.DEFAULT.foreground(150); // xanh lá nhạt — column
+                return AttributedStyle.DEFAULT.foreground(150);
             }
-            return AttributedStyle.DEFAULT.foreground(183); // tím nhạt — alias/keyword khác/unknown
+            return AttributedStyle.DEFAULT.foreground(183);
         }
 
         return AttributedStyle.DEFAULT;

@@ -1,7 +1,7 @@
 package com.sqlctx.schema;
 
-import com.sqlctx.datasource.OracleDataSource;
-import com.sqlctx.datasource.PostgresDataSource;
+import com.sqlctx.dialect.DialectAdapter;
+import com.sqlctx.dialect.DialectAdapters;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,17 +51,10 @@ public class SchemaIndex {
     public static void reload(Dialect d) {
         dialect = d;
         try {
-            if (d == Dialect.ORACLE) {
-                var conn = OracleDataSource.get();
-                schemas = SchemaLoader.loadSchemaOracle(conn);
-                dataTypes = SchemaLoader.loadDataTypesOracle();
-                functions = SchemaLoader.loadFunctionsOracle();
-            } else {
-                var conn = PostgresDataSource.get();
-                schemas = SchemaLoader.loadSchema(conn);
-                dataTypes = SchemaLoader.loadDataTypes(conn);
-                functions = SchemaLoader.loadFunctions(conn);
-            }
+            DialectAdapter adapter = DialectAdapters.of(d);
+            schemas = adapter.loadSchema();
+            dataTypes = adapter.loadDataTypes();
+            functions = adapter.loadFunctions();
             tableIndex = buildIndex(schemas);
             schemaTableIndex = buildSchemaTableIndex(schemas);
         } catch (Exception e) {

@@ -168,7 +168,6 @@ public final class SuggestFilter {
         return Character.isLowerCase(prev) && Character.isUpperCase(cur);
     }
 
-    // ───────────────────────────────────────────────────
 
     /**
      * Phần "đang gõ dở" thật sự cần match - nếu đang ở dot-mode và prefix có dấu

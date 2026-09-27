@@ -123,21 +123,6 @@ public class OracleScopeBuilder extends PlSqlParserBaseListener {
         return false;
     }
 
-//    public Scope scopeAt(int tokenIndex) {
-//        Scope best = null;
-//        for (Scope s : allScopes) {
-//            if (s.startTokenIndex < 0) {
-//                continue;
-//            }
-//            if (s.startTokenIndex <= tokenIndex && tokenIndex <= s.stopTokenIndex) {
-//                if (best == null || spanOf(s) < spanOf(best)) {
-//                    best = s;
-//                }
-//            }
-//        }
-//        return best != null ? best : root;
-//    }
-
     public Scope scopeAt(int tokenIndex) {
         Scope best = null;
         for (Scope s : allScopes) {

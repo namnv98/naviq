@@ -73,7 +73,6 @@ public final class CompletionHistory {
         return (int) Math.round(Math.min(raw, 10) * 3); // 0..30 điểm
     }
 
-    // ───────────────────────────────────────────────────
     private static void ensureLoaded() {
         if (loaded) {
             return;

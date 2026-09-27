@@ -3,12 +3,8 @@ package com.sqlctx.cli.terminal;
 import com.sqlctx.completion.suggestion.CompletionHistory;
 import com.sqlctx.completion.suggestion.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.SuggestFilter;
-import com.sqlctx.completion.suggestion.oracle.OracleSuggestionService;
-import com.sqlctx.completion.suggestion.postgresql.PostgresSuggestionService;
 import com.sqlctx.datasource.ConnectionProfileStore;
-import com.sqlctx.datasource.OracleDataSource;
-import com.sqlctx.datasource.PostgresDataSource;
-import com.sqlctx.schema.Dialect;
+import com.sqlctx.dialect.DialectAdapters;
 import com.sqlctx.schema.SchemaIndex;
 import com.sqlctx.completion.model.Suggestion;
 import com.sqlctx.completion.model.SuggestionType;
@@ -85,8 +81,6 @@ public class MenuCompleter {
 
     private static TerminalMenu terminalMenu;
     private static LineReader reader;
-
-    // ───────────────────────────────────────────────────
     public static void register(LineReader lineReader) {
         reader = lineReader;
         if (!(lineReader instanceof LineReaderImpl impl)) {
@@ -145,7 +139,7 @@ public class MenuCompleter {
             return true;
         });
 
-        map.bind(new Reference("delete-autosuggestion"), "\u001b[3~"); // DELETE (ANSI escape)
+        map.bind(new Reference("delete-autosuggestion"), "\u001b[3~");
         map.bind(new Reference("menu-complete"), "\t");
         map.bind(new Reference("up-autosuggestion"), KeyMap.key(impl.getTerminal(), Capability.key_up));
         map.bind(new Reference("down-autosuggestion"), KeyMap.key(impl.getTerminal(), Capability.key_down));
@@ -180,13 +174,9 @@ public class MenuCompleter {
         }
         return result;
     }
-
-    // ───────────────────────────────────────────────────
     /** Tính và hiện lại gợi ý theo nội dung/con trỏ hiện tại. Gọi sau self-insert / backward-delete-char / accept-line. */
     private static List<Suggestion> suggest(CompletionInputPreparer.PrepareCompletionInput input) {
-        return SchemaIndex.dialect == Dialect.ORACLE
-                ? OracleSuggestionService.suggests(input)
-                : PostgresSuggestionService.suggests(input);
+        return DialectAdapters.of(SchemaIndex.dialect).suggest(input);
     }
 
     /** Gói chung (input, suggests) cho 1 lần gợi ý - dùng cho cả đường SQL lẫn đường meta-command. */
@@ -256,18 +246,8 @@ public class MenuCompleter {
     }
 
     private static List<String> fetchDatabaseNames() {
-        Dialect dialect = SchemaIndex.dialect;
-        String sql = dialect == Dialect.ORACLE
-                ? "SELECT name FROM v$pdbs ORDER BY name"
-                : "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname";
-        var conn = dialect == Dialect.ORACLE ? OracleDataSource.get() : PostgresDataSource.get();
-        try (var stmt = conn.createStatement();
-             var rs = stmt.executeQuery(sql)) {
-            List<String> names = new ArrayList<>();
-            while (rs.next()) {
-                names.add(rs.getString(1));
-            }
-            return names;
+        try {
+            return DialectAdapters.of(SchemaIndex.dialect).listDatabases().names();
         } catch (Exception e) {
             return List.of();
         }
@@ -303,8 +283,6 @@ public class MenuCompleter {
         terminalMenu.show(lines, AnchorStrategies.smart(lines, PAGE_SIZE), 1, 1, linesBelowCursor(reader, sql, cursor));
         autosuggestionOpen = true;
     }
-
-    // ───────────────────────────────────────────────────
     private static void menuComplete(LineReaderImpl reader) {
         Terminal terminal = reader.getTerminal();
 
@@ -421,9 +399,6 @@ public class MenuCompleter {
                         }
                         char ch = key.charAt(0);
                         hide();
-                        if (!filtered.isEmpty() && isIdentifierChar(ch)) {
-//                            insert(reader, filtered.get(selected), ctx.prefix(), ctx.dotMode());
-                        }
                         reader.getBuffer().write(ch);
                         return;
                     }
@@ -436,8 +411,6 @@ public class MenuCompleter {
             hide();
         }
     }
-
-    // ───────────────────────────────────────────────────
     private static List<AttributedString> render(
             List<Suggestion> items,
             int selected,
@@ -475,7 +448,7 @@ public class MenuCompleter {
 
             AttributedStringBuilder row = new AttributedStringBuilder();
 
-            row.style(sel ? STYLE_SELECTED : STYLE_NORMAL).append(" ");          // leading space
+            row.style(sel ? STYLE_SELECTED : STYLE_NORMAL).append(" ");
 
             // Icon tô màu riêng theo loại (bảng/view/hàm/từ khoá...) - dễ nhận diện bằng mắt hơn 1 màu xám duy nhất.
             row.style(sel ? STYLE_SELECTED : iconStyle(type)).append(typeIcon(type));
@@ -541,30 +514,28 @@ public class MenuCompleter {
 
         String lower = t.toLowerCase();
         if (lower.startsWith("interval")) {
-            return AttributedStyle.DEFAULT.background(BG).foreground(109); // cyan - vẫn là loại thời gian
+            return AttributedStyle.DEFAULT.background(BG).foreground(109);
         }
         if (lower.startsWith("int") || lower.startsWith("numeric") || lower.startsWith("decimal")
                 || lower.startsWith("real") || lower.startsWith("double") || lower.startsWith("serial")
                 || lower.startsWith("money") || lower.startsWith("number") || lower.startsWith("binary_")) {
-            return AttributedStyle.DEFAULT.background(BG).foreground(220); // vàng
+            return AttributedStyle.DEFAULT.background(BG).foreground(220);
         }
         if (lower.startsWith("text") || lower.startsWith("character") || lower.startsWith("varchar")
                 || lower.startsWith("uuid") || lower.startsWith("json")
                 || lower.startsWith("char") || lower.startsWith("clob") || lower.startsWith("long")) {
-            return AttributedStyle.DEFAULT.background(BG).foreground(114); // xanh lá
+            return AttributedStyle.DEFAULT.background(BG).foreground(114);
         }
         if (lower.startsWith("timestamp") || lower.startsWith("date") || lower.startsWith("time")) {
-            return AttributedStyle.DEFAULT.background(BG).foreground(109); // cyan
+            return AttributedStyle.DEFAULT.background(BG).foreground(109);
         }
         if (lower.startsWith("bool")) {
-            return AttributedStyle.DEFAULT.background(BG).foreground(141); // tím
+            return AttributedStyle.DEFAULT.background(BG).foreground(141);
         }
         return AttributedStyle.DEFAULT.background(BG).foreground(244);
     }
-
-    // ───────────────────────────────────────────────────
     private static void insert(LineReaderImpl reader, Suggestion s, String prefix, boolean dot) {
-        CompletionHistory.record(s.getKey()); // ghi nhận lựa chọn - dùng để ưu tiên lần sau
+        CompletionHistory.record(s.getKey());
         reader.getBuffer().move(-prefix.length());
         for (int i = 0; i < prefix.length(); i++) {
             reader.getBuffer().delete();
@@ -580,8 +551,6 @@ public class MenuCompleter {
             reader.getBuffer().write(s.getKey());
         }
     }
-
-    // ───────────────────────────────────────────────────
     private static void highlight(AttributedStringBuilder sb, String word, String match,
                                   boolean dot) {
         if (match.isEmpty()) {
@@ -665,16 +634,16 @@ public class MenuCompleter {
     /** Màu icon riêng theo loại gợi ý - giúp liếc mắt phân biệt bảng/view/hàm/từ khoá nhanh hơn 1 màu xám duy nhất. */
     private static AttributedStyle iconStyle(String type) {
         int fg = switch (type) {
-            case "table" -> 75;               // xanh dương nhạt
-            case "view" -> 80;                 // cyan
-            case "materialized view" -> 111;   // xanh dương-tím
-            case "column" -> 114;               // xanh lá
-            case "function" -> 176;             // hồng-tím
-            case "keyword" -> 214;              // cam vàng
-            case "datatype" -> 183;             // tím nhạt
-            case "schema" -> 245;               // xám xanh
-            case "command" -> 220;               // vàng gold
-            case "database" -> 111;               // xanh dương-tím
+            case "table" -> 75;
+            case "view" -> 80;
+            case "materialized view" -> 111;
+            case "column" -> 114;
+            case "function" -> 176;
+            case "keyword" -> 214;
+            case "datatype" -> 183;
+            case "schema" -> 245;
+            case "command" -> 220;
+            case "database" -> 111;
             default -> 245;
         };
         return AttributedStyle.DEFAULT.foreground(fg).background(BG);
@@ -697,7 +666,7 @@ public class MenuCompleter {
         Terminal term = reader.getTerminal();
         PrintWriter out = term.writer();
 
-        out.print("\u001b[s"); // save cursor
+        out.print("\u001b[s");
 
         // Xóa ghost cũ bằng cách in LẠI ĐÚNG TEXT THẬT đang nằm ngay sau cursor
         // (KHÔNG phải khoảng trắng) - nếu cursor không đứng cuối dòng (đang sửa giữa
@@ -721,23 +690,22 @@ public class MenuCompleter {
             }
         }
 
-        out.print("\u001b[u"); // restore cursor (về vị trí cursor thật)
+        out.print("\u001b[u");
 
         // Vẽ ghost mới
         if (ghost != null && !ghost.isEmpty()) {
-            out.print("\u001b[s"); // save lại
+            out.print("\u001b[s");
             AttributedStringBuilder as = new AttributedStringBuilder();
             as.style(AttributedStyle.DEFAULT.foreground(244));
             as.append(ghost);
             out.print(as.toAnsi());
-            out.print("\u001b[u"); // restore
+            out.print("\u001b[u");
         }
 
         lastGhost = ghost == null ? "" : ghost;
         out.flush();
     }
 
-    // Gọi khi đóng menu hoặc insert
     public static void clearGhost(LineReaderImpl reader) {
         renderGhost(reader, "");
     }
@@ -776,7 +744,7 @@ public class MenuCompleter {
 
     public static void hide() {
         autosuggestionOpen = false;
-        clearGhost((LineReaderImpl) reader); // xóa ghost khi đóng menu
+        clearGhost((LineReaderImpl) reader);
         terminalMenu.hide();
     }
 
