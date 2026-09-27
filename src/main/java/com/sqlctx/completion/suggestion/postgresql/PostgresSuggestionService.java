@@ -91,11 +91,11 @@ public class PostgresSuggestionService implements SuggestionService {
         if (matchedRuleNames.contains("any_name")
                 && !nameFollowsNonTableKeyword
                 && !isNonTableAnyNameContext(syntacticResults)) {
-            addTableNameSuggestions(suggests, syntacticResults);
+            addTableNameSuggestions(suggests, syntacticResults, semanticResult.visibleCteNames());
         }
 
         if (matchedRuleNames.contains("qualified_name") && !nameFollowsNonTableKeyword) {
-            addTableNameSuggestions(suggests, syntacticResults);
+            addTableNameSuggestions(suggests, syntacticResults, semanticResult.visibleCteNames());
         }
 
         // GRANT/REVOKE .. TO/FROM, ALTER ROLE/GROUP, OWNER TO, DROP ROLE, DROP OWNED BY,
@@ -369,7 +369,7 @@ public class PostgresSuggestionService implements SuggestionService {
         }
     }
 
-    private static void addTableNameSuggestions(List<Suggestion> suggests, PostgresSyntacticAnalyzer.Result syn) {
+    private static void addTableNameSuggestions(List<Suggestion> suggests, PostgresSyntacticAnalyzer.Result syn, java.util.Set<String> visibleCteNames) {
         int caretTokenIndex = syn.caretTokenIndex();
         var tokenStream = syn.tokenStream();
         if (caretTokenIndex >= 2) {
@@ -384,5 +384,9 @@ public class PostgresSuggestionService implements SuggestionService {
             }
         }
         SchemaIndex.schemaTableIndex.values().forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+        // Tên CTE (WITH cte AS (...)) cũng là 1 "bảng" hợp lệ để gõ trong FROM - bug thật đã sửa:
+        // trước đây HOÀN TOÀN không gợi ý được tên CTE lúc đang gõ dở (chỉ resolve được SAU khi gõ
+        // xong nguyên tên nhờ resolveAsExistingCte ở tầng semantic, không phải lúc completion).
+        visibleCteNames.forEach(name -> suggests.add(Suggestion.of(name, SuggestionType.TABLE)));
     }
 }

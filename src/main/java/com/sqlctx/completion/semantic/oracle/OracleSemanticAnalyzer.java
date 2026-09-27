@@ -79,13 +79,20 @@ public class OracleSemanticAnalyzer {
             }
             var result = model.resolveAt(cursorOffset, scope);
             String ddlTargetAlias = scope != null && scope.isDdlTargetScope ? scope.primaryAlias() : null;
+            // Tên CTE (WITH cte AS (...)) - giống hệt lý do bên PostgresSemanticAnalyzer (bug thật:
+            // trước đây không gợi ý được tên CTE lúc đang gõ dở FROM).
+            // Đi qua visibleDerivedScopes() (đúng chuỗi cha) chứ không đọc thẳng
+            // scope.derivedScopeAliases - đồng nhất với PostgresSemanticAnalyzer (xem comment ở
+            // đó để biết lý do cụ thể).
+            java.util.Set<String> visibleCteNames = scope != null ? scope.visibleDerivedScopes().keySet() : java.util.Set.of();
             return new Result(
                     result.danglingQualifier(),
                     result.danglingQualifierResolvesTo(),
                     result.danglingQualifierScope(),
                     result.visibleAliases(),
                     result.visibleDerivedScopes(),
-                    ddlTargetAlias
+                    ddlTargetAlias,
+                    visibleCteNames
             );
         } catch (Exception e) {
             // Không in ra stderr - đang gõ dở SQL nên lỗi kiểu này xảy ra liên tục, in thẳng ra sẽ phá
@@ -135,10 +142,11 @@ public class OracleSemanticAnalyzer {
             Scope qualifierDerivedScope,
             Map<String, String> visibleAliases,
             Map<String, Scope> visibleDerivedScopes,
-            String ddlTargetAlias
+            String ddlTargetAlias,
+            java.util.Set<String> visibleCteNames
     ) {
         public static Result empty() {
-            return new Result(null, null, null, Map.of(), Map.of(), null);
+            return new Result(null, null, null, Map.of(), Map.of(), null, java.util.Set.of());
         }
     }
 }

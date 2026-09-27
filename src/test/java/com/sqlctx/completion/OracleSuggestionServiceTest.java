@@ -355,4 +355,48 @@ class OracleSuggestionServiceTest {
                 "select * from users u join orders o on o.user_id = u.id join contracts c on c.id = u.id where c.|");
         assertExactColumns(result, "c.id", "c.name", "c.amount", "c.status");
     }
+
+    // =====================================================================
+    // N. TỪNG VỊ TRÍ trong câu (không chỉ 1 vị trí đại diện) - CTE/HAVING/
+    // subquery, y hệt nhóm đã thêm bên Postgres.
+    // =====================================================================
+
+    @Test
+    @DisplayName("HAVING |: phải thấy đúng cột thật của bảng đang GROUP BY")
+    void havingClauseSuggestsRealColumns() {
+        var result = suggest("select status, count(*) from orders group by status having |");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.status", "orders.id", "orders.total", "orders.user_id", "orders.customer_id")));
+    }
+
+    @Test
+    @DisplayName("Subquery không tương quan trong WHERE IN (...): cursor bên trong subquery phải thấy cột bảng subquery đang FROM")
+    void whereInSubquerySuggestsSubqueryOwnColumns() {
+        var result = suggest("select * from users where id in (select | from orders)");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.id", "orders.total", "orders.status", "orders.user_id", "orders.customer_id")));
+    }
+
+    @Test
+    @DisplayName("Tên CTE phải được gợi ý như 1 bảng khi đang gõ dở trong FROM - bug thật đã sửa")
+    void cteNameSuggestedAsFromTarget() {
+        var result = suggest("with recent as (select * from users) select * from re|");
+        assertTrue(hasKeyOfType(result, "recent", "table"));
+    }
+
+    @Test
+    @DisplayName("CTE tham chiếu CTE khác (2 tầng, cả 2 đều wildcard) phải resolve xuyên suốt - bug thật đã sửa (DerivedColumnExpander dùng chung với Postgres)")
+    void cteChainResolvesTransitively() {
+        var result = suggest("with a as (select * from users), b as (select * from a) select * from b bb where bb.|");
+        assertExactColumns(result, "bb.id", "bb.name", "bb.email");
+    }
+
+    @Test
+    @DisplayName("UNION nhánh 2 KHÔNG được thấy bảng của nhánh 1 (Oracle: mỗi query_block đã tự có scope riêng, không dính bug như Postgres từng có, test để canh không tái phát)")
+    void unionSecondBranchDoesNotLeakFirstBranchTable() {
+        var result = suggest("select id from users union select | from orders");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.id", "orders.customer_id", "orders.total", "orders.status", "orders.user_id")));
+        assertTrue(columns.stream().noneMatch(c -> c.startsWith("users.")));
+    }
 }

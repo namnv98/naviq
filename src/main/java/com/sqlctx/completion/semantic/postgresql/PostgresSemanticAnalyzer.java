@@ -58,13 +58,25 @@ public class PostgresSemanticAnalyzer {
             var scope = model.scopeAt(patch.caretTokenIndex());
             var result = model.resolveAt(cursorOffset, scope);
             String ddlTargetAlias = scope != null && scope.isDdlTargetScope ? scope.primaryAlias() : null;
+            // Tên CTE (WITH cte AS (...)) đang HIỂN THỊ ở scope hiện tại - đăng ký vào
+            // derivedScopeAliases của scope ngay khi WITH clause đóng xong (xem
+            // PostgresScopeBuilder.exitWith_clause), TRƯỚC KHI người dùng gõ tới FROM. Cần để gợi ý
+            // TÊN CTE như 1 "bảng" khi đang gõ dở "FROM re|" - trước đây hoàn toàn không có (bug
+            // thật, chỉ resolve được SAU khi cả tên CTE đã gõ xong, không completion được lúc gõ dở).
+            // Đi qua visibleDerivedScopes() (đúng chuỗi cha, giống visibleAliases()) chứ KHÔNG đọc
+            // thẳng scope.derivedScopeAliases - từ khi simple_select_pramary có scope riêng, scope
+            // hiện tại ở cursor (con) không tự có derivedScopeAliases của CTE (đăng ký ở scope CHA
+            // lúc exitWith_clause) - đọc thẳng sẽ bỏ sót, phải đi qua chuỗi kế thừa như mọi chỗ
+            // khác đã làm.
+            Set<String> visibleCteNames = scope != null ? scope.visibleDerivedScopes().keySet() : Set.of();
             return new Result(
                     result.danglingQualifier(),
                     result.danglingQualifierResolvesTo(),
                     result.danglingQualifierScope(),
                     result.visibleAliases(),
                     result.visibleDerivedScopes(),
-                    ddlTargetAlias
+                    ddlTargetAlias,
+                    visibleCteNames
             );
         } catch (Exception e) {
             // Không in ra stderr - đang gõ dở SQL nên lỗi kiểu này xảy ra liên tục, in thẳng ra sẽ phá
@@ -80,11 +92,12 @@ public class PostgresSemanticAnalyzer {
         Scope qualifierDerivedScope,
         Map<String, String> visibleAliases,
         Map<String, Scope> visibleDerivedScopes,
-        String ddlTargetAlias
+        String ddlTargetAlias,
+        Set<String> visibleCteNames
     ) {
 
         public static Result empty() {
-            return new Result(null, null, null, Map.of(), Map.of(), null);
+            return new Result(null, null, null, Map.of(), Map.of(), null, Set.of());
         }
     }
 }

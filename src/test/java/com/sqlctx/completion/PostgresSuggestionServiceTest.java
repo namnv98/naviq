@@ -548,4 +548,136 @@ class PostgresSuggestionServiceTest {
         assertTrue(datatypes.contains("int4"));
         assertTrue(datatypes.contains("text"));
     }
+
+    // =====================================================================
+    // P. TỪNG VỊ TRÍ trong 1 câu SELECT/UPDATE/DELETE hoàn chỉnh - không chỉ 1
+    // vị trí đại diện cho cả câu lệnh (đây là tool AUTOCOMPLETE, người dùng gõ
+    // và dừng lại ở RẤT NHIỀU điểm khác nhau trong CÙNG 1 câu).
+    // =====================================================================
+
+    @Test
+    @DisplayName("'select |' (đầu câu, chưa gõ gì) - phải thấy đúng cột thật của bảng trong FROM")
+    void selectBareStartSuggestsRealColumns() {
+        var result = suggest("select | from users");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("users.id", "users.name", "users.email")));
+    }
+
+    @Test
+    @DisplayName("'select id, |' (cột thứ 2 trở đi) - vẫn phải thấy đúng cột thật")
+    void selectSecondColumnStillSuggestsColumns() {
+        var result = suggest("select id, | from users");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("users.id", "users.name", "users.email")));
+    }
+
+    @Test
+    @DisplayName("'WHERE id = 1 AND |' (điều kiện thứ 2 trở đi) - vẫn phải thấy đúng cột thật")
+    void whereAndContinuationStillSuggestsColumns() {
+        var result = suggest("select * from users where id = 1 and |");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("users.id", "users.name", "users.email")));
+    }
+
+    @Test
+    @DisplayName("HAVING |: phải thấy đúng cột thật của bảng đang GROUP BY")
+    void havingClauseSuggestsRealColumns() {
+        var result = suggest("select status, count(*) from orders group by status having |");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.status", "orders.id", "orders.total", "orders.user_id", "orders.customer_id")));
+    }
+
+    @Test
+    @DisplayName("Subquery KHÔNG tương quan trong WHERE IN (...): cursor bên trong subquery phải thấy cột của bảng subquery đang FROM")
+    void whereInSubquerySuggestsSubqueryOwnColumns() {
+        var result = suggest("select * from users where id in (select | from orders)");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.id", "orders.total", "orders.status", "orders.user_id", "orders.customer_id")));
+    }
+
+    @Test
+    @DisplayName("Subquery TƯƠNG QUAN (correlated EXISTS): alias bảng NGOÀI vẫn phải resolve được bên trong subquery")
+    void whereExistsCorrelatedResolvesOuterAlias() {
+        var result = suggest("select * from users u where exists (select 1 from orders o where o.user_id = u.|)");
+        assertExactColumns(result, "u.id", "u.name", "u.email");
+    }
+
+    @Test
+    @DisplayName("Tên CTE phải được gợi ý như 1 bảng khi đang gõ dở trong FROM - bug thật đã sửa (trước đây hoàn toàn không gợi ý được)")
+    void cteNameSuggestedAsFromTarget() {
+        var result = suggest("with recent as (select * from users) select * from re|");
+        assertTrue(hasKeyOfType(result, "recent", "table"));
+    }
+
+    @Test
+    @DisplayName("CTE tham chiếu CTE khác (2 tầng, cả 2 đều wildcard) phải resolve xuyên suốt - bug thật đã sửa (DerivedColumnExpander trước đây chỉ đệ quy đúng 1 cấp, tầng 2 luôn rỗng)")
+    void cteChainResolvesTransitively() {
+        var result = suggest("with a as (select * from users), b as (select * from a) select * from b bb where bb.|");
+        assertExactColumns(result, "bb.id", "bb.name", "bb.email");
+    }
+
+    @Test
+    @DisplayName("INSERT ... VALUES (|): KHÔNG có bảng nào trong scope để gợi ý cột (quy ước đã có từ trước)")
+    void insertValuesDoesNotSuggestColumns() {
+        var result = suggest("insert into users (id, name) values (1, |)");
+        assertTrue(keysOfType(result, "column").isEmpty());
+    }
+
+    @Test
+    @DisplayName("DELETE FROM users WHERE | (không JOIN/USING) - vẫn phải thấy đúng cột thật")
+    void deletePlainWhereSuggestsColumns() {
+        var result = suggest("delete from users where |");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("users.id", "users.name", "users.email")));
+    }
+
+    // =====================================================================
+    // Q. Window function (OVER (...)), LATERAL, UNION - verify bằng Postgres
+    // THẬT (không chỉ suy từ grammar - bài học từ session này: grammar port
+    // có thể sai/thiếu, phải đối chiếu hành vi DB thật).
+    // =====================================================================
+
+    @Test
+    @DisplayName("Window function PARTITION BY |: phải thấy đúng cột thật của bảng đang FROM")
+    void windowPartitionBySuggestsRealColumns() {
+        var result = suggest("select id, sum(total) over (partition by | order by id) from orders");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.id", "orders.total", "orders.status", "orders.user_id", "orders.customer_id")));
+    }
+
+    @Test
+    @DisplayName("Window function ORDER BY (trong OVER) |: phải thấy đúng cột thật")
+    void windowOrderBySuggestsRealColumns() {
+        var result = suggest("select id, sum(total) over (partition by status order by |) from orders");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.id", "orders.total", "orders.status", "orders.user_id", "orders.customer_id")));
+    }
+
+    @Test
+    @DisplayName("LATERAL subquery: được phép tham chiếu alias của FROM-item ĐỨNG TRƯỚC nó (đúng ngữ nghĩa LATERAL thật của Postgres, verify bằng docs/hành vi chuẩn)")
+    void lateralSubqueryResolvesPrecedingAlias() {
+        var result = suggest("select * from users u, lateral (select * from orders o where o.user_id = u.|) sub");
+        assertExactColumns(result, "u.id", "u.name", "u.email");
+    }
+
+    @Test
+    @DisplayName("UNION nhánh 2 KHÔNG được thấy bảng của nhánh 1 - bug thật đã sửa, verify bằng Postgres THẬT: \"select id from users union select users.name from orders\" bị Postgres từ chối \"missing FROM-clause entry for table users\" - chứng minh 2 nhánh KHÔNG share scope")
+    void unionSecondBranchDoesNotLeakFirstBranchTable() {
+        var result = suggest("select id from users union select | from orders");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.id", "orders.total", "orders.status", "orders.user_id", "orders.customer_id")),
+                "Nhánh 2 phải thấy cột của orders (bảng CHÍNH NÓ đang FROM)");
+        assertTrue(columns.stream().noneMatch(c -> c.startsWith("users.")),
+                "Nhánh 2 KHÔNG được thấy cột của users (bảng thuộc nhánh 1, không cùng scope) - verify bằng Postgres thật đã xác nhận điều này");
+    }
+
+    @Test
+    @DisplayName("UNION nhánh 2 cũng không được thấy CTE chỉ dùng ở nhánh 1")
+    void unionSecondBranchDoesNotLeakCteFromFirstBranch() {
+        var result = suggest("with a as (select * from users) select * from a union select | from orders");
+        var columns = keysOfType(result, "column");
+        assertTrue(columns.containsAll(List.of("orders.id", "orders.total", "orders.status", "orders.user_id", "orders.customer_id")));
+        assertTrue(columns.stream().noneMatch(c -> c.startsWith("a.")),
+                "Nhánh 2 không FROM cte 'a' nên không được thấy cột của nó");
+    }
 }

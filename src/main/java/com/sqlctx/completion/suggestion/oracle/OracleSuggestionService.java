@@ -97,7 +97,7 @@ public class OracleSuggestionService implements SuggestionService {
         // (FROM, table_ref, ALTER TABLE, general_table_ref, CREATE INDEX...) - chỉ cần 1 check,
         // không cần 2 check trùng lặp như bản gốc.
         if (matchedRuleNames.contains("tableview_name")) {
-            addTableNameSuggestions(suggests, syntacticResults);
+            addTableNameSuggestions(suggests, syntacticResults, semanticResult.visibleCteNames());
         }
 
         // columnref (Postgres, 1 rule gộp chung mọi biểu thức cột) -> Oracle TÁCH thành 2 rule:
@@ -403,7 +403,7 @@ public class OracleSuggestionService implements SuggestionService {
         }
     }
 
-    private static void addTableNameSuggestions(List<Suggestion> suggests, OracleSyntacticAnalyzer.Result syn) {
+    private static void addTableNameSuggestions(List<Suggestion> suggests, OracleSyntacticAnalyzer.Result syn, java.util.Set<String> visibleCteNames) {
         // "tableview_name" dùng CHUNG cho mọi vị trí tham chiếu bảng/view (xem comment ở nơi gọi) -
         // nhưng DROP VIEW chỉ nên gợi ý VIEW thật, không phải bảng (bug thật phát hiện qua
         // GrammarBreadthTest: "DROP VIEW |" gợi ý cả TABLE, dù DROP VIEW một bảng thật là câu lệnh
@@ -434,5 +434,10 @@ public class OracleSuggestionService implements SuggestionService {
                 .filter(t -> !isDropView || "view".equalsIgnoreCase(t.kind()))
                 .filter(t -> !isDropTable || "table".equalsIgnoreCase(t.kind()))
                 .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+        // Tên CTE cũng là 1 "bảng" hợp lệ để gõ trong FROM - không áp dụng cho DROP VIEW/DROP TABLE
+        // (CTE không phải đối tượng có thể DROP). Cùng bug/lý do đã sửa bên Postgres.
+        if (!isDropView && !isDropTable) {
+            visibleCteNames.forEach(name -> suggests.add(Suggestion.of(name, SuggestionType.TABLE)));
+        }
     }
 }

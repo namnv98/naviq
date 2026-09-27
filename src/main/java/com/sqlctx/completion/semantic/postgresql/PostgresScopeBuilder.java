@@ -159,7 +159,14 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
                 continue; // root hoặc chưa set
             }
             if (s.startTokenIndex <= tokenIndex && tokenIndex <= s.stopTokenIndex) {
-                if (best == null || spanOf(s) < spanOf(best)) {
+                // Hoà span (2 scope lồng nhau NHƯNG trùng khít [start,stop] - vd
+                // simple_select_pramary lồng ngay trong select_no_parens khi không có WITH
+                // clause, cả 2 cùng bắt đầu ở token SELECT và cùng kết thúc ở token cuối câu) ->
+                // ưu tiên scope có id LỚN HƠN (được push SAU, tức sâu/cụ thể hơn - id tăng đơn
+                // điệu theo thứ tự push). Bug thật đã gặp: dùng "<" chặt khiến hoà span luôn giữ
+                // scope THÊM VÀO TRƯỚC (scope cha, rỗng alias) thay vì scope con vừa đăng ký alias.
+                if (best == null || spanOf(s) < spanOf(best)
+                        || (spanOf(s) == spanOf(best) && s.id > best.id)) {
                     best = s;
                 }
             }
@@ -180,6 +187,31 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
     @Override
     public void exitSelect_no_parens(PostgreSQLParser.Select_no_parensContext ctx) {
         popScope(ctx.getStop());  // stop là CLOSE_PAREN
+    }
+
+    // ---- UNION/INTERSECT/EXCEPT alias-leak giữa các nhánh - BUG THẬT đã xác nhận bằng Postgres
+    // thật ("select id from users union select users.name from orders" bị từ chối "missing
+    // FROM-clause entry for table users"). select_clause là "simple_select_pramary
+    // ((UNION|EXCEPT) simple_select_pramary)*" - nhiều nhánh SELECT là ANH EM (sibling) nằm CHUNG
+    // trong 1 select_no_parens, KHÔNG lồng nhau - trước đây select_no_parens push ĐÚNG 1 scope
+    // cho CẢ CÂU UNION nên FROM của nhánh này ghi đè/lẫn vào FROM của nhánh kia. Mỗi nhánh
+    // SELECT...FROM...WHERE (chỉ alternative ĐẦU của simple_select_pramary) giờ có scope RIÊNG.
+    // LẦN THỬ ĐẦU đã gây regression nặng (24 test fail) vì scope mới trùng khít span với
+    // select_no_parens khi không có WITH clause, và scopeAt() dùng "<" chặt nên hoà span luôn
+    // chọn nhầm scope cha rỗng - đã sửa CẢ tie-break của scopeAt() (ưu tiên id lớn hơn khi hoà
+    // span) TRƯỚC KHI bật lại thay đổi này.
+    @Override
+    public void enterSimple_select_pramary(PostgreSQLParser.Simple_select_pramaryContext ctx) {
+        if (ctx.SELECT() != null) {
+            pushScope(ctx.getStart());
+        }
+    }
+
+    @Override
+    public void exitSimple_select_pramary(PostgreSQLParser.Simple_select_pramaryContext ctx) {
+        if (ctx.SELECT() != null) {
+            popScope(ctx.getStop());
+        }
     }
 
     // ---- UPDATE / DELETE - grammar mới KHÔNG dùng table_ref cho 2 câu này mà dùng
@@ -811,6 +843,18 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
             return;
         }
         Scope cteScope = host.children.get(host.children.size() - 1);
+        // BÓC LỚP BỌC: từ khi simple_select_pramary có scope riêng (sửa alias-leak giữa các
+        // nhánh UNION), 1 CTE thân KHÔNG-UNION giờ có 2 scope LỒNG NHAU trùng khít [start,stop]
+        // (select_no_parens bọc ngoài, simple_select_pramary bên trong mới là nơi FROM/cột thật sự
+        // được ghi) - cteScope ở trên vẫn là scope BỌC NGOÀI (rỗng), phải bóc xuống scope con nếu
+        // nó là wrapper 1-con-trùng-span (KHÔNG đệ quy xuống subquery lồng thật sự, vì subquery
+        // thật luôn có span HẸP HƠN, không trùng khít).
+        if (cteScope.children.size() == 1) {
+            Scope inner = cteScope.children.get(0);
+            if (inner.startTokenIndex == cteScope.startTokenIndex && inner.stopTokenIndex == cteScope.stopTokenIndex) {
+                cteScope = inner;
+            }
+        }
         cteScope.isolatedFromParentAliases = true;
         applyCteColumnRename(cteScope, ctx.opt_name_list());
         pendingCte.peek().put(ctx.name().getText(), cteScope);
