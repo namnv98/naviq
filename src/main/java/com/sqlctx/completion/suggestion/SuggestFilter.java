@@ -4,7 +4,9 @@ import com.sqlctx.completion.model.Suggestion;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Lọc + xếp hạng danh sách Suggestion theo prefix người dùng đang gõ (hỗ trợ dot-mode
@@ -39,7 +41,14 @@ public final class SuggestFilter {
         }
 
         List<Scored> scored = new ArrayList<>();
+        // Khử trùng (type, key) - nhiều nhánh của service cùng thêm 1 nguồn dữ liệu cho CÙNG vị trí
+        // (vd hàm từ cả func_name lẫn columnref, 2 token khác nhau cùng hiển thị "operator") -
+        // bug thật: mọi vị trí biểu thức từng hiện count/sum/avg/now 2 lần trên menu.
+        Set<String> seen = new HashSet<>();
         for (Suggestion s : all) {
+            if (!seen.add(s.getType().label() + "\u0000" + s.getKey().toLowerCase())) {
+                continue;
+            }
             if (schemaPrefix != null && !s.getKey().toLowerCase().startsWith(schemaPrefix + ".")) {
                 continue;
             }

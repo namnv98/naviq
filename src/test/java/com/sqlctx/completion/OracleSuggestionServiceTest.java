@@ -1,117 +1,27 @@
 package com.sqlctx.completion;
 
-import com.sqlctx.completion.model.Suggestion;
-import com.sqlctx.completion.suggestion.CompletionHistory;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
-import com.sqlctx.completion.suggestion.oracle.OracleSuggestionService;
-import com.sqlctx.schema.ColumnInfo;
-import com.sqlctx.schema.SchemaInfo;
-import com.sqlctx.schema.SchemaIndex;
-import com.sqlctx.schema.TableInfo;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
+import com.sqlctx.completion.support.CompletionExpectations;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
-
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.sqlctx.completion.support.Completion.ora;
+import static com.sqlctx.completion.support.CompletionFixtures.*;
 
 /**
- * Test gợi ý SQL Oracle đi qua ĐÚNG đường thật production dùng
- * ({@code suggests(PrepareCompletionInput)}, có {@code SuggestFilter} rank/lọc). Cùng triết lý
- * với {@link PostgresSuggestionServiceTest}: viết kỳ vọng ĐÚNG trước dựa trên schema fixture +
- * ngữ nghĩa SQL, rồi mới assert - không quan sát output thật rồi khớp ngược.
+ * Test gợi ý SQL Oracle (SÂU: xếp hạng, alias, scope, CTE/subquery/UNION) đi qua ĐÚNG đường
+ * production ({@code suggests(PrepareCompletionInput)}, có {@code SuggestFilter} rank/lọc). Cùng
+ * cách kiểm tra với {@link PostgresSuggestionServiceTest}.
+ * <p>
+ * MỖI test khẳng định TOÀN BỘ danh sách gợi ý tại vị trí con trỏ - không chỉ "có chứa" (xem
+ * {@link com.sqlctx.completion.support.CompletionExpectation}): mỗi loại khai báo phải khớp
+ * CHÍNH XÁC, loại không khai báo phải rỗng, không được trùng, keyword khớp snapshot
+ * ({@code src/test/resources/completion/keywords-*.txt}). Kiểm tra chạy tự động sau test bởi
+ * {@link com.sqlctx.completion.support.CompletionExpectations}.
  */
+@ExtendWith(CompletionExpectations.class)
+@ExtendWith(CompletionExpectations.class)
 class OracleSuggestionServiceTest {
-
-    @BeforeAll
-    static void setUpFixtureSchema() {
-        var id = new ColumnInfo("id", "id", "NUMBER", true);
-        var name = new ColumnInfo("name", "name", "VARCHAR2", false);
-        var email = new ColumnInfo("email", "email", "VARCHAR2", false);
-        var customerId = new ColumnInfo("customer_id", "customer_id", "NUMBER", false);
-        var total = new ColumnInfo("total", "total", "NUMBER", false);
-        var status = new ColumnInfo("status", "status", "VARCHAR2", false);
-        var userId = new ColumnInfo("user_id", "user_id", "NUMBER", false);
-        var amount = new ColumnInfo("amount", "amount", "NUMBER", false);
-        var price = new ColumnInfo("price", "price", "NUMBER", false);
-        var quantity = new ColumnInfo("quantity", "quantity", "NUMBER", false);
-        var description = new ColumnInfo("description", "description", "VARCHAR2", false);
-
-        var users = new TableInfo("naviq", "users", "table", List.of(id, name, email));
-        var orders = new TableInfo("naviq", "orders", "table", List.of(id, customerId, total, status, userId));
-        var contracts = new TableInfo("naviq", "contracts", "table", List.of(id, name, amount, status));
-        var products = new TableInfo("naviq", "products", "table", List.of(id, name, price, quantity, description));
-
-        var schema = new SchemaInfo("naviq", List.of(users, orders, contracts, products));
-        SchemaIndex.schemas = List.of(schema);
-        SchemaIndex.tableIndex = Map.of(
-                "naviq.users", users, "users", users,
-                "naviq.orders", orders, "orders", orders,
-                "naviq.contracts", contracts, "contracts", contracts,
-                "naviq.products", products, "products", products
-        );
-        SchemaIndex.schemaTableIndex = Map.of(
-                "naviq.users", users, "naviq.orders", orders,
-                "naviq.contracts", contracts, "naviq.products", products
-        );
-        SchemaIndex.functions = List.of("count", "sum", "avg", "sysdate");
-        SchemaIndex.dataTypes = List.of("NUMBER", "VARCHAR2", "DATE", "CHAR");
-    }
-
-    @BeforeEach
-    void resetHistory() {
-        CompletionHistory.resetForTests();
-    }
-
-    // =====================================================================
-    // Helper - gọi ĐÚNG đường production (có SuggestFilter)
-    // =====================================================================
-
-    private static List<Suggestion> suggest(String rawWithCursor) {
-        int cursor = rawWithCursor.indexOf('|');
-        String sql = rawWithCursor.substring(0, cursor) + rawWithCursor.substring(cursor + 1);
-        var input = CompletionInputPreparer.buildInput(sql, cursor);
-        return OracleSuggestionService.suggests(input);
-    }
-
-    private static String firstKey(List<Suggestion> list) {
-        assertFalse(list.isEmpty(), "Danh sách gợi ý rỗng, không có kết quả để lấy top 1");
-        return list.get(0).getKey();
-    }
-
-    private static String firstType(List<Suggestion> list) {
-        assertFalse(list.isEmpty(), "Danh sách gợi ý rỗng, không có kết quả để lấy top 1");
-        return list.get(0).getType().label();
-    }
-
-    private static List<String> keysOfType(List<Suggestion> list, String type) {
-        return list.stream().filter(s -> s.getType().label().equals(type)).map(Suggestion::getKey).toList();
-    }
-
-    private static boolean hasKeyOfType(List<Suggestion> list, String key, String type) {
-        return list.stream().anyMatch(s -> s.getKey().equalsIgnoreCase(key) && s.getType().label().equals(type));
-    }
-
-    private static void assertExactKeysOfType(List<Suggestion> list, String type, String... expectedKeys) {
-        Set<String> actual = list.stream().filter(s -> s.getType().label().equals(type))
-                .map(s -> s.getKey().toLowerCase()).collect(Collectors.toCollection(TreeSet::new));
-        Set<String> expected = java.util.Arrays.stream(expectedKeys)
-                .map(String::toLowerCase).collect(Collectors.toCollection(TreeSet::new));
-        assertEquals(expected, actual, () -> "Tập '" + type + "' không khớp — mong đợi đúng " + expected + " nhưng thực tế là " + actual);
-    }
-
-    private static void assertExactColumns(List<Suggestion> list, String... expectedKeys) {
-        assertExactKeysOfType(list, "column", expectedKeys);
-    }
 
     // =====================================================================
     // A. Prefix ranking thật - đối tượng schema thật phải thắng keyword chung
@@ -120,24 +30,19 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("Gõ tên bảng có thật ('us') phải thắng keyword chung ('user') dù cả 2 cùng match prefix")
     void realTableBeatsGenericKeywordOnPrefix() {
-        var result = suggest("select * from us|");
-        assertEquals("naviq.users", firstKey(result));
-        assertEquals("table", firstType(result));
+        ora("select * from us|").tables("naviq.products", "naviq.users").first("naviq.users");
     }
 
     @Test
     @DisplayName("Gõ tên cột không alias ('i') phải thắng keyword ('interval'...) dù cả 2 cùng match prefix")
     void realColumnBeatsGenericKeywordOnPrefix() {
-        var result = suggest("select * from users where i|");
-        assertEquals("users.id", firstKey(result));
-        assertEquals("column", firstType(result));
+        ora("select * from users where i|").columns("users.email", "users.id").first("users.id");
     }
 
     @Test
     @DisplayName("Không phân biệt hoa/thường: 'USE' vẫn tìm ra bảng 'users'")
     void tableMatchIsCaseInsensitive() {
-        var result = suggest("select * from USE|");
-        assertEquals("naviq.users", firstKey(result));
+        ora("select * from USE|").tables("naviq.users").first("naviq.users");
     }
 
     // =====================================================================
@@ -147,9 +52,7 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("Gõ thiếu 1 ký tự giữa từ ('usrs' thiếu 'e') vẫn phải gợi ý ra 'users' (fuzzy subsequence)")
     void fuzzySubsequenceStillFindsRealTable() {
-        var result = suggest("select * from usrs|");
-        assertTrue(hasKeyOfType(result, "naviq.users", "table"),
-                "Gõ 'usrs' (thiếu chữ 'e') phải vẫn khớp fuzzy ra 'users' - không được biến mất hoàn toàn");
+        ora("select * from usrs|").tables("naviq.users");
     }
 
     // =====================================================================
@@ -159,15 +62,13 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("JOIN 2 bảng, gõ 'u.' phải CHỈ ra đúng cột của users, không lẫn cột orders")
     void aliasQualifiedColumnsAfterJoin() {
-        var result = suggest("select * from users u join orders o on o.user_id = u.|");
-        assertExactColumns(result, "u.id", "u.name", "u.email");
+        ora("select * from users u join orders o on o.user_id = u.|").columns("u.email", "u.id", "u.name");
     }
 
     @Test
     @DisplayName("JOIN...USING(|): chỉ gợi ý đúng cột TRÙNG TÊN giữa 2 bảng (users/orders chỉ chung 'id')")
     void joinUsingSuggestsOnlyCommonColumns() {
-        var result = suggest("select * from users u join orders o using (|");
-        assertExactColumns(result, "u.id", "o.id");
+        ora("select * from users u join orders o using (|").columns("o.id", "u.id");
     }
 
     // =====================================================================
@@ -178,22 +79,19 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("Gợi ý alias mặc định cho 1 bảng chưa dùng lần nào: 'contracts' -> 'c'")
     void firstAliasSuggestionUsesFirstLetter() {
-        var result = suggest("select * from contracts |");
-        assertTrue(hasKeyOfType(result, "c", "alias"));
+        ora("select * from contracts |").aliases("c");
     }
 
     @Test
     @DisplayName("Alias 'c' đã dùng - lần 2 phải là 'c1', không lặp lại 'c'")
     void secondAliasCollisionAvoidedWithSuffix1() {
-        var result = suggest("select * from contracts c join contracts |");
-        assertTrue(hasKeyOfType(result, "c1", "alias"));
+        ora("select * from contracts c join contracts |").aliases("c1");
     }
 
     @Test
     @DisplayName("Alias 'c' và 'c1' đã dùng - lần 3 phải là 'c2'")
     void thirdAliasCollisionAvoidedWithSuffix2() {
-        var result = suggest("select * from contracts c join contracts c1 join contracts |");
-        assertTrue(hasKeyOfType(result, "c2", "alias"));
+        ora("select * from contracts c join contracts c1 join contracts |").aliases("c2");
     }
 
     // =====================================================================
@@ -203,11 +101,7 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("'naviq.us|' (đã gõ rõ schema) phải xếp 'naviq.users' lên đầu, đúng schema đã gõ")
     void schemaQualifiedPrefixRanksRealTableFirst() {
-        var result = suggest("select * from naviq.us|");
-        assertEquals("naviq.users", firstKey(result));
-        assertEquals("table", firstType(result));
-        keysOfType(result, "table").forEach(k -> assertTrue(k.startsWith("naviq."),
-                () -> "'" + k + "' không thuộc schema 'naviq' đã gõ rõ"));
+        ora("select * from naviq.us|").tables("naviq.products", "naviq.users").first("naviq.users");
     }
 
     // =====================================================================
@@ -217,8 +111,8 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("INSERT INTO orders (...): danh sách cột phải ĐÚNG các cột thật của orders")
     void insertColumnListSuggestsExactRealColumns() {
-        var result = suggest("insert into orders (|");
-        assertExactColumns(result, "orders.id", "orders.customer_id", "orders.total", "orders.status", "orders.user_id");
+        ora("insert into orders (|")
+                .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id");
     }
 
     // =====================================================================
@@ -228,21 +122,13 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("'order by name |' (đã gõ xong 1 cột) - KHÔNG còn gợi ý cột nào nữa, chỉ còn ASC/DESC")
     void orderByNoLongerSuggestsColumnsAfterCompleteElement() {
-        var result = suggest("select * from users order by name |");
-        assertTrue(keysOfType(result, "column").isEmpty(),
-                "Đã gõ xong 1 cột trong ORDER BY - không nên còn gợi ý cột nào nữa");
-        var keywords = result.stream().filter(s -> s.getType().label().equals("keyword"))
-                .map(s -> s.getKey().toLowerCase()).collect(Collectors.toSet());
-        assertTrue(keywords.contains("asc"));
-        assertTrue(keywords.contains("desc"));
+        ora("select * from users order by name |").keywordsInclude("asc", "desc");
     }
 
     @Test
     @DisplayName("'group by name |' (đã gõ xong 1 cột) - KHÔNG còn gợi ý cột nào nữa (y hệt ORDER BY)")
     void groupByNoLongerSuggestsColumnsAfterCompleteElement() {
-        var result = suggest("select * from users group by name |");
-        assertTrue(keysOfType(result, "column").isEmpty(),
-                "Đã gõ xong 1 cột trong GROUP BY - không nên còn gợi ý cột nào nữa");
+        ora("select * from users group by name |");
     }
 
     // =====================================================================
@@ -253,8 +139,8 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("WITH cte AS (...): alias của CTE phải gợi ý đúng cột của SELECT bên trong nó")
     void cteAliasColumnsResolveCorrectly() {
-        var result = suggest("with recent as (select * from users) select * from recent r where r.|");
-        assertExactColumns(result, "r.id", "r.name", "r.email");
+        ora("with recent as (select * from users) select * from recent r where r.|")
+                .columns("r.email", "r.id", "r.name");
     }
 
     // =====================================================================
@@ -264,8 +150,7 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("2 bảng join cùng có cột 'name' - gõ trần 'na' phải thấy CẢ HAI, đúng alias riêng")
     void ambiguousColumnAcrossJoinedTablesShowsBothQualified() {
-        var result = suggest("select * from users u join contracts c on u.id = c.id where na|");
-        assertExactColumns(result, "u.name", "c.name");
+        ora("select * from users u join contracts c on u.id = c.id where na|").columns("c.name", "u.name");
     }
 
     // =====================================================================
@@ -275,9 +160,8 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("MERGE ... WHEN MATCHED THEN UPDATE SET <alias>.<cột>: chỉ gợi ý đúng cột của bảng đích")
     void mergeUpdateSetSuggestsTargetTableColumns() {
-        var result = suggest(
-                "merge into orders o using contracts c on (o.id = c.id) when matched then update set o.|");
-        assertExactColumns(result, "o.id", "o.customer_id", "o.total", "o.status", "o.user_id");
+        ora("merge into orders o using contracts c on (o.id = c.id) when matched then update set o.|")
+                .columns("o.customer_id", "o.id", "o.status", "o.total", "o.user_id");
     }
 
     // =====================================================================
@@ -285,29 +169,21 @@ class OracleSuggestionServiceTest {
     // =====================================================================
 
     @Test
-    @DisplayName("Subquery chưa đóng ngoặc (đang gõ dở) - tối thiểu KHÔNG được crash")
-    void unclosedSubqueryDoesNotCrash() {
-        // Khác Postgres (resolve đúng cột của subquery dù chưa đóng ngoặc): engine Oracle hiện
-        // KHÔNG resolve được scope cho case chưa-đóng-ngoặc này (derived-scope trả rỗng) - một
-        // giới hạn thật, sâu hơn (liên quan tới cách OracleScopeBuilder dựng derived scope khi
-        // parse chưa hoàn tất), không sửa trong lần này. Test chỉ đảm bảo tối thiểu: không throw.
-        assertDoesNotThrow(() -> suggest("select * from (select * from users u where u.|"));
+    @DisplayName("Subquery chưa đóng ngoặc (đang gõ dở): 'u.|' vẫn phải ra đúng cột của alias bên trong - bug thật đã sửa (trước đây rỗng)")
+    void unclosedSubqueryStillSuggestsColumns() {
+        ora("select * from (select * from users u where u.|").columns("u.email", "u.id", "u.name");
     }
 
     @Test
     @DisplayName("Buffer rỗng - không crash, gợi ý các từ khoá bắt đầu câu")
     void emptyBufferSuggestsStatementStartKeywords() {
-        var result = suggest("|");
-        var keywords = result.stream().filter(s -> s.getType().label().equals("keyword"))
-                .map(s -> s.getKey().toLowerCase()).collect(Collectors.toSet());
-        assertTrue(keywords.contains("select"));
+        ora("|").keywordsInclude("select");
     }
 
     @Test
     @DisplayName("Gõ 'x.' với 'x' không phải alias/bảng nào có thật - không crash, không suy đoán bừa")
     void dotAfterUnknownQualifierDoesNotCrash() {
-        var result = suggest("select * from x.|");
-        assertTrue(result.isEmpty(), "'x' không phải alias/bảng nào có thật - không nên bịa ra gợi ý nào");
+        ora("select * from x.|");
     }
 
     // =====================================================================
@@ -317,8 +193,7 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("CAST(x AS N|): chỉ gợi ý đúng datatype có thật khớp prefix 'N' (NUMBER)")
     void castSuggestsMatchingDatatypes() {
-        var result = suggest("select cast(id as N|) from dual");
-        assertTrue(keysOfType(result, "datatype").stream().anyMatch(k -> k.equalsIgnoreCase("NUMBER")));
+        ora("select cast(id as N|) from dual").datatypes("NUMBER");
     }
 
     // =====================================================================
@@ -329,8 +204,7 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("Trong BEGIN...END, SELECT vẫn phải resolve đúng cột theo alias")
     void plsqlBlockScopeResolvesColumnsCorrectly() {
-        var result = suggest("begin\n  select name from users u where u.|\nend;");
-        assertExactColumns(result, "u.id", "u.name", "u.email");
+        ora("begin\n  select name from users u where u.|\nend;").columns("u.email", "u.id", "u.name");
     }
 
     // =====================================================================
@@ -340,8 +214,9 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("CONNECT BY PRIOR id = |: vẫn phải gợi ý đúng cột của bảng đang truy vấn phân cấp")
     void connectByResolvesTableColumns() {
-        var result = suggest("select * from contracts start with id = 1 connect by prior id = |");
-        assertExactColumns(result, "contracts.id", "contracts.name", "contracts.amount", "contracts.status");
+        ora("select * from contracts start with id = 1 connect by prior id = |")
+                .columns("contracts.amount", "contracts.id", "contracts.name", "contracts.status")
+                .functions(ORA_FUNCTIONS);
     }
 
     // =====================================================================
@@ -351,9 +226,8 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("JOIN 3 bảng, gõ alias bảng thứ 3 phải CHỈ ra đúng cột của nó, không lẫn 2 bảng kia")
     void tripleJoinResolvesCorrectTableAmongThree() {
-        var result = suggest(
-                "select * from users u join orders o on o.user_id = u.id join contracts c on c.id = u.id where c.|");
-        assertExactColumns(result, "c.id", "c.name", "c.amount", "c.status");
+        ora("select * from users u join orders o on o.user_id = u.id join contracts c on c.id = u.id where c.|")
+                .columns("c.amount", "c.id", "c.name", "c.status");
     }
 
     // =====================================================================
@@ -364,39 +238,103 @@ class OracleSuggestionServiceTest {
     @Test
     @DisplayName("HAVING |: phải thấy đúng cột thật của bảng đang GROUP BY")
     void havingClauseSuggestsRealColumns() {
-        var result = suggest("select status, count(*) from orders group by status having |");
-        var columns = keysOfType(result, "column");
-        assertTrue(columns.containsAll(List.of("orders.status", "orders.id", "orders.total", "orders.user_id", "orders.customer_id")));
+        ora("select status, count(*) from orders group by status having |")
+                .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
+                .functions(ORA_FUNCTIONS);
     }
 
     @Test
     @DisplayName("Subquery không tương quan trong WHERE IN (...): cursor bên trong subquery phải thấy cột bảng subquery đang FROM")
     void whereInSubquerySuggestsSubqueryOwnColumns() {
-        var result = suggest("select * from users where id in (select | from orders)");
-        var columns = keysOfType(result, "column");
-        assertTrue(columns.containsAll(List.of("orders.id", "orders.total", "orders.status", "orders.user_id", "orders.customer_id")));
+        ora("select * from users where id in (select | from orders)")
+                .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id", "users.email", "users.id", "users.name")
+                .functions(ORA_FUNCTIONS);
     }
 
     @Test
     @DisplayName("Tên CTE phải được gợi ý như 1 bảng khi đang gõ dở trong FROM - bug thật đã sửa")
     void cteNameSuggestedAsFromTarget() {
-        var result = suggest("with recent as (select * from users) select * from re|");
-        assertTrue(hasKeyOfType(result, "recent", "table"));
+        ora("with recent as (select * from users) select * from re|").tables("naviq.orders", "recent");
     }
 
     @Test
     @DisplayName("CTE tham chiếu CTE khác (2 tầng, cả 2 đều wildcard) phải resolve xuyên suốt - bug thật đã sửa (DerivedColumnExpander dùng chung với Postgres)")
     void cteChainResolvesTransitively() {
-        var result = suggest("with a as (select * from users), b as (select * from a) select * from b bb where bb.|");
-        assertExactColumns(result, "bb.id", "bb.name", "bb.email");
+        ora("with a as (select * from users), b as (select * from a) select * from b bb where bb.|")
+                .columns("bb.email", "bb.id", "bb.name");
     }
 
     @Test
     @DisplayName("UNION nhánh 2 KHÔNG được thấy bảng của nhánh 1 (Oracle: mỗi query_block đã tự có scope riêng, không dính bug như Postgres từng có, test để canh không tái phát)")
     void unionSecondBranchDoesNotLeakFirstBranchTable() {
-        var result = suggest("select id from users union select | from orders");
-        var columns = keysOfType(result, "column");
-        assertTrue(columns.containsAll(List.of("orders.id", "orders.customer_id", "orders.total", "orders.status", "orders.user_id")));
-        assertTrue(columns.stream().noneMatch(c -> c.startsWith("users.")));
+        ora("select id from users union select | from orders")
+                .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
+                .functions(ORA_FUNCTIONS);
+    }
+
+    @Test
+    @DisplayName("Alias subquery KHÔNG được gợi ý như 1 bảng sau JOIN (chỉ tên CTE mới được)")
+    void subqueryAliasNotSuggestedAsTable() {
+        ora("select * from (select * from users) x join |").tables(ORA_TABLES);
+    }
+
+    @Test
+    @DisplayName("Alias trỏ tới CTE ('from r rr') không được gợi ý như bảng - chỉ chính tên CTE 'r'")
+    void cteAliasNotSuggestedAsTable() {
+        ora("with r as (select * from users) select * from r rr join |")
+                .tables("naviq.contracts", "naviq.orders", "naviq.products", "naviq.users", "r");
+    }
+
+    @Test
+    @DisplayName("Tên CTE vẫn được gợi ý trong subquery lồng bên dưới (đi qua chuỗi scope cha)")
+    void cteNameVisibleInsideNestedSubquery() {
+        ora("with r as (select * from users) select * from orders where user_id in (select id from r|)")
+                .tables("naviq.contracts", "naviq.orders", "naviq.products", "naviq.users", "r");
+    }
+
+    @Test
+    @DisplayName("Chuỗi CTE 3 tầng toàn wildcard - đệ quy không giới hạn cấp")
+    void cteChainThreeLevelsResolves() {
+        ora("with a as (select * from users), b as (select * from a), c as (select * from b) select * from c cc where cc.|")
+                .columns("cc.email", "cc.id", "cc.name");
+    }
+
+    @Test
+    @DisplayName("UNION nhánh 2 không resolve được alias định nghĩa ở nhánh 1")
+    void unionSecondBranchCannotUseFirstBranchAlias() {
+        ora("select id from users u union select u.| from orders");
+    }
+
+    // =====================================================================
+    // P. "x.|" gõ dở BÊN TRONG subquery - lỗi cú pháp ở dấu chấm cụt từng khiến
+    // ANTLR đóng/bỏ query_block của subquery, alias bên trong biến mất.
+    // =====================================================================
+
+    @Test
+    @DisplayName("Subquery trong FROM đã đóng ngoặc: 'u.|' phải ra cột của alias bên trong - bug thật đã sửa (trước đây rỗng)")
+    void closedFromSubqueryDotSuggestsInnerAliasColumns() {
+        ora("select * from (select * from users u where u.|)").columns("u.email", "u.id", "u.name");
+    }
+
+    @Test
+    @DisplayName("Subquery trong WHERE ... IN (...): 'o.|' phải ra cột của alias bên trong - bug thật đã sửa (trước đây rỗng)")
+    void inSubqueryDotSuggestsInnerAliasColumns() {
+        ora("select * from users where id in (select 1 from orders o where o.|)")
+                .columns("o.customer_id", "o.id", "o.status", "o.total", "o.user_id");
+    }
+
+    @Test
+    @DisplayName("Subquery trong EXISTS (...): 'o.|' phải ra cột của alias bên trong")
+    void existsSubqueryDotSuggestsInnerAliasColumns() {
+        ora("select * from users where exists (select 1 from orders o where o.|)")
+                .columns("o.customer_id", "o.id", "o.status", "o.total", "o.user_id");
+    }
+
+    @Test
+    @DisplayName("SELECT list: KHÔNG gợi ý mọi bảng của schema (nhánh table_wild 't.*') - bug thật đã sửa")
+    void selectListDoesNotSuggestAllTables() {
+        ora("select | from users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(ORA_FUNCTIONS);
     }
 }

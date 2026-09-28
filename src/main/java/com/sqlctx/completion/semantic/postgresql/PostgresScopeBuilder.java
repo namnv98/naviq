@@ -203,7 +203,9 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
     @Override
     public void enterSimple_select_pramary(PostgreSQLParser.Simple_select_pramaryContext ctx) {
         if (ctx.SELECT() != null) {
-            pushScope(ctx.getStart());
+            Scope wrapper = stack.peek();
+            Scope branch = pushScope(ctx.getStart());
+            firstBranchOf.putIfAbsent(wrapper, branch);
         }
     }
 
@@ -212,6 +214,19 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
         if (ctx.SELECT() != null) {
             popScope(ctx.getStop());
         }
+    }
+
+    /**
+     * select_no_parens scope -> scope của nhánh SELECT ĐẦU TIÊN bên trong nó. Từ khi mỗi nhánh
+     * có scope riêng, scope select_no_parens (thứ được lấy qua children.last() khi đăng ký
+     * subquery/CTE) KHÔNG còn chứa projectedColumns/hasWildcard/FROM - tất cả nằm ở scope nhánh.
+     * Cột đầu ra của cả câu UNION/INTERSECT/EXCEPT lấy theo nhánh ĐẦU (đúng ngữ nghĩa Postgres).
+     */
+    private final Map<Scope, Scope> firstBranchOf = new HashMap<>();
+
+    /** Scope mang cột đầu ra của 1 subquery/CTE - xem {@link #firstBranchOf}. */
+    private Scope columnScopeOf(Scope selectScope) {
+        return firstBranchOf.getOrDefault(selectScope, selectScope);
     }
 
     // ---- UPDATE / DELETE - grammar mới KHÔNG dùng table_ref cho 2 câu này mà dùng
@@ -762,7 +777,7 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
         if (alias == null) {
             return;
         }
-        Scope inner = cur.children.get(cur.children.size() - 1);
+        Scope inner = columnScopeOf(cur.children.get(cur.children.size() - 1));
         cur.aliases.put(alias, "<subquery#" + inner.id + ">");
         cur.derivedScopeAliases.put(alias, inner); // lưu thẳng Scope
     }
@@ -842,20 +857,13 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
         if (ctx.preparablestmt() == null || ctx.preparablestmt().selectstmt() == null) {
             return;
         }
-        Scope cteScope = host.children.get(host.children.size() - 1);
-        // BÓC LỚP BỌC: từ khi simple_select_pramary có scope riêng (sửa alias-leak giữa các
-        // nhánh UNION), 1 CTE thân KHÔNG-UNION giờ có 2 scope LỒNG NHAU trùng khít [start,stop]
-        // (select_no_parens bọc ngoài, simple_select_pramary bên trong mới là nơi FROM/cột thật sự
-        // được ghi) - cteScope ở trên vẫn là scope BỌC NGOÀI (rỗng), phải bóc xuống scope con nếu
-        // nó là wrapper 1-con-trùng-span (KHÔNG đệ quy xuống subquery lồng thật sự, vì subquery
-        // thật luôn có span HẸP HƠN, không trùng khít).
-        if (cteScope.children.size() == 1) {
-            Scope inner = cteScope.children.get(0);
-            if (inner.startTokenIndex == cteScope.startTokenIndex && inner.stopTokenIndex == cteScope.stopTokenIndex) {
-                cteScope = inner;
-            }
-        }
-        cteScope.isolatedFromParentAliases = true;
+        // Cô lập ở scope select_no_parens BỌC NGOÀI (không phải nhánh) - để MỌI nhánh của thân
+        // CTE dạng UNION (kể cả WITH RECURSIVE) đều không thấy alias câu ngoài. Cột thì lấy từ
+        // nhánh đầu (columnScopeOf) - bản cũ chỉ bóc được wrapper 1-con, thân UNION (nhiều con)
+        // bị giữ nguyên wrapper rỗng -> "t.|" trên CTE UNION/RECURSIVE ra rỗng (bug thật).
+        Scope wrapper = host.children.get(host.children.size() - 1);
+        wrapper.isolatedFromParentAliases = true;
+        Scope cteScope = columnScopeOf(wrapper);
         applyCteColumnRename(cteScope, ctx.opt_name_list());
         pendingCte.peek().put(ctx.name().getText(), cteScope);
     }
@@ -892,6 +900,7 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
             // không phải nguồn cột hợp lệ (vd "with r as (...) select | from users" hay cursor nằm
             // TRONG thân CTE r) - alias thật sự được thêm vào aliases khi table_ref "FROM c" chạy.
             pending.forEach((name, s) -> host.derivedScopeAliases.put(name, s));
+            host.cteNames.addAll(pending.keySet());
         }
     }
 

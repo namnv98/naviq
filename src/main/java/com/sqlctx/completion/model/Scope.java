@@ -32,6 +32,15 @@ public class Scope implements DerivedScope {
     public final Map<String, Scope> derivedScopeAliases = new LinkedHashMap<>();
 
     /**
+     * Tên CTE (WITH c AS (...)) được ĐỊNH NGHĨA tại scope này - tập con key của
+     * {@link #derivedScopeAliases}. Phải tách riêng vì derivedScopeAliases còn chứa cả alias của
+     * subquery trong FROM ("(select ...) x") lẫn alias trỏ tới CTE ("from c cc") - những thứ đó
+     * KHÔNG phải tên có thể gõ sau FROM (bug thật: "select * from (select * from users) x join |"
+     * từng gợi ý "x" như 1 bảng).
+     */
+    public final Set<String> cteNames = new LinkedHashSet<>();
+
+    /**
      * Xem javadoc field cùng tên ở PostgresScopeBuilder. Ở Oracle: true cho scope của
      * insert_statement/merge_statement/alter_table/create_index.
      */
@@ -89,6 +98,15 @@ public class Scope implements DerivedScope {
         Map<String, Scope> result = new LinkedHashMap<>();
         for (Scope s : visibilityChain()) {
             result.putAll(s.derivedScopeAliases);
+        }
+        return result;
+    }
+
+    /** Tên CTE nhìn thấy được từ scope này (cùng chuỗi kế thừa với {@link #visibleAliases()}). */
+    public Set<String> visibleCteNames() {
+        Set<String> result = new LinkedHashSet<>();
+        for (Scope s : visibilityChain()) {
+            result.addAll(s.cteNames);
         }
         return result;
     }

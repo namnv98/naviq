@@ -102,6 +102,13 @@ public class PostgresSyntacticAnalyzer {
         // CREATE AGGREGATE) - cùng lý do rolespec/nonreservedword_or_sconst: thiếu rule này khiến
         // engine tụt xuống liệt kê hết token nguyên thuỷ thay vì dừng ở 1 rule để gợi ý hàm/kiểu thật.
         m.put(PostgreSQLParser.RULE_type_function_name, true);
+        // "collabel" = IDENTIFIER | MỌI keyword (unreserved/col_name/type_func_name/reserved) - vị trí
+        // tên option tuỳ ý (OPTIONS (|, SET (|, CREATE TEXT SEARCH DICTIONARY (|...) và alias cột mới
+        // (AS |). Thiếu rule này engine liệt kê cả ~525 keyword như thể đều là gợi ý hợp lệ (bug thật,
+        // phát hiện khi chuyển test sang so khớp CHÍNH XÁC). Keyword cú pháp THẬT tại cùng vị trí
+        // (vd ADD/SET/DROP của alter_generic_option_elem) đi qua nhánh khác nên không bị ảnh hưởng.
+        m.put(PostgreSQLParser.RULE_collabel, true);
+        m.put(PostgreSQLParser.RULE_bare_col_label, true);
 
         return m;
     }

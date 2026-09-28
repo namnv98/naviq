@@ -110,7 +110,23 @@ public class PostgresSuggestionService implements SuggestionService {
         // dataTypes) vì rule dùng CHUNG, không tách được ngữ nghĩa chỉ từ tên rule. "func_name" đã là
         // preferred rule từ trước (chặn được tràn keyword) nhưng CHƯA TỪNG được nối để thêm gợi ý
         // thật - phát hiện qua audit noise, cùng đợt với type_function_name.
-        if (matchedRuleNames.contains("func_name") || matchedRuleNames.contains("type_function_name")) {
+        //
+        // Tách 2 nguồn theo đúng vị trí (bug thật: trước đây LUÔN thêm cả hàm lẫn kiểu):
+        // - func_name khớp (DROP FUNCTION |, EXECUTE FUNCTION |, WITH FUNCTION |) -> CHỈ hàm; riêng
+        //   vị trí BIỂU THỨC (columnref cùng khớp) thêm cả kiểu: typed literal "int4 '5'" đi qua
+        //   AexprConst: func_name sconst (đã kiểm chứng trên Postgres thật).
+        // - type_function_name dưới func_return (RETURNS |) / func_arg (DROP AGGREGATE a(|) -> vị trí
+        //   KIỂU, "typename" cùng khớp đã tự thêm datatype - không thêm hàm.
+        // - còn lại (def_arg: sfunc = | / restrict = | / stype = |) -> không phân biệt được hàm hay
+        //   kiểu chỉ từ rule -> giữ cả 2.
+        if (matchedRuleNames.contains("func_name")) {
+            SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
+            if (matchedRuleNames.contains("columnref")) {
+                SchemaIndex.dataTypes.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.DATATYPE, t)));
+            }
+        } else if (matchedRuleNames.contains("type_function_name")
+                && !isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_type_function_name, PostgreSQLParser.RULE_func_return)
+                && !isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_type_function_name, PostgreSQLParser.RULE_func_arg)) {
             SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
             SchemaIndex.dataTypes.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.DATATYPE, t)));
         }
@@ -146,7 +162,10 @@ public class PostgresSuggestionService implements SuggestionService {
         boolean isColidIndexColumn = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_index_elem); // CREATE INDEX ... (col) (colid = cột lập index)
         boolean isColidSetTarget = isRuleInContext(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_set_target); // UPDATE SET / INSERT ON CONFLICT DO UPDATE SET (colid = assignment-target)
         boolean isColidUsingClauseColumn = isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_join_qual); // JOIN ... USING (col1, col2) (colid = cột chung 2 bảng)
-        boolean isColidInsert = isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_insertstmt); // JOIN ... USING (col1, col2) (colid = cột chung 2 bảng)
+        // INSERT INTO t (col, |) - chỉ danh sách cột (insert_column_item), KHÔNG phải mọi colid nằm
+        // đâu đó trong câu INSERT (bản cũ dùng ancestor insertstmt nên "INSERT ... SELECT |" cũng bị
+        // coi là danh sách cột thuần).
+        boolean isColidInsert = isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_colid, PostgreSQLParser.RULE_insert_column_item);
 
         // MERGE ... WHEN MATCHED THEN UPDATE SET | - vế TRÁI của phép gán chỉ được là cột bảng TARGET
         // (bảng USING/source cùng visible trong scope của mergestmt nhưng không thể là đích gán).
@@ -182,6 +201,15 @@ public class PostgresSuggestionService implements SuggestionService {
         // lower(col)) - chỉ 4 case dưới đây là định danh thuần.
         boolean isColidPureIdentifierList = isColidDropTarget || isColidSetTarget || isColidUsingClauseColumn || isColidInsert || isColidTableColumnList;
 
+        // Các vị trí trên nhận TÊN CỘT TRẦN - dạng có tiền tố bảng/alias bị Postgres từ chối (đã
+        // kiểm chứng trên Postgres 18 thật: "INSERT INTO users (users.id)", "UPDATE users SET
+        // users.name = ..", "JOIN .. USING (u.id)", "CREATE INDEX ON users (users.id)", "MERGE ..
+        // UPDATE SET o.status = ..", "DROP COLUMN users.email" đều lỗi). MenuCompleter chèn NGUYÊN key
+        // khi không ở dot-mode, nên key phải là tên trần (bug thật: trước đây chèn "users.id").
+        boolean bareColumnPosition = matchedRuleNames.contains("colid") && semanticResult.qualifier() == null
+                && (isMergeSetTarget || isJoinUsingColumn || isColidPureIdentifierList || isColidIndexColumn);
+        int columnsFrom = suggests.size();
+
         if (matchedRuleNames.contains("colid") && isMergeSetTarget) {
             addTargetOnlyColumnSuggestions(suggests, semanticResult);
         } else if (matchedRuleNames.contains("colid") && isJoinUsingColumn) {
@@ -190,6 +218,16 @@ public class PostgresSuggestionService implements SuggestionService {
             addColumnSuggestions(suggests, semanticResult, false);
         } else if (matchedRuleNames.contains("colid") && (isColumnrefColumn || isColidIndexColumn)) {
             addColumnSuggestions(suggests, semanticResult, true);
+        }
+
+        if (bareColumnPosition) {
+            for (int i = columnsFrom; i < suggests.size(); i++) {
+                Suggestion col = suggests.get(i);
+                if (col.getType() == SuggestionType.COLUMN && col.getKey().contains(".")) {
+                    String bare = col.getKey().substring(col.getKey().lastIndexOf('.') + 1);
+                    suggests.set(i, Suggestion.of(bare, SuggestionType.COLUMN, col.getColumnType()));
+                }
+            }
         }
 
         return suggests;
@@ -321,7 +359,8 @@ public class PostgresSuggestionService implements SuggestionService {
 
     /** Như addColumnSuggestions nhưng chỉ cột của alias {@link PostgresSemanticAnalyzer.Result#ddlTargetAlias()}. */
     private static void addTargetOnlyColumnSuggestions(List<Suggestion> suggests, PostgresSemanticAnalyzer.Result sem) {
-        SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
+        // Vế trái SET là định danh cột THUẦN (set_target), không phải biểu thức - không gợi ý hàm
+        // (bug thật: MERGE ... UPDATE SET | từng hiện count/sum/avg/now, khác hẳn UPDATE ... SET |).
         var cols = columnsPerVisibleAlias(sem).get(sem.ddlTargetAlias());
         if (cols != null) {
             suggests.addAll(cols);
@@ -372,21 +411,128 @@ public class PostgresSuggestionService implements SuggestionService {
     private static void addTableNameSuggestions(List<Suggestion> suggests, PostgresSyntacticAnalyzer.Result syn, java.util.Set<String> visibleCteNames) {
         int caretTokenIndex = syn.caretTokenIndex();
         var tokenStream = syn.tokenStream();
+        Set<String> kinds = allowedRelationKinds(syn);
         if (caretTokenIndex >= 2) {
             Token tok = tokenStream.get(caretTokenIndex - 1);
             if (tok.getType() == PostgreSQLParser.DOT) {
                 Token prev = tokenStream.get(caretTokenIndex - 2);
                 if (prev.getType() == PostgreSQLParser.Identifier) {
                     String schema = prev.getText();
-                    SchemaIndex.getTablesBySchema(schema).forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+                    SchemaIndex.getTablesBySchema(schema).stream()
+                            .filter(t -> kinds == null || kinds.contains(t.kind()))
+                            .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
                     return;
                 }
             }
         }
-        SchemaIndex.schemaTableIndex.values().forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+        SchemaIndex.schemaTableIndex.values().stream()
+                .filter(t -> kinds == null || kinds.contains(t.kind()))
+                .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+        if (kinds != null) {
+            return; // CTE chỉ tham chiếu được trong câu truy vấn, không phải đích của lệnh DDL/utility
+        }
         // Tên CTE (WITH cte AS (...)) cũng là 1 "bảng" hợp lệ để gõ trong FROM - bug thật đã sửa:
         // trước đây HOÀN TOÀN không gợi ý được tên CTE lúc đang gõ dở (chỉ resolve được SAU khi gõ
         // xong nguyên tên nhờ resolveAsExistingCte ở tầng semantic, không phải lúc completion).
         visibleCteNames.forEach(name -> suggests.add(Suggestion.of(name, SuggestionType.TABLE)));
+    }
+
+    private static final Set<String> TABLE = Set.of("table");
+    private static final Set<String> VIEW = Set.of("view");
+    private static final Set<String> MATVIEW = Set.of("materialized view");
+    private static final Set<String> TABLE_OR_MATVIEW = Set.of("table", "materialized view");
+    private static final Set<String> TABLE_OR_VIEW = Set.of("table", "view");
+
+    /**
+     * Loại relation (TableInfo.kind) mà lệnh đang gõ chấp nhận ở vị trí tên bảng - null = mọi loại
+     * (SELECT/JOIN, ALTER TABLE, GRANT...). Bảng dưới đây đối chiếu với Postgres 18 THẬT (chạy từng
+     * lệnh trên table/view/materialized view, xem lỗi 42809 "... is not a table"...) - bug thật:
+     * trước đây "DROP TABLE |", "TRUNCATE |", "REFRESH MATERIALIZED VIEW |"... đều gợi ý cả view.
+     */
+    private static Set<String> allowedRelationKinds(PostgresSyntacticAnalyzer.Result syn) {
+        List<Integer> before = realTokenTypesBeforeTableName(syn);
+        if (before.isEmpty()) {
+            return null;
+        }
+        int prev = before.get(0);
+        int prev2 = before.size() > 1 ? before.get(1) : -1;
+        int prev3 = before.size() > 2 ? before.get(2) : -1;
+        int first = before.get(before.size() - 1); // token đầu câu lệnh
+        switch (prev) {
+            case PostgreSQLParser.TABLE -> {
+                return switch (prev2) {
+                    case PostgreSQLParser.DROP, PostgreSQLParser.TRUNCATE -> TABLE;
+                    case PostgreSQLParser.FOR, PostgreSQLParser.ADD_P, PostgreSQLParser.SET -> TABLE; // PUBLICATION / ALTER EXTENSION ADD
+                    case PostgreSQLParser.ON -> prev3 == PostgreSQLParser.COMMENT ? TABLE : null;  // COMMENT ON TABLE (GRANT ON TABLE: mọi loại)
+                    case PostgreSQLParser.REINDEX -> TABLE_OR_MATVIEW;
+                    case PostgreSQLParser.LOCK_P -> TABLE_OR_VIEW;
+                    default -> null;
+                };
+            }
+            case PostgreSQLParser.VIEW -> {
+                if (prev2 == PostgreSQLParser.MATERIALIZED) {
+                    return MATVIEW; // REFRESH / DROP / ALTER MATERIALIZED VIEW
+                }
+                return prev2 == PostgreSQLParser.DROP || prev2 == PostgreSQLParser.ALTER ? VIEW : null;
+            }
+            case PostgreSQLParser.TRUNCATE -> {
+                return TABLE;
+            }
+            case PostgreSQLParser.LOCK_P -> {
+                return TABLE_OR_VIEW;
+            }
+            case PostgreSQLParser.CLUSTER -> {
+                return TABLE_OR_MATVIEW;
+            }
+            case PostgreSQLParser.INTO -> {
+                return first == PostgreSQLParser.INSERT || first == PostgreSQLParser.MERGE ? TABLE_OR_VIEW : null;
+            }
+            case PostgreSQLParser.UPDATE -> {
+                return first == PostgreSQLParser.UPDATE ? TABLE_OR_VIEW : null;
+            }
+            case PostgreSQLParser.FROM -> {
+                return first == PostgreSQLParser.DELETE_P && before.size() == 2 ? TABLE_OR_VIEW : null;
+            }
+            case PostgreSQLParser.ON -> {
+                return first == PostgreSQLParser.CREATE && before.contains(PostgreSQLParser.INDEX) ? TABLE_OR_MATVIEW : null;
+            }
+            default -> {
+                if (first == PostgreSQLParser.VACUUM || first == PostgreSQLParser.ANALYZE || first == PostgreSQLParser.ANALYSE) {
+                    return TABLE_OR_MATVIEW;
+                }
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Token type thật trước vị trí tên bảng, GẦN NHẤT ĐỨNG ĐẦU, dừng ở đầu câu lệnh (sau ";"). Bỏ
+     * qua phần không đổi ngữ nghĩa: IF [NOT] EXISTS, ONLY, CONCURRENTLY, tên đã gõ trong danh
+     * sách ("DROP TABLE a, |" -> như "DROP TABLE |") và phần "schema." đang gõ dở.
+     */
+    private static List<Integer> realTokenTypesBeforeTableName(PostgresSyntacticAnalyzer.Result syn) {
+        var ts = syn.tokenStream();
+        List<Integer> out = new ArrayList<>();
+        boolean skippingNames = true;
+        for (int i = syn.caretTokenIndex() - 1; i >= 0; i--) {
+            Token t = ts.get(i);
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
+            int type = t.getType();
+            if (type == PostgreSQLParser.SEMI) {
+                break;
+            }
+            if (skippingNames) {
+                if (type == PostgreSQLParser.DOT || type == PostgreSQLParser.COMMA || type == PostgreSQLParser.Identifier
+                        || type == PostgreSQLParser.IF_P || type == PostgreSQLParser.EXISTS || type == PostgreSQLParser.NOT
+                        || type == PostgreSQLParser.ONLY || type == PostgreSQLParser.CONCURRENTLY) {
+                    continue;
+                }
+                skippingNames = false;
+            }
+            out.add(type);
+        }
+        return out;
     }
 }

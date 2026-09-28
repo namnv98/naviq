@@ -88,7 +88,21 @@ public final class OracleCursorTokenPatcher {
         int finalCaretIdx;
         boolean patched;
 
-        if (reuseRealToken) {
+        if (reuseRealToken && tokens.get(caretIdx).getType() == PlSqlParser.PERIOD) {
+            // "o.|" - dấu chấm CỤT: grammar Oracle bắt buộc id_expression ngay sau PERIOD, nên nếu
+            // để nguyên thì lỗi cú pháp ở đây khiến ANTLR bỏ cả subquery đang chứa nó (bug thật:
+            // "... IN (select 1 from orders o where o.|)" mất alias o). Chèn placeholder NGAY SAU dấu
+            // chấm để thành "o.zzzcursorzzz" hợp lệ; caret vẫn trỏ vào dấu chấm vì
+            // OracleSemanticAnalyzer.detect() dựa vào đó để nhận ra qualifier.
+            Token dot = tokens.get(caretIdx);
+            CommonToken placeholder = new CommonToken(
+                    tokenSource, PlSqlParser.REGULAR_ID, Token.DEFAULT_CHANNEL,
+                    dot.getStopIndex() + 1, dot.getStopIndex() + CURSOR_PLACEHOLDER.length());
+            placeholder.setText(CURSOR_PLACEHOLDER);
+            working.add(caretIdx + 1, placeholder);
+            finalCaretIdx = caretIdx;
+            patched = true;
+        } else if (reuseRealToken) {
             finalCaretIdx = caretIdx;
             patched = false;
         } else {

@@ -82,7 +82,7 @@ public class OracleSuggestionService implements SuggestionService {
         // check cả 2 vì tuỳ vị trí trong grammar sẽ khớp rule nào.
         if ((matchedRuleNames.contains("type_spec") || matchedRuleNames.contains("datatype")
                 || matchedRuleNames.contains("json_value_return_type") || matchedRuleNames.contains("json_query_return_type"))
-                && !isGeneralElementCursorName) {
+                && !isGeneralElementCursorName && !isExecuteImmediatePhantomTypeSpec(syntacticResults)) {
             addDataTypeSuggestions(suggests);
         }
 
@@ -96,7 +96,13 @@ public class OracleSuggestionService implements SuggestionService {
         // Oracle GỘP CHUNG thành 1 rule duy nhất "tableview_name" cho mọi vị trí tham chiếu bảng
         // (FROM, table_ref, ALTER TABLE, general_table_ref, CREATE INDEX...) - chỉ cần 1 check,
         // không cần 2 check trùng lặp như bản gốc.
-        if (matchedRuleNames.contains("tableview_name")) {
+        // 2 vị trí tableview_name KHÔNG phải tên bảng để chọn (bug thật - hiện toàn bộ bảng schema):
+        // - table_wild ("t.*" trong SELECT list): tiền tố hợp lệ chỉ là alias/bảng ĐÃ có trong FROM,
+        //   không phải mọi bảng; cột đã được gợi ý qua general_element.
+        // - ngay sau 1 định danh ("from contracts |"): 2 định danh liền nhau thì cái sau là alias,
+        //   không thể là tên bảng - đây là nhánh ảo của ATN.
+        boolean isTableWild = isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_table_wild);
+        if (matchedRuleNames.contains("tableview_name") && !isTableWild && !followsIdentifier(syntacticResults)) {
             addTableNameSuggestions(suggests, syntacticResults, semanticResult.visibleCteNames());
         }
 
@@ -229,7 +235,10 @@ public class OracleSuggestionService implements SuggestionService {
             addCommonColumnSuggestions(suggests, semanticResult);
         } else if (qualifierResolvedByDanglingDot || shouldSuggestColumnsViaColumnName || shouldSuggestColumnsViaGeneralElement
                 || (shouldSuggestColumnsViaRegularId && !isAlterRegularIdAwaitingDatatype)) {
-            addColumnSuggestions(suggests, semanticResult);
+            // Hàm CHỈ hợp lệ ở vị trí BIỂU THỨC (general_element) - column_name/regular_id còn là định
+            // danh THUẦN: INSERT INTO t (|, UPDATE t SET |, ALTER TABLE t MODIFY (|, kiểu cột
+            // "CREATE TABLE t (id |)" (bug thật: cả 4 vị trí từng gợi ý count/sum/avg/sysdate).
+            addColumnSuggestions(suggests, semanticResult, shouldSuggestColumnsViaGeneralElement);
         }
 
         // Toàn bộ khối "colid + parent-context" của Postgres (isColidAlias/isColidDropTarget/
@@ -239,6 +248,28 @@ public class OracleSuggestionService implements SuggestionService {
         // theo từng parent-rule riêng.
 
         return suggests;
+    }
+
+    /**
+     * "BEGIN EXECUTE IMMEDIATE |END;" - ATN còn dò ra nhánh ẢO coi "EXECUTE IMMEDIATE" là khai báo
+     * biến PL/SQL (variable_declaration: identifier type_spec), lộ type_spec ngay tại vị trí thực
+     * chất là BIỂU THỨC (chuỗi SQL động) - bug thật: gợi ý NUMBER/VARCHAR2/... ở đây.
+     */
+    private static boolean isExecuteImmediatePhantomTypeSpec(OracleSyntacticAnalyzer.Result syn) {
+        return isRuleAncestorAnywhere(syn, PlSqlParser.RULE_general_element, PlSqlParser.RULE_execute_immediate)
+                && isRuleAncestorAnywhere(syn, PlSqlParser.RULE_type_spec, PlSqlParser.RULE_variable_declaration);
+    }
+
+    private static boolean followsIdentifier(OracleSyntacticAnalyzer.Result syn) {
+        var ts = syn.tokenStream();
+        for (int i = syn.caretTokenIndex() - 1; i >= 0; i--) {
+            Token t = ts.get(i);
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
+            return t.getType() == PlSqlParser.REGULAR_ID || t.getType() == PlSqlParser.DELIMITED_ID;
+        }
+        return false;
     }
 
     private static boolean isRuleAncestorAnywhere(OracleSyntacticAnalyzer.Result syn, int ruleId, int ancestorRuleIdToFind) {
@@ -380,8 +411,10 @@ public class OracleSuggestionService implements SuggestionService {
         }
     }
 
-    private static void addColumnSuggestions(List<Suggestion> suggests, OracleSemanticAnalyzer.Result sem) {
-        SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
+    private static void addColumnSuggestions(List<Suggestion> suggests, OracleSemanticAnalyzer.Result sem, boolean includeFunctions) {
+        if (includeFunctions) {
+            SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
+        }
         if (sem.qualifier() != null) {
             String qualifier = sem.qualifier();
             if (sem.qualifierDerivedScope() != null) {

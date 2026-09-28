@@ -1,140 +1,38 @@
 package com.sqlctx.completion;
 
-import com.sqlctx.completion.model.Suggestion;
-import com.sqlctx.completion.suggestion.CompletionHistory;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
-import com.sqlctx.completion.suggestion.postgresql.PostgresSuggestionService;
-import com.sqlctx.schema.ColumnInfo;
-import com.sqlctx.schema.SchemaInfo;
-import com.sqlctx.schema.SchemaIndex;
-import com.sqlctx.schema.TableInfo;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
+import com.sqlctx.completion.support.CompletionExpectations;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static com.sqlctx.completion.support.Completion.pg;
+import static com.sqlctx.completion.support.CompletionFixtures.*;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Phủ RỘNG: một entry cho MỖI alternative của rule top-level "stmt" trong
- * {@code PostgreSQLParser.g4} (125 loại statement, kể cả DDL/utility hiếm gặp). Khác bản trước
- * (chỉ {@code assertDoesNotThrow}) - file này verify NỘI DUNG gợi ý, không chỉ "không crash".
+ * {@code PostgreSQLParser.g4} (125 loại statement, kể cả DDL/utility hiếm gặp). Case gọi tên RULE
+ * NGỮ PHÁP CHÍNH XÁC trong tên test/comment để truy lại được đang xét dòng nào trong file .g4.
  * <p>
- * Phương pháp bắt buộc cho MỖI entry: đọc rule ngữ pháp thật trong {@code PostgreSQLParser.g4}
- * để tự suy ra ĐỘC LẬP vị trí con trỏ nên gợi ý gì, RỒI mới chạy code so sánh - không bao giờ lấy
- * ngược output hiện tại làm "expected". Case gọi tên RULE NGỮ PHÁP CHÍNH XÁC trong tên test/comment
- * để truy lại được đang xét dòng nào trong file .g4.
+ * MỖI test khẳng định TOÀN BỘ danh sách gợi ý tại vị trí con trỏ - không chỉ "có chứa" (xem
+ * {@link com.sqlctx.completion.support.CompletionExpectation}): mỗi loại khai báo phải khớp
+ * CHÍNH XÁC, loại không khai báo phải rỗng, không được trùng, keyword khớp snapshot
+ * ({@code src/test/resources/completion/keywords-*.txt}). Kiểm tra chạy tự động sau test bởi
+ * {@link com.sqlctx.completion.support.CompletionExpectations}.
  * <p>
- * 3 nhóm assertion tuỳ vị trí:
- * 1. Có dữ liệu thật enumerable (bảng/cột/hàm/kiểu/role) - assert nội dung cụ thể.
- * 2. Vị trí chờ định danh CHƯA TỪNG TỒN TẠI (tên object mới sắp tạo) - assert KHÔNG có gợi ý dữ
- *    liệu thật nào bị lộ ra sớm.
- * 3. Giá trị tuỳ ý thật sự không có nguồn dữ liệu (string/numeric literal, option key tuỳ driver,
- *    tên phiên/con trỏ nội bộ session...) - assertDoesNotThrow, có comment giải thích tại sao.
+ * Vị trí KHÔNG có nguồn dữ liệu enumerable (tên object mới sắp tạo, literal chuỗi/số, option key
+ * tuỳ driver, tên phiên/con trỏ...) cũng được khẳng định chính xác: mọi loại gợi ý dữ liệu phải
+ * RỖNG - bản cũ chỉ assertDoesNotThrow nên không bắt được noise lọt vào (vd ~525 keyword ở
+ * OPTIONS (|).
  */
+@ExtendWith(CompletionExpectations.class)
+@ExtendWith(CompletionExpectations.class)
 class PostgresGrammarBreadthTest {
-
-    @BeforeAll
-    static void setUpFixtureSchema() {
-        var id = new ColumnInfo("id", "id", "int4", true);
-        var name = new ColumnInfo("name", "name", "text", false);
-        var email = new ColumnInfo("email", "email", "text", false);
-        var customerId = new ColumnInfo("customer_id", "customer_id", "int4", false);
-        var total = new ColumnInfo("total", "total", "numeric", false);
-        var status = new ColumnInfo("status", "status", "text", false);
-        var userId = new ColumnInfo("user_id", "user_id", "int4", false);
-        var amount = new ColumnInfo("amount", "amount", "numeric", false);
-        var price = new ColumnInfo("price", "price", "numeric", false);
-        var quantity = new ColumnInfo("quantity", "quantity", "int4", false);
-        var description = new ColumnInfo("description", "description", "text", false);
-
-        var users = new TableInfo("public", "users", "table", List.of(id, name, email));
-        var orders = new TableInfo("public", "orders", "table", List.of(id, customerId, total, status, userId));
-        var contracts = new TableInfo("public", "contracts", "table", List.of(id, name, amount, status));
-        var products = new TableInfo("public", "products", "table", List.of(id, name, price, quantity, description));
-        var activeUsers = new TableInfo("public", "active_users", "view", List.of(id, name));
-
-        var publicSchema = new SchemaInfo("public", List.of(users, orders, contracts, products, activeUsers));
-        SchemaIndex.schemas = List.of(publicSchema);
-        SchemaIndex.tableIndex = new java.util.HashMap<>(Map.of(
-                "public.users", users, "users", users,
-                "public.orders", orders, "orders", orders,
-                "public.contracts", contracts, "contracts", contracts,
-                "public.products", products, "products", products
-        ));
-        SchemaIndex.tableIndex.put("public.active_users", activeUsers);
-        SchemaIndex.tableIndex.put("active_users", activeUsers);
-        SchemaIndex.schemaTableIndex = new java.util.HashMap<>(Map.of(
-                "public.users", users, "public.orders", orders,
-                "public.contracts", contracts, "public.products", products
-        ));
-        SchemaIndex.schemaTableIndex.put("public.active_users", activeUsers);
-        SchemaIndex.functions = List.of("count", "sum", "avg", "now");
-        SchemaIndex.dataTypes = List.of("int4", "text", "numeric", "bool", "timestamp");
-        SchemaIndex.roles = List.of("role1", "role2", "postgres");
-        SchemaIndex.languages = List.of("plpgsql", "sql");
-    }
-
-    @BeforeEach
-    void resetHistory() {
-        CompletionHistory.resetForTests();
-    }
-
-    private static List<Suggestion> suggest(String rawWithCursor) {
-        int cursor = rawWithCursor.indexOf('|');
-        String sql = rawWithCursor.substring(0, cursor) + rawWithCursor.substring(cursor + 1);
-        var input = CompletionInputPreparer.buildInput(sql, cursor);
-        return PostgresSuggestionService.suggests(input);
-    }
-
-    private static List<String> keysOfType(List<Suggestion> list, String type) {
-        return list.stream().filter(s -> s.getType().label().equals(type)).map(Suggestion::getKey).toList();
-    }
-
-    private static Set<String> keySetOfType(List<Suggestion> list, String type) {
-        return list.stream().filter(s -> s.getType().label().equals(type))
-                .map(s -> s.getKey().toLowerCase()).collect(Collectors.toCollection(TreeSet::new));
-    }
-
-    private static void assertExactTables(List<Suggestion> result) {
-        // CHỈ 4 bảng thật (type "table") - "active_users" là VIEW (type "view" riêng), các vị trí
-        // dùng helper này (DROP TABLE/ANALYZE/VACUUM/REINDEX TABLE/ADD TABLE của publication...) đều
-        // là ngữ cảnh chỉ áp dụng cho bảng thật, KHÔNG áp dụng cho view thường - đúng là view không
-        // nên xuất hiện ở type "table" tại các vị trí này (bug ban đầu nằm ở chính test này, không
-        // phải ở code sản phẩm - đã tự sửa khi chạy thấy assertion sai).
-        assertEquals(Set.of("public.users", "public.orders", "public.contracts", "public.products"),
-                keySetOfType(result, "table"));
-    }
-
-    private static void assertExactRoles(List<Suggestion> result) {
-        assertEquals(Set.of("role1", "role2", "postgres"), keySetOfType(result, "role"));
-    }
-
-    private static void assertHasFunctionsAndDatatypes(List<Suggestion> result) {
-        assertTrue(keysOfType(result, "function").containsAll(List.of("count", "sum", "avg", "now")));
-        assertTrue(keysOfType(result, "datatype").containsAll(List.of("int4", "text")));
-    }
-
-    private static void assertNoRealData(List<Suggestion> result) {
-        assertTrue(keysOfType(result, "table").isEmpty(), "Không nên có gợi ý bảng ở vị trí này");
-        assertTrue(keysOfType(result, "column").isEmpty(), "Không nên có gợi ý cột ở vị trí này");
-        assertTrue(keysOfType(result, "role").isEmpty(), "Không nên có gợi ý role ở vị trí này");
-        assertTrue(keysOfType(result, "datatype").isEmpty(), "Không nên có gợi ý datatype ở vị trí này");
-        assertTrue(keysOfType(result, "function").isEmpty(), "Không nên có gợi ý hàm ở vị trí này");
-    }
 
     // =====================================================================
     // A. Vị trí có RULE NGỮ PHÁP tham chiếu ROLE thật (rolespec) - phải
@@ -145,146 +43,128 @@ class PostgresGrammarBreadthTest {
     @Test
     @DisplayName("alterdefaultprivilegesstmt: defacl_privilege_target grant ... TO role_list - phải có role thật (+ GROUP là keyword hợp lệ)")
     void alterdefaultprivilegesstmt() {
-        var r = suggest("alter default privileges in schema public grant select on tables to |");
-        assertExactRoles(r);
+        pg("alter default privileges in schema public grant select on tables to |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("altergroupstmt: ALTER GROUP name ADD USER role_list - phải đúng role thật")
     void altergroupstmt() {
-        var r = suggest("alter group grp1 add user |");
-        assertExactRoles(r);
+        pg("alter group grp1 add user |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("alterownerstmt: OWNER TO rolespec (via any object owner clause) - phải đúng role thật")
     void alterownerstmt() {
-        var r = suggest("alter aggregate agg1(int4) owner to |");
-        assertExactRoles(r);
+        pg("alter aggregate agg1(int4) owner to |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("createtablespacestmt: CREATE TABLESPACE name OWNER rolespec - phải đúng role thật")
     void createtablespacestmt() {
-        var r = suggest("create tablespace ts2 owner |");
-        assertExactRoles(r);
+        pg("create tablespace ts2 owner |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("createdbstmt: createdb_opt_item OWNER -> nonreservedword_or_sconst - phải có role thật (+ TRUE/FALSE/ON/DEFAULT là alternative hợp lệ khác của cùng rule)")
     void createdbstmt() {
-        var r = suggest("create database db2 owner |");
-        assertTrue(keysOfType(r, "role").containsAll(List.of("role1", "role2", "postgres")));
+        pg("create database db2 owner |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("dropownedstmt: DROP OWNED BY role_list - phải đúng role thật")
     void dropownedstmt() {
-        var r = suggest("drop owned by |");
-        assertExactRoles(r);
+        pg("drop owned by |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("droprolestmt: DROP ROLE role_list - phải đúng role thật (+ IF EXISTS)")
     void droprolestmt() {
-        var r = suggest("drop role |");
-        assertExactRoles(r);
+        pg("drop role |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("grantstmt: GRANT ... TO grantee_list (rolespec, + GROUP keyword hợp lệ) - phải đúng role thật")
     void grantstmt() {
-        var r = suggest("grant select on public.users to |");
-        assertExactRoles(r);
+        pg("grant select on public.users to |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("grantrolestmt: GRANT role_list TO role_list - phải đúng role thật")
     void grantrolestmt() {
-        var r = suggest("grant role1 to |");
-        assertExactRoles(r);
+        pg("grant role1 to |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("revokestmt: REVOKE ... FROM grantee_list - phải đúng role thật")
     void revokestmt() {
-        var r = suggest("revoke select on public.users from |");
-        assertExactRoles(r);
+        pg("revoke select on public.users from |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("revokerolestmt: REVOKE role_list FROM role_list - phải đúng role thật")
     void revokerolestmt() {
-        var r = suggest("revoke role1 from |");
-        assertExactRoles(r);
+        pg("revoke role1 from |").roles(PG_ROLES);
     }
 
     @Test
     @DisplayName("reassignownedstmt: REASSIGN OWNED BY role_list TO rolespec - phải đúng role thật")
     void reassignownedstmt() {
-        var r = suggest("reassign owned by role1 to |");
-        assertExactRoles(r);
+        pg("reassign owned by role1 to |").roles(PG_ROLES);
     }
 
     // =====================================================================
     // B. Vị trí tham chiếu BẢNG/VIEW thật (any_name/qualified_name trỏ vào
-    // 1 relation có sẵn) - phải đúng 5 đối tượng trong fixture.
+    // 1 relation có sẵn) - phải ĐÚNG loại relation mà lệnh chấp nhận. Bảng
+    // loại đã đối chiếu Postgres 18 thật (xem PostgresSuggestionService
+    // .allowedRelationKinds) - vd DROP TABLE một view -> lỗi 42809.
     // =====================================================================
 
     @Test
-    @DisplayName("alterextensioncontentsstmt: ALTER EXTENSION ... ADD TABLE any_name - phải đúng 5 bảng/view thật")
+    @DisplayName("alterextensioncontentsstmt: ALTER EXTENSION ... ADD TABLE any_name - chỉ bảng thường")
     void alterextensioncontentsstmt() {
-        var r = suggest("alter extension ext1 add table |");
-        assertExactTables(r);
+        pg("alter extension ext1 add table |").tables(PG_TABLES);
     }
 
     @Test
-    @DisplayName("alterpublicationstmt: ALTER PUBLICATION ... ADD TABLE - phải đúng 5 bảng/view thật")
+    @DisplayName("alterpublicationstmt: ALTER PUBLICATION ... ADD TABLE - chỉ bảng thường (publication không nhận view/materialized view)")
     void alterpublicationstmt() {
-        var r = suggest("alter publication pub1 add table |");
-        assertExactTables(r);
+        pg("alter publication pub1 add table |").tables(PG_TABLES);
     }
 
     @Test
-    @DisplayName("analyzestmt: ANALYZE qualified_name - phải đúng 5 bảng/view thật")
+    @DisplayName("analyzestmt: ANALYZE qualified_name - bảng + materialized view (view bị Postgres bỏ qua)")
     void analyzestmt() {
-        var r = suggest("analyze |");
-        assertExactTables(r);
+        pg("analyze |").tables(PG_TABLES).materializedViews(PG_MATVIEWS);
     }
 
     @Test
-    @DisplayName("createpublicationstmt: CREATE PUBLICATION ... FOR TABLE - phải đúng 5 bảng/view thật")
+    @DisplayName("createpublicationstmt: CREATE PUBLICATION ... FOR TABLE - chỉ bảng thường (publication không nhận view/materialized view)")
     void createpublicationstmt() {
-        var r = suggest("create publication pub1 for table |");
-        assertExactTables(r);
+        pg("create publication pub1 for table |").tables(PG_TABLES);
     }
 
     @Test
-    @DisplayName("dropstmt: DROP TABLE any_name_list - phải đúng 5 bảng/view thật")
+    @DisplayName("dropstmt: DROP TABLE any_name_list - chỉ bảng thường (view/materialized view -> lỗi 42809)")
     void dropstmt() {
-        var r = suggest("drop table |");
-        assertExactTables(r);
+        pg("drop table |").tables(PG_TABLES);
     }
 
     @Test
-    @DisplayName("refreshmatviewstmt: REFRESH MATERIALIZED VIEW qualified_name - phải đúng 5 bảng/view thật")
+    @DisplayName("refreshmatviewstmt: REFRESH MATERIALIZED VIEW qualified_name - CHỈ materialized view")
     void refreshmatviewstmt() {
-        var r = suggest("refresh materialized view |");
-        assertExactTables(r);
+        pg("refresh materialized view |").materializedViews(PG_MATVIEWS);
     }
 
     @Test
-    @DisplayName("reindexstmt: REINDEX TABLE qualified_name - phải đúng 5 bảng/view thật")
+    @DisplayName("reindexstmt: REINDEX TABLE qualified_name - bảng + materialized view (view -> lỗi 42809)")
     void reindexstmt() {
-        var r = suggest("reindex table |");
-        assertExactTables(r);
+        pg("reindex table |").tables(PG_TABLES).materializedViews(PG_MATVIEWS);
     }
 
     @Test
-    @DisplayName("vacuumstmt: VACUUM qualified_name - phải đúng 5 bảng/view thật")
+    @DisplayName("vacuumstmt: VACUUM qualified_name - bảng + materialized view (view bị Postgres bỏ qua)")
     void vacuumstmt() {
-        var r = suggest("vacuum |");
-        assertExactTables(r);
+        pg("vacuum |").tables(PG_TABLES).materializedViews(PG_MATVIEWS);
     }
 
     // =====================================================================
@@ -296,203 +176,201 @@ class PostgresGrammarBreadthTest {
     @Test
     @DisplayName("selectstmt: target_list biểu thức - phải có cột/hàm/kiểu thật của users")
     void selectstmt() {
-        var r = suggest("select | from public.users");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
-        assertHasFunctionsAndDatatypes(r);
+        pg("select | from public.users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("createasstmt: CREATE TABLE AS SELECT target_list - giống selectstmt")
     void createasstmt() {
-        var r = suggest("create table t2 as select | from public.users");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("create table t2 as select | from public.users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("creatematviewstmt: CREATE MATERIALIZED VIEW AS SELECT target_list - giống selectstmt")
     void creatematviewstmt() {
-        var r = suggest("create materialized view mv1 as select | from public.users");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("create materialized view mv1 as select | from public.users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("viewstmt: CREATE VIEW AS SELECT target_list - giống selectstmt")
     void viewstmt() {
-        var r = suggest("create view v1 as select | from public.users");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("create view v1 as select | from public.users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("declarecursorstmt: DECLARE CURSOR FOR SELECT target_list - giống selectstmt")
     void declarecursorstmt() {
-        var r = suggest("declare cur1 cursor for select | from public.users");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("declare cur1 cursor for select | from public.users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("explainstmt: EXPLAIN SELECT target_list - giống selectstmt")
     void explainstmt() {
-        var r = suggest("explain select | from public.users");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("explain select | from public.users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("preparestmt: PREPARE ... AS SELECT target_list - giống selectstmt")
     void preparestmt() {
-        var r = suggest("prepare p1 as select | from public.users");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("prepare p1 as select | from public.users")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("deletestmt: DELETE ... WHERE a_expr - phải có cột thật của users trong biểu thức điều kiện")
     void deletestmt() {
-        var r = suggest("delete from public.users where |");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("delete from public.users where |")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("updatestmt: UPDATE ... SET target - phải có cột thật để gán giá trị")
     void updatestmt() {
-        var r = suggest("update public.users set |");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("update public.users set |").columns("email", "id", "name");
     }
 
     @Test
     @DisplayName("indexstmt: CREATE INDEX ... (index_elem) - cột thật + hàm/kiểu (index theo biểu thức hợp lệ)")
     void indexstmt() {
-        var r = suggest("create index idx1 on public.users (|");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("create index idx1 on public.users (|").columns("email", "id", "name").functions(PG_FUNCTIONS);
     }
 
     @Test
     @DisplayName("alterpolicystmt: ALTER POLICY ... USING (a_expr) - cột thật của users trong biểu thức boolean")
     void alterpolicystmt() {
-        var r = suggest("alter policy pol1 on public.users using (|");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("alter policy pol1 on public.users using (|")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("createpolicystmt: CREATE POLICY ... USING (a_expr) - cột thật của users")
     void createpolicystmt() {
-        var r = suggest("create policy pol1 on public.users using (|");
-        assertTrue(keysOfType(r, "column").containsAll(List.of("users.id", "users.name", "users.email")));
+        pg("create policy pol1 on public.users using (|")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("mergestmt: WHEN MATCHED THEN UPDATE SET - CHỈ cột bảng ĐÍCH (orders), KHÔNG lẫn cột users (nguồn)")
     void mergestmt() {
-        var r = suggest("merge into public.orders o using public.users u on o.user_id = u.id when matched then update set |");
-        var cols = keysOfType(r, "column");
-        assertTrue(cols.containsAll(List.of("o.id", "o.total", "o.status", "o.user_id", "o.customer_id")));
-        assertTrue(cols.stream().noneMatch(c -> c.startsWith("u.")), "Không được lẫn cột bảng nguồn (users) vào vế SET của MERGE");
+        pg("merge into public.orders o using public.users u on o.user_id = u.id when matched then update set |")
+                .columns("customer_id", "id", "status", "total", "user_id");
     }
 
     // =====================================================================
     // D. Vị trí tham chiếu HÀM/KIỂU đã có (func_name/type_function_name/
-    // typename) - assert hàm/kiểu thật CÓ MẶT. Ghi chú: nhiều vị trí trong
-    // nhóm này lẽ ra CHỈ nên là hàm HOẶC CHỈ nên là kiểu (không phải cả 2) -
-    // đây là 1 bug đã biết (func_name/type_function_name/typename cùng khớp
-    // 1 lúc, dual-fire) chưa sửa; test này chỉ assert phần ĐÚNG chắc chắn có
-    // mặt, không assert phần dư kia phải vắng mặt (để không lặp lại việc đã
-    // được coordinator ghi nhận là "known residual, chưa sửa").
+    // typename). Đã tách: func_name (DROP FUNCTION, EXECUTE FUNCTION...) -> CHỈ
+    // hàm; RETURNS/đối số hàm -> CHỈ kiểu. Riêng def_arg (sfunc = |, restrict
+    // = |) vẫn cả hai vì rule không phân biệt được tham số nhận hàm hay kiểu.
     // =====================================================================
 
     @Test
     @DisplayName("createfunctionstmt: RETURNS func_type (typename) - phải có datatype thật")
     void createfunctionstmt() {
-        var r = suggest("create function f1() returns |");
-        assertTrue(keysOfType(r, "datatype").containsAll(List.of("int4", "text")));
+        pg("create function f1() returns |").datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("altercompositetypestmt: ADD ATTRIBUTE a typename - phải có datatype thật, CHƯA gõ tên attribute nên chưa tới lượt kiểu... thực ra ĐÃ gõ 'a' rồi nên đúng vị trí typename")
     void altercompositetypestmt() {
-        var r = suggest("alter type mytype add attribute a |");
-        assertTrue(keysOfType(r, "datatype").containsAll(List.of("int4", "text")));
+        pg("alter type mytype add attribute a |").datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("createdomainstmt: CREATE DOMAIN AS typename - phải có datatype thật")
     void createdomainstmt() {
-        var r = suggest("create domain d1 as |");
-        assertTrue(keysOfType(r, "datatype").containsAll(List.of("int4", "text")));
+        pg("create domain d1 as |").datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("removeoperstmt: DROP OPERATOR = (int4, typename) - phải có datatype thật cho tham số thứ 2")
     void removeoperstmt() {
-        var r = suggest("drop operator = (int4, |");
-        assertTrue(keysOfType(r, "datatype").containsAll(List.of("int4", "text")));
+        pg("drop operator = (int4, |").datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("removeaggrstmt: DROP AGGREGATE agg1(typename) - phải có datatype thật cho kiểu tham số")
     void removeaggrstmt() {
-        var r = suggest("drop aggregate agg1(|");
-        assertTrue(keysOfType(r, "datatype").containsAll(List.of("int4", "text")));
+        pg("drop aggregate agg1(|").datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("definestmt: CREATE AGGREGATE (sfunc = func_name) - phải có function thật")
     void definestmt() {
-        var r = suggest("create aggregate agg2(int4) (sfunc = |");
-        assertTrue(keysOfType(r, "function").containsAll(List.of("count", "sum", "avg", "now")));
+        pg("create aggregate agg2(int4) (sfunc = |").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("alteroperatorstmt: SET (restrict = func_name) - phải có function thật")
     void alteroperatorstmt() {
-        var r = suggest("alter operator = (int4, int4) set (restrict = |");
-        assertTrue(keysOfType(r, "function").containsAll(List.of("count", "sum", "avg", "now")));
+        pg("alter operator = (int4, int4) set (restrict = |").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("removefuncstmt: DROP FUNCTION func_name - phải có function thật")
     void removefuncstmt() {
-        var r = suggest("drop function |");
-        assertTrue(keysOfType(r, "function").containsAll(List.of("count", "sum", "avg", "now")));
+        pg("drop function |").functions(PG_FUNCTIONS);
     }
 
     @Test
     @DisplayName("createcaststmt: CREATE CAST ... WITH FUNCTION func_name - phải có function thật")
     void createcaststmt() {
-        var r = suggest("create cast (int4 as text) with function |");
-        assertTrue(keysOfType(r, "function").containsAll(List.of("count", "sum", "avg", "now")));
+        pg("create cast (int4 as text) with function |").functions(PG_FUNCTIONS);
     }
 
     @Test
     @DisplayName("createtrigstmt: CREATE TRIGGER ... EXECUTE FUNCTION func_name - phải có function thật")
     void createtrigstmt() {
-        var r = suggest("create trigger trg2 before insert on public.users execute function |");
-        assertTrue(keysOfType(r, "function").containsAll(List.of("count", "sum", "avg", "now")));
+        pg("create trigger trg2 before insert on public.users execute function |").functions(PG_FUNCTIONS);
     }
 
     @Test
     @DisplayName("createeventtrigstmt: CREATE EVENT TRIGGER ... EXECUTE FUNCTION func_name - phải có function thật")
     void createeventtrigstmt() {
-        var r = suggest("create event trigger et2 on ddl_command_start execute function |");
-        assertTrue(keysOfType(r, "function").containsAll(List.of("count", "sum", "avg", "now")));
+        pg("create event trigger et2 on ddl_command_start execute function |").functions(PG_FUNCTIONS);
     }
 
     @Test
     @DisplayName("callstmt: CALL func_application(a_expr) - vị trí biểu thức đối số, hàm/kiểu thật hợp lệ")
     void callstmt() {
-        var r = suggest("call myproc(|");
-        assertHasFunctionsAndDatatypes(r);
+        pg("call myproc(|").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("createassertionstmt: CREATE ASSERTION CHECK (a_expr) - biểu thức boolean, hàm/kiểu thật hợp lệ")
     void createassertionstmt() {
-        var r = suggest("create assertion a1 check (|");
-        assertHasFunctionsAndDatatypes(r);
+        pg("create assertion a1 check (|").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
     }
 
     @Test
     @DisplayName("createstatsstmt: CREATE STATISTICS ... ON (expr) - biểu thức, hàm/kiểu thật hợp lệ")
     void createstatsstmt() {
-        var r = suggest("create statistics st1 on |");
-        assertHasFunctionsAndDatatypes(r);
+        pg("create statistics st1 on |").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
     }
 
     // =====================================================================
@@ -504,38 +382,31 @@ class PostgresGrammarBreadthTest {
     @Test
     @DisplayName("altertablestmt: ADD COLUMN | (tên cột MỚI, colid CHƯA xong) - grammar columnDef: colid typename tuần tự, chưa tới lượt typename")
     void altertablestmt() {
-        var r = suggest("alter table public.users add column |");
-        assertNoRealData(r);
+        pg("alter table public.users add column |");
     }
 
     @Test
     @DisplayName("createschemastmt: CREATE SCHEMA IF NOT EXISTS | (tên schema MỚI chưa tồn tại) - không lộ dữ liệu thật")
     void createschemastmt() {
-        var r = suggest("create schema if not exists |");
-        assertNoRealData(r);
+        pg("create schema if not exists |");
     }
 
     @Test
     @DisplayName("renamestmt: RENAME TO | (tên bảng MỚI sau khi đổi tên, chưa tồn tại) - không lộ dữ liệu thật")
     void renamestmt() {
-        var r = suggest("alter table public.users rename to |");
-        assertNoRealData(r);
+        pg("alter table public.users rename to |");
     }
 
     @Test
     @DisplayName("createstmt: CREATE TABLE t3 (a int4, tên CỘT MỚI ở vị trí đầu) - chưa gõ gì, chỉ nên là keyword LIKE/CHECK/CONSTRAINT..., không lộ dữ liệu thật")
     void createstmt() {
-        var r = suggest("create table t3 (|");
-        assertNoRealData(r);
+        pg("create table t3 (|");
     }
 
     @Test
     @DisplayName("insertstmt: INSERT INTO t (col_list) - insert_column_item: colid CHỈ LÀ ĐỊNH DANH THUẦN, KHÔNG PHẢI biểu thức -> KHÔNG được có function ở đây (bug thật: hiện có count/sum/avg/now lẫn vào)")
     void insertstmt() {
-        var r = suggest("insert into public.users (|");
-        assertTrue(keysOfType(r, "function").isEmpty(),
-                "insert_column_list chỉ nhận colid (định danh thuần, xem insert_column_item: colid opt_indirection) - "
-                        + "KHÔNG phải biểu thức, function không hợp lệ ở đây. Bug thật, coordinator cần sửa.");
+        pg("insert into public.users (|").columns("email", "id", "name");
     }
 
     // =====================================================================
@@ -545,450 +416,446 @@ class PostgresGrammarBreadthTest {
     @Test
     @DisplayName("createconversionstmt: CREATE CONVERSION ... FROM any_name - any_name ở đây là TÊN HÀM chuyển đổi encoding, KHÔNG PHẢI bảng (bug thật: hiện gợi ý bảng)")
     void createconversionstmt() {
-        var r = suggest("create conversion conv1 for 'UTF8' to 'LATIN1' from |");
-        assertTrue(keysOfType(r, "table").isEmpty(),
-                "grammar: createconversionstmt: CREATE ... CONVERSION any_name FOR sconst TO sconst FROM any_name - "
-                        + "FROM ở đây trỏ tới hàm chuyển đổi encoding (built-in như utf8_to_latin1), không phải bảng. "
-                        + "Bug thật (any_name bị mặc định gợi ý bảng vô điều kiện), coordinator cần sửa.");
+        pg("create conversion conv1 for 'UTF8' to 'LATIN1' from |");
     }
 
     // =====================================================================
     // G. Giá trị tuỳ ý THẬT SỰ không có nguồn dữ liệu để gợi ý (string/số
     // literal, option key theo driver/extension, tên phiên/session-only...)
-    // - assertDoesNotThrow là lựa chọn ĐÚNG và trung thực, không phải lối tắt.
+    // - assert KHÔNG có gợi ý dữ liệu schema nào (mọi loại rỗng), keyword khớp
+    //   snapshot.
     // =====================================================================
 
     @Test
-    @DisplayName("altereventtrigstmt: enable_trigger (ENABLE/DISABLE) + OWNER TO/RENAME TO là rule SIBLING (alterownerstmt/renamestmt) cùng khớp tiền tố - không throw là đủ")
+    @DisplayName("altereventtrigstmt: enable_trigger (ENABLE/DISABLE) + OWNER TO/RENAME TO là rule SIBLING (alterownerstmt/renamestmt) cùng khớp tiền tố - không gợi ý dữ liệu schema nào")
     void altereventtrigstmt() {
-        assertDoesNotThrow(() -> suggest("alter event trigger trg1 |"));
+        pg("alter event trigger trg1 |");
     }
 
     @Test
-    @DisplayName("altercollationstmt: REFRESH VERSION - chỉ keyword thuần, không throw là đủ")
+    @DisplayName("altercollationstmt: REFRESH VERSION - chỉ keyword thuần, không gợi ý dữ liệu schema nào")
     void altercollationstmt() {
-        assertDoesNotThrow(() -> suggest("alter collation c1 |"));
+        pg("alter collation c1 |");
     }
 
     @Test
-    @DisplayName("alterdatabasestmt: SET TABLESPACE name - tablespace name qua rule 'name' dùng chung khắp nơi (không chỉ tablespace), quá rủi ro để wire riêng - không throw là đủ (giới hạn đã biết)")
+    @DisplayName("alterdatabasestmt: SET TABLESPACE name - tablespace name qua rule 'name' dùng chung khắp nơi (không chỉ tablespace), quá rủi ro để wire riêng - không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void alterdatabasestmt() {
-        assertDoesNotThrow(() -> suggest("alter database db1 set tablespace |"));
+        pg("alter database db1 set tablespace |");
     }
 
     @Test
-    @DisplayName("alterdatabasesetstmt: SET search_path TO value - generic GUC value (mọi tham số cấu hình dùng chung 1 rule), không riêng cho search_path - không throw là đủ")
+    @DisplayName("alterdatabasesetstmt: SET search_path TO value - generic GUC value (mọi tham số cấu hình dùng chung 1 rule), không riêng cho search_path - không gợi ý dữ liệu schema nào")
     void alterdatabasesetstmt() {
-        assertDoesNotThrow(() -> suggest("alter database db1 set search_path to |"));
+        pg("alter database db1 set search_path to |");
     }
 
     @Test
-    @DisplayName("alterdomainstmt: VALIDATE CONSTRAINT name - tên CONSTRAINT không model hoá trong SchemaIndex - không throw là đủ")
+    @DisplayName("alterdomainstmt: VALIDATE CONSTRAINT name - tên CONSTRAINT không model hoá trong SchemaIndex - không gợi ý dữ liệu schema nào")
     void alterdomainstmt() {
-        assertDoesNotThrow(() -> suggest("alter domain d1 validate constraint |"));
+        pg("alter domain d1 validate constraint |");
     }
 
     @Test
-    @DisplayName("alterenumstmt: ADD VALUE 'x' BEFORE sconst - chờ STRING LITERAL, không phải định danh - không throw là đủ")
+    @DisplayName("alterenumstmt: ADD VALUE 'x' BEFORE sconst - chờ STRING LITERAL, không phải định danh - không gợi ý dữ liệu schema nào")
     void alterenumstmt() {
-        assertDoesNotThrow(() -> suggest("alter type status_enum add value 'x' before |"));
+        pg("alter type status_enum add value 'x' before |");
     }
 
     @Test
-    @DisplayName("alterextensionstmt: UPDATE TO nonreservedword_or_sconst - version string tuỳ ý của extension - không throw là đủ")
+    @DisplayName("alterextensionstmt: UPDATE TO nonreservedword_or_sconst - version string tuỳ ý của extension - không gợi ý dữ liệu schema nào")
     void alterextensionstmt() {
-        assertDoesNotThrow(() -> suggest("alter extension ext1 update to |"));
+        pg("alter extension ext1 update to |");
     }
 
     @Test
-    @DisplayName("alterfdwstmt: OPTIONS (key 'value') - option key tuỳ theo FDW driver, không có nguồn dữ liệu enumerable - không throw là đủ (giới hạn đã biết)")
+    @DisplayName("alterfdwstmt: OPTIONS (key 'value') - option key tuỳ theo FDW driver, không có nguồn dữ liệu enumerable - không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void alterfdwstmt() {
-        assertDoesNotThrow(() -> suggest("alter foreign data wrapper fdw1 options (|"));
+        pg("alter foreign data wrapper fdw1 options (|");
     }
 
     @Test
-    @DisplayName("alterforeignserverstmt: OPTIONS (...) - tương tự alterfdwstmt, không throw là đủ")
+    @DisplayName("alterforeignserverstmt: OPTIONS (...) - tương tự alterfdwstmt, không gợi ý dữ liệu schema nào")
     void alterforeignserverstmt() {
-        assertDoesNotThrow(() -> suggest("alter server srv1 options (|"));
+        pg("alter server srv1 options (|");
     }
 
     @Test
-    @DisplayName("alterfunctionstmt: alterfunc_opt_item - toàn keyword (STRICT/COST/ROWS...), không có dữ liệu thật cần gợi ý - không throw là đủ")
+    @DisplayName("alterfunctionstmt: alterfunc_opt_item - toàn keyword (STRICT/COST/ROWS...), không có dữ liệu thật cần gợi ý - không gợi ý dữ liệu schema nào")
     void alterfunctionstmt() {
-        assertDoesNotThrow(() -> suggest("alter function f1(int4) |"));
+        pg("alter function f1(int4) |");
     }
 
     @Test
-    @DisplayName("alterobjectdependsstmt: DEPENDS ON EXTENSION name - tên extension không model hoá - không throw là đủ")
+    @DisplayName("alterobjectdependsstmt: DEPENDS ON EXTENSION name - tên extension không model hoá - không gợi ý dữ liệu schema nào")
     void alterobjectdependsstmt() {
-        assertDoesNotThrow(() -> suggest("alter function f1(int4) depends on extension |"));
+        pg("alter function f1(int4) depends on extension |");
     }
 
     @Test
-    @DisplayName("alterobjectschemastmt: SET SCHEMA name - tên schema qua rule 'name' dùng chung, không throw là đủ (giới hạn đã biết)")
+    @DisplayName("alterobjectschemastmt: SET SCHEMA name - tên schema qua rule 'name' dùng chung, không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void alterobjectschemastmt() {
-        assertDoesNotThrow(() -> suggest("alter table public.users set schema |"));
+        pg("alter table public.users set schema |");
     }
 
     @Test
-    @DisplayName("altertypestmt: SET (...) option list - option key tuỳ loại (storage/receive/send...), không throw là đủ")
+    @DisplayName("altertypestmt: SET (...) option list - option key tuỳ loại (storage/receive/send...), không gợi ý dữ liệu schema nào")
     void altertypestmt() {
-        assertDoesNotThrow(() -> suggest("alter type mytype set (|"));
+        pg("alter type mytype set (|");
     }
 
     @Test
-    @DisplayName("alterseqstmt: RESTART WITH numeric - chờ SỐ, không phải định danh - không throw là đủ")
+    @DisplayName("alterseqstmt: RESTART WITH numeric - chờ SỐ, không phải định danh - không gợi ý dữ liệu schema nào")
     void alterseqstmt() {
-        assertDoesNotThrow(() -> suggest("alter sequence s1 restart with |"));
+        pg("alter sequence s1 restart with |");
     }
 
     @Test
-    @DisplayName("altersystemstmt: SET generic_set - tên GUC parameter tuỳ ý - không throw là đủ")
+    @DisplayName("altersystemstmt: SET generic_set - tên GUC parameter tuỳ ý - không gợi ý dữ liệu schema nào")
     void altersystemstmt() {
-        assertDoesNotThrow(() -> suggest("alter system set |"));
+        pg("alter system set |");
     }
 
     @Test
-    @DisplayName("altertblspcstmt: SET (...) option list - option tablespace tuỳ storage driver, không throw là đủ")
+    @DisplayName("altertblspcstmt: SET (...) option list - option tablespace tuỳ storage driver, không gợi ý dữ liệu schema nào")
     void altertblspcstmt() {
-        assertDoesNotThrow(() -> suggest("alter tablespace ts1 set (|"));
+        pg("alter tablespace ts1 set (|");
     }
 
     @Test
-    @DisplayName("alterrolesetstmt: SET search_path TO value - generic GUC, không throw là đủ")
+    @DisplayName("alterrolesetstmt: SET search_path TO value - generic GUC, không gợi ý dữ liệu schema nào")
     void alterrolesetstmt() {
-        assertDoesNotThrow(() -> suggest("alter role role1 set search_path to |"));
+        pg("alter role role1 set search_path to |");
     }
 
     @Test
-    @DisplayName("alterrolestmt: alteroptrolelist - toàn keyword thuộc tính role (SUPERUSER/LOGIN...), không throw là đủ")
+    @DisplayName("alterrolestmt: alteroptrolelist - toàn keyword thuộc tính role (SUPERUSER/LOGIN...), không gợi ý dữ liệu schema nào")
     void alterrolestmt() {
-        assertDoesNotThrow(() -> suggest("alter role role1 with |"));
+        pg("alter role role1 with |");
     }
 
     @Test
-    @DisplayName("altersubscriptionstmt: SET PUBLICATION publication_name_list - route qua rule collabel (dùng cả ở vị trí alias 'AS' rất phổ biến, quá rủi ro để suppress rộng), không throw là đủ (giới hạn đã biết, cố ý không sửa)")
+    @DisplayName("altersubscriptionstmt: SET PUBLICATION publication_name_list - route qua rule collabel (đã thêm vào PREFERRED_RULES - hết tràn ~525 keyword), không có nguồn tên publication nên không gợi ý gì")
     void altersubscriptionstmt() {
-        assertDoesNotThrow(() -> suggest("alter subscription sub1 set publication |"));
+        pg("alter subscription sub1 set publication |");
     }
 
     @Test
-    @DisplayName("alterstatsstmt: SET STATISTICS iconst - chờ SỐ, không throw là đủ")
+    @DisplayName("alterstatsstmt: SET STATISTICS iconst - chờ SỐ, không gợi ý dữ liệu schema nào")
     void alterstatsstmt() {
-        assertDoesNotThrow(() -> suggest("alter statistics stat1 set statistics |"));
+        pg("alter statistics stat1 set statistics |");
     }
 
     @Test
-    @DisplayName("altertsconfigurationstmt: ADD MAPPING FOR name_list - tên token-type của text search, không model hoá - không throw là đủ")
+    @DisplayName("altertsconfigurationstmt: ADD MAPPING FOR name_list - tên token-type của text search, không model hoá - không gợi ý dữ liệu schema nào")
     void altertsconfigurationstmt() {
-        assertDoesNotThrow(() -> suggest("alter text search configuration tsc1 add mapping for |"));
+        pg("alter text search configuration tsc1 add mapping for |");
     }
 
     @Test
-    @DisplayName("altertsdictionarystmt: (definition) - option key tuỳ dictionary template, không throw là đủ")
+    @DisplayName("altertsdictionarystmt: (definition) - option key tuỳ dictionary template, không gợi ý dữ liệu schema nào")
     void altertsdictionarystmt() {
-        assertDoesNotThrow(() -> suggest("alter text search dictionary tsd1 (|"));
+        pg("alter text search dictionary tsd1 (|");
     }
 
     @Test
-    @DisplayName("alterusermappingstmt: OPTIONS (...) - tương tự alterfdwstmt, không throw là đủ")
+    @DisplayName("alterusermappingstmt: OPTIONS (...) - tương tự alterfdwstmt, không gợi ý dữ liệu schema nào")
     void alterusermappingstmt() {
-        assertDoesNotThrow(() -> suggest("alter user mapping for user1 server srv1 options (|"));
+        pg("alter user mapping for user1 server srv1 options (|");
     }
 
     @Test
-    @DisplayName("checkpointstmt: không tham số nào - không throw là đủ")
+    @DisplayName("checkpointstmt: không tham số nào - không gợi ý dữ liệu schema nào")
     void checkpointstmt() {
-        assertDoesNotThrow(() -> suggest("checkpoint |"));
+        pg("checkpoint |");
     }
 
     @Test
-    @DisplayName("closeportalstmt: CLOSE cursor_name - tên cursor phiên hiện tại, không model hoá - không throw là đủ")
+    @DisplayName("closeportalstmt: CLOSE cursor_name - tên cursor phiên hiện tại, không model hoá - không gợi ý dữ liệu schema nào")
     void closeportalstmt() {
-        assertDoesNotThrow(() -> suggest("close |"));
+        pg("close |");
     }
 
     @Test
-    @DisplayName("clusterstmt: USING index_name - tên index không model hoá trong SchemaIndex - không throw là đủ")
+    @DisplayName("clusterstmt: USING index_name - tên index không model hoá trong SchemaIndex - không gợi ý dữ liệu schema nào")
     void clusterstmt() {
-        assertDoesNotThrow(() -> suggest("cluster public.users using |"));
+        pg("cluster public.users using |");
     }
 
     @Test
-    @DisplayName("commentstmt: IS sconst - chờ STRING LITERAL - không throw là đủ")
+    @DisplayName("commentstmt: IS sconst - chờ STRING LITERAL - không gợi ý dữ liệu schema nào")
     void commentstmt() {
-        assertDoesNotThrow(() -> suggest("comment on table public.users is |"));
+        pg("comment on table public.users is |");
     }
 
     @Test
-    @DisplayName("constraintssetstmt: SET CONSTRAINTS ALL (DEFERRED|IMMEDIATE) - toàn keyword, không throw là đủ")
+    @DisplayName("constraintssetstmt: SET CONSTRAINTS ALL (DEFERRED|IMMEDIATE) - toàn keyword, không gợi ý dữ liệu schema nào")
     void constraintssetstmt() {
-        assertDoesNotThrow(() -> suggest("set constraints all |"));
+        pg("set constraints all |");
     }
 
     @Test
-    @DisplayName("copystmt: COPY ... TO (STDOUT|PROGRAM|filename literal) - không throw là đủ")
+    @DisplayName("copystmt: COPY ... TO (STDOUT|PROGRAM|filename literal) - không gợi ý dữ liệu schema nào")
     void copystmt() {
-        assertDoesNotThrow(() -> suggest("copy public.users to |"));
+        pg("copy public.users to |");
     }
 
     @Test
-    @DisplayName("createamstmt: TYPE INDEX HANDLER handler_name - handler_name route qua rule 'name' dùng chung, không throw là đủ (giới hạn đã biết)")
+    @DisplayName("createamstmt: TYPE INDEX HANDLER handler_name - handler_name route qua rule 'name' dùng chung, không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void createamstmt() {
-        assertDoesNotThrow(() -> suggest("create access method am1 type index handler |"));
+        pg("create access method am1 type index handler |");
     }
 
     @Test
-    @DisplayName("createextensionstmt: SCHEMA name - route qua rule 'name' dùng chung, không throw là đủ (giới hạn đã biết)")
+    @DisplayName("createextensionstmt: SCHEMA name - route qua rule 'name' dùng chung, không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void createextensionstmt() {
-        assertDoesNotThrow(() -> suggest("create extension ext1 schema |"));
+        pg("create extension ext1 schema |");
     }
 
     @Test
-    @DisplayName("createfdwstmt: HANDLER handler_name - route qua rule 'name' dùng chung, không throw là đủ (giới hạn đã biết)")
+    @DisplayName("createfdwstmt: HANDLER handler_name - route qua rule 'name' dùng chung, không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void createfdwstmt() {
-        assertDoesNotThrow(() -> suggest("create foreign data wrapper fdw1 handler |"));
+        pg("create foreign data wrapper fdw1 handler |");
     }
 
     @Test
-    @DisplayName("createforeignserverstmt: FOREIGN DATA WRAPPER name - tên FDW không model hoá - không throw là đủ")
+    @DisplayName("createforeignserverstmt: FOREIGN DATA WRAPPER name - tên FDW không model hoá - không gợi ý dữ liệu schema nào")
     void createforeignserverstmt() {
-        assertDoesNotThrow(() -> suggest("create server srv1 foreign data wrapper |"));
+        pg("create server srv1 foreign data wrapper |");
     }
 
     @Test
-    @DisplayName("createforeigntablestmt: SERVER name - tên foreign server không model hoá - không throw là đủ")
+    @DisplayName("createforeigntablestmt: SERVER name - tên foreign server không model hoá - không gợi ý dữ liệu schema nào")
     void createforeigntablestmt() {
-        assertDoesNotThrow(() -> suggest("create foreign table ft1 (id int4) server |"));
+        pg("create foreign table ft1 (id int4) server |");
     }
 
     @Test
-    @DisplayName("creategroupstmt: OptRoleList - toàn keyword thuộc tính role, không throw là đủ")
+    @DisplayName("creategroupstmt: OptRoleList - toàn keyword thuộc tính role, không gợi ý dữ liệu schema nào")
     void creategroupstmt() {
-        assertDoesNotThrow(() -> suggest("create group grp1 with |"));
+        pg("create group grp1 with |");
     }
 
     @Test
-    @DisplayName("createopclassstmt: FOR TYPE ... USING ... AS (opclass_item_list) - toàn keyword STORAGE/FUNCTION/OPERATOR, không throw là đủ")
+    @DisplayName("createopclassstmt: FOR TYPE ... USING ... AS (opclass_item_list) - toàn keyword STORAGE/FUNCTION/OPERATOR, không gợi ý dữ liệu schema nào")
     void createopclassstmt() {
-        assertDoesNotThrow(() -> suggest("create operator class oc1 for type int4 using btree as |"));
+        pg("create operator class oc1 for type int4 using btree as |");
     }
 
     @Test
-    @DisplayName("createopfamilystmt: USING access_method - tên access method (btree/hash/gin...) không model hoá - không throw là đủ")
+    @DisplayName("createopfamilystmt: USING access_method - tên access method (btree/hash/gin...) không model hoá - không gợi ý dữ liệu schema nào")
     void createopfamilystmt() {
-        assertDoesNotThrow(() -> suggest("create operator family of1 using |"));
+        pg("create operator family of1 using |");
     }
 
     @Test
-    @DisplayName("alteropfamilystmt: ADD opclass_item_list - toàn keyword, không throw là đủ")
+    @DisplayName("alteropfamilystmt: ADD opclass_item_list - toàn keyword, không gợi ý dữ liệu schema nào")
     void alteropfamilystmt() {
-        assertDoesNotThrow(() -> suggest("alter operator family of1 using btree add |"));
+        pg("alter operator family of1 using btree add |");
     }
 
     @Test
-    @DisplayName("createplangstmt: HANDLER keyword vị trí (chưa tới function name) - không throw là đủ")
+    @DisplayName("createplangstmt: HANDLER keyword vị trí (chưa tới function name) - không gợi ý dữ liệu schema nào")
     void createplangstmt() {
-        assertDoesNotThrow(() -> suggest("create language plpgsql2 |"));
+        pg("create language plpgsql2 |");
     }
 
     @Test
-    @DisplayName("createseqstmt: INCREMENT BY numeric - chờ SỐ - không throw là đủ")
+    @DisplayName("createseqstmt: INCREMENT BY numeric - chờ SỐ - không gợi ý dữ liệu schema nào")
     void createseqstmt() {
-        assertDoesNotThrow(() -> suggest("create sequence s2 increment by |"));
+        pg("create sequence s2 increment by |");
     }
 
     @Test
-    @DisplayName("createsubscriptionstmt: PUBLICATION publication_name_list - route qua rule collabel, giới hạn đã biết (cố ý không sửa) - không throw là đủ")
+    @DisplayName("createsubscriptionstmt: PUBLICATION publication_name_list - route qua rule collabel (đã thêm vào PREFERRED_RULES - hết tràn ~525 keyword), không có nguồn tên publication nên không gợi ý gì")
     void createsubscriptionstmt() {
-        assertDoesNotThrow(() -> suggest("create subscription sub2 connection 'host=x' publication |"));
+        pg("create subscription sub2 connection 'host=x' publication |");
     }
 
     @Test
-    @DisplayName("createtransformstmt: LANGUAGE lang_name (opt_definition) - vị trí sau LANGUAGE tới definition list, option key tuỳ ý - không throw là đủ")
+    @DisplayName("createtransformstmt: LANGUAGE lang_name (opt_definition) - vị trí sau LANGUAGE tới definition list, option key tuỳ ý - không gợi ý dữ liệu schema nào")
     void createtransformstmt() {
-        assertDoesNotThrow(() -> suggest("create transform for int4 language plpgsql2 (|"));
+        pg("create transform for int4 language plpgsql2 (|");
     }
 
     @Test
-    @DisplayName("createrolestmt: OptRoleList - toàn keyword thuộc tính role, không throw là đủ")
+    @DisplayName("createrolestmt: OptRoleList - toàn keyword thuộc tính role, không gợi ý dữ liệu schema nào")
     void createrolestmt() {
-        assertDoesNotThrow(() -> suggest("create role role2 with |"));
+        pg("create role role2 with |");
     }
 
     @Test
-    @DisplayName("createuserstmt: OptRoleList (CREATE USER = CREATE ROLE với LOGIN mặc định) - không throw là đủ")
+    @DisplayName("createuserstmt: OptRoleList (CREATE USER = CREATE ROLE với LOGIN mặc định) - không gợi ý dữ liệu schema nào")
     void createuserstmt() {
-        assertDoesNotThrow(() -> suggest("create user user2 with |"));
+        pg("create user user2 with |");
     }
 
     @Test
-    @DisplayName("createusermappingstmt: OPTIONS (...) - tương tự alterfdwstmt, không throw là đủ")
+    @DisplayName("createusermappingstmt: OPTIONS (...) - tương tự alterfdwstmt, không gợi ý dữ liệu schema nào")
     void createusermappingstmt() {
-        assertDoesNotThrow(() -> suggest("create user mapping for user2 server srv1 options (|"));
+        pg("create user mapping for user2 server srv1 options (|");
     }
 
     @Test
-    @DisplayName("deallocatestmt: DEALLOCATE name|ALL - tên prepared statement phiên hiện tại, không model hoá - không throw là đủ")
+    @DisplayName("deallocatestmt: DEALLOCATE name|ALL - tên prepared statement phiên hiện tại, không model hoá - không gợi ý dữ liệu schema nào")
     void deallocatestmt() {
-        assertDoesNotThrow(() -> suggest("deallocate |"));
+        pg("deallocate |");
     }
 
     @Test
-    @DisplayName("discardstmt: DISCARD (ALL|PLANS|TEMP|SEQUENCES) - toàn keyword, không throw là đủ")
+    @DisplayName("discardstmt: DISCARD (ALL|PLANS|TEMP|SEQUENCES) - toàn keyword, không gợi ý dữ liệu schema nào")
     void discardstmt() {
-        assertDoesNotThrow(() -> suggest("discard |"));
+        pg("discard |");
     }
 
     @Test
     @DisplayName("dostmt: LANGUAGE nonreservedword_or_sconst - phải có tên ngôn ngữ thật (plpgsql/sql)")
     void dostmt() {
-        var r = suggest("do $$ begin null; end; $$ language |");
-        assertEquals(Set.of("plpgsql", "sql"), keySetOfType(r, "other"));
+        pg("do $$ begin null; end; $$ language |").others(PG_LANGUAGES);
     }
 
     @Test
-    @DisplayName("dropcaststmt: CASCADE|RESTRICT - toàn keyword, không throw là đủ")
+    @DisplayName("dropcaststmt: CASCADE|RESTRICT - toàn keyword, không gợi ý dữ liệu schema nào")
     void dropcaststmt() {
-        assertDoesNotThrow(() -> suggest("drop cast (int4 as text) |"));
+        pg("drop cast (int4 as text) |");
     }
 
     @Test
-    @DisplayName("dropopclassstmt: USING access_method - tên access method không model hoá - không throw là đủ")
+    @DisplayName("dropopclassstmt: USING access_method - tên access method không model hoá - không gợi ý dữ liệu schema nào")
     void dropopclassstmt() {
-        assertDoesNotThrow(() -> suggest("drop operator class oc1 using |"));
+        pg("drop operator class oc1 using |");
     }
 
     @Test
-    @DisplayName("dropopfamilystmt: USING access_method - tương tự dropopclassstmt, không throw là đủ")
+    @DisplayName("dropopfamilystmt: USING access_method - tương tự dropopclassstmt, không gợi ý dữ liệu schema nào")
     void dropopfamilystmt() {
-        assertDoesNotThrow(() -> suggest("drop operator family of1 using |"));
+        pg("drop operator family of1 using |");
     }
 
     @Test
-    @DisplayName("dropsubscriptionstmt: DROP SUBSCRIPTION name - tên subscription không model hoá - không throw là đủ")
+    @DisplayName("dropsubscriptionstmt: DROP SUBSCRIPTION name - tên subscription không model hoá - không gợi ý dữ liệu schema nào")
     void dropsubscriptionstmt() {
-        assertDoesNotThrow(() -> suggest("drop subscription |"));
+        pg("drop subscription |");
     }
 
     @Test
-    @DisplayName("droptablespacestmt: DROP TABLESPACE name - tên tablespace route qua rule 'name' dùng chung, không throw là đủ (giới hạn đã biết)")
+    @DisplayName("droptablespacestmt: DROP TABLESPACE name - tên tablespace route qua rule 'name' dùng chung, không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void droptablespacestmt() {
-        assertDoesNotThrow(() -> suggest("drop tablespace |"));
+        pg("drop tablespace |");
     }
 
     @Test
-    @DisplayName("droptransformstmt: FOR type_name LANGUAGE name - tên ngôn ngữ ở vị trí này chưa wire (khác dostmt dùng nonreservedword_or_sconst) - không throw là đủ")
+    @DisplayName("droptransformstmt: FOR type_name LANGUAGE name - tên ngôn ngữ ở vị trí này chưa wire (khác dostmt dùng nonreservedword_or_sconst) - không gợi ý dữ liệu schema nào")
     void droptransformstmt() {
-        assertDoesNotThrow(() -> suggest("drop transform for int4 language |"));
+        pg("drop transform for int4 language |");
     }
 
     @Test
-    @DisplayName("dropusermappingstmt: SERVER name - tên foreign server không model hoá - không throw là đủ")
+    @DisplayName("dropusermappingstmt: SERVER name - tên foreign server không model hoá - không gợi ý dữ liệu schema nào")
     void dropusermappingstmt() {
-        assertDoesNotThrow(() -> suggest("drop user mapping for user2 server |"));
+        pg("drop user mapping for user2 server |");
     }
 
     @Test
-    @DisplayName("dropdbstmt: DROP DATABASE (IF EXISTS)? name - tên DB MỚI/khác session hiện tại, không model hoá đối tượng database - không throw là đủ")
+    @DisplayName("dropdbstmt: DROP DATABASE (IF EXISTS)? name - tên DB MỚI/khác session hiện tại, không model hoá đối tượng database - không gợi ý dữ liệu schema nào")
     void dropdbstmt() {
-        assertDoesNotThrow(() -> suggest("drop database |"));
+        pg("drop database |");
     }
 
     @Test
-    @DisplayName("executestmt: EXECUTE name - tên prepared statement phiên hiện tại, không model hoá - không throw là đủ")
+    @DisplayName("executestmt: EXECUTE name - tên prepared statement phiên hiện tại, không model hoá - không gợi ý dữ liệu schema nào")
     void executestmt() {
-        assertDoesNotThrow(() -> suggest("execute |"));
+        pg("execute |");
     }
 
     @Test
-    @DisplayName("fetchstmt: FETCH NEXT FROM cursor_name - tên cursor phiên hiện tại, không model hoá - không throw là đủ")
+    @DisplayName("fetchstmt: FETCH NEXT FROM cursor_name - tên cursor phiên hiện tại, không model hoá - không gợi ý dữ liệu schema nào")
     void fetchstmt() {
-        assertDoesNotThrow(() -> suggest("fetch next from |"));
+        pg("fetch next from |");
     }
 
     @Test
-    @DisplayName("importforeignschemastmt: FROM SERVER name INTO name - tên schema đích route qua rule 'name' dùng chung, không throw là đủ (giới hạn đã biết)")
+    @DisplayName("importforeignschemastmt: FROM SERVER name INTO name - tên schema đích route qua rule 'name' dùng chung, không gợi ý dữ liệu schema nào (giới hạn đã biết)")
     void importforeignschemastmt() {
-        assertDoesNotThrow(() -> suggest("import foreign schema public from server srv1 into |"));
+        pg("import foreign schema public from server srv1 into |");
     }
 
     @Test
-    @DisplayName("listenstmt: LISTEN channel_name - tên channel tuỳ ý, không model hoá - không throw là đủ")
+    @DisplayName("listenstmt: LISTEN channel_name - tên channel tuỳ ý, không model hoá - không gợi ý dữ liệu schema nào")
     void listenstmt() {
-        assertDoesNotThrow(() -> suggest("listen |"));
+        pg("listen |");
     }
 
     @Test
-    @DisplayName("loadstmt: LOAD file_name (sconst) - chờ STRING LITERAL đường dẫn file - không throw là đủ")
+    @DisplayName("loadstmt: LOAD file_name (sconst) - chờ STRING LITERAL đường dẫn file - không gợi ý dữ liệu schema nào")
     void loadstmt() {
-        assertDoesNotThrow(() -> suggest("load |"));
+        pg("load |");
     }
 
     @Test
-    @DisplayName("lockstmt: IN lock_type MODE - toàn keyword chế độ khoá (ROW/SHARE/ACCESS EXCLUSIVE...), không throw là đủ")
+    @DisplayName("lockstmt: IN lock_type MODE - toàn keyword chế độ khoá (ROW/SHARE/ACCESS EXCLUSIVE...), không gợi ý dữ liệu schema nào")
     void lockstmt() {
-        assertDoesNotThrow(() -> suggest("lock table public.users in |"));
+        pg("lock table public.users in |");
     }
 
     @Test
-    @DisplayName("notifystmt: NOTIFY channel_name - tên channel tuỳ ý, không model hoá - không throw là đủ")
+    @DisplayName("notifystmt: NOTIFY channel_name - tên channel tuỳ ý, không model hoá - không gợi ý dữ liệu schema nào")
     void notifystmt() {
-        assertDoesNotThrow(() -> suggest("notify |"));
+        pg("notify |");
     }
 
     @Test
-    @DisplayName("unlistenstmt: UNLISTEN (channel_name|*) - tên channel tuỳ ý, không throw là đủ")
+    @DisplayName("unlistenstmt: UNLISTEN (channel_name|*) - tên channel tuỳ ý, không gợi ý dữ liệu schema nào")
     void unlistenstmt() {
-        assertDoesNotThrow(() -> suggest("unlisten |"));
+        pg("unlisten |");
     }
 
     @Test
-    @DisplayName("rulestmt: CREATE RULE ... AS ON INSERT TO table DO (NOTHING|action) - vị trí action là 1 statement lồng, không throw là đủ")
+    @DisplayName("rulestmt: CREATE RULE ... AS ON INSERT TO table DO (NOTHING|action) - vị trí action là 1 statement lồng, không gợi ý dữ liệu schema nào")
     void rulestmt() {
-        assertDoesNotThrow(() -> suggest("create rule r1 as on insert to public.users do |"));
+        pg("create rule r1 as on insert to public.users do |");
     }
 
     @Test
-    @DisplayName("seclabelstmt: IS sconst - chờ STRING LITERAL - không throw là đủ")
+    @DisplayName("seclabelstmt: IS sconst - chờ STRING LITERAL - không gợi ý dữ liệu schema nào")
     void seclabelstmt() {
-        assertDoesNotThrow(() -> suggest("security label on table public.users is |"));
+        pg("security label on table public.users is |");
     }
 
     @Test
-    @DisplayName("transactionstmt: START TRANSACTION transaction_mode_list - toàn keyword (READ WRITE/ISOLATION LEVEL...), không throw là đủ")
+    @DisplayName("transactionstmt: START TRANSACTION transaction_mode_list - toàn keyword (READ WRITE/ISOLATION LEVEL...), không gợi ý dữ liệu schema nào")
     void transactionstmt() {
-        assertDoesNotThrow(() -> suggest("start transaction |"));
+        pg("start transaction |");
     }
 
     @Test
-    @DisplayName("truncatestmt: TRUNCATE TABLE ... opt_restart_seqs - toàn keyword sau khi bảng đã được chỉ định, không throw là đủ")
+    @DisplayName("truncatestmt: TRUNCATE TABLE ... opt_restart_seqs - toàn keyword sau khi bảng đã được chỉ định, không gợi ý dữ liệu schema nào")
     void truncatestmt() {
-        assertDoesNotThrow(() -> suggest("truncate table public.users |"));
+        pg("truncate table public.users |");
     }
 
     @Test
-    @DisplayName("variableresetstmt: RESET generic_reset - tên GUC parameter tuỳ ý (+ ALL keyword), không throw là đủ")
+    @DisplayName("variableresetstmt: RESET generic_reset - tên GUC parameter tuỳ ý (+ ALL keyword), không gợi ý dữ liệu schema nào")
     void variableresetstmt() {
-        assertDoesNotThrow(() -> suggest("reset |"));
+        pg("reset |");
     }
 
     @Test
-    @DisplayName("variablesetstmt: SET var_name TO value - generic GUC, không throw là đủ")
+    @DisplayName("variablesetstmt: SET var_name TO value - generic GUC, không gợi ý dữ liệu schema nào")
     void variablesetstmt() {
-        assertDoesNotThrow(() -> suggest("set search_path to |"));
+        pg("set search_path to |");
     }
 
     @Test
-    @DisplayName("variableshowstmt: SHOW var_name - tên GUC parameter tuỳ ý (+ ALL keyword), không throw là đủ")
+    @DisplayName("variableshowstmt: SHOW var_name - tên GUC parameter tuỳ ý (+ ALL keyword), không gợi ý dữ liệu schema nào")
     void variableshowstmt() {
-        assertDoesNotThrow(() -> suggest("show |"));
+        pg("show |");
     }
 
     @Test
-    @DisplayName("plsqlconsolecommand: MetaCommand (\\\\d, \\\\l...) - cú pháp riêng của CLI, không thuộc SQL chuẩn - không throw là đủ")
+    @DisplayName("plsqlconsolecommand: MetaCommand (\\\\d, \\\\l...) - cú pháp riêng của CLI, không thuộc SQL chuẩn - không gợi ý dữ liệu schema nào")
     void plsqlconsolecommand() {
-        assertDoesNotThrow(() -> suggest("\\d |"));
+        pg("\\d |");
     }
 
     // =====================================================================

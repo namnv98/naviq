@@ -66,7 +66,15 @@ public class OracleSemanticAnalyzer {
             String danglingQualifier = detect(tokens, patch.caretTokenIndex(), PlSqlParser.PERIOD, IDENTIFIER_TOKEN_TYPES);
             model.recordDanglingDot(cursorOffset, danglingQualifier);
 
-            var scope = model.scopeAt(patch.caretTokenIndex());
+            // "x.|" gõ dở trong subquery (FROM (...) hoặc IN (...)): lỗi cú pháp ở dấu chấm cụt khiến
+            // ANTLR phục hồi bằng cách ĐÓNG query_block của subquery TRƯỚC dấu chấm - scopeAt(dấu chấm)
+            // rơi ra scope NGOÀI, không thấy alias của subquery (bug thật: "select * from (select *
+            // from users u where u.|)" từng trả rỗng). Token qualifier ("u") thì chắc chắn nằm TRONG
+            // scope đúng - lấy scope theo token đó.
+            int scopeTokenIndex = danglingQualifier != null
+                    ? previousRealTokenIndex(tokens, patch.caretTokenIndex())
+                    : patch.caretTokenIndex();
+            var scope = model.scopeAt(scopeTokenIndex);
             if (scope != model.root() && crossesRealSemicolon(tokens, scope, patch.caretTokenIndex())) {
                 // scopeAt() có 1 fallback (xem javadoc ở đó) chọn "scope gần caret nhất theo điểm
                 // bắt đầu" khi không scope nào phủ trọn caret - đúng ý đồ cho câu bị gõ dở/lỗi cú
@@ -80,11 +88,9 @@ public class OracleSemanticAnalyzer {
             var result = model.resolveAt(cursorOffset, scope);
             String ddlTargetAlias = scope != null && scope.isDdlTargetScope ? scope.primaryAlias() : null;
             // Tên CTE (WITH cte AS (...)) - giống hệt lý do bên PostgresSemanticAnalyzer (bug thật:
-            // trước đây không gợi ý được tên CTE lúc đang gõ dở FROM).
-            // Đi qua visibleDerivedScopes() (đúng chuỗi cha) chứ không đọc thẳng
-            // scope.derivedScopeAliases - đồng nhất với PostgresSemanticAnalyzer (xem comment ở
-            // đó để biết lý do cụ thể).
-            java.util.Set<String> visibleCteNames = scope != null ? scope.visibleDerivedScopes().keySet() : java.util.Set.of();
+            // trước đây không gợi ý được tên CTE lúc đang gõ dở FROM). Dùng visibleCteNames()
+            // chứ KHÔNG dùng key của visibleDerivedScopes() - map đó còn chứa alias subquery.
+            java.util.Set<String> visibleCteNames = scope != null ? scope.visibleCteNames() : java.util.Set.of();
             return new Result(
                     result.danglingQualifier(),
                     result.danglingQualifierResolvesTo(),
@@ -114,6 +120,15 @@ public class OracleSemanticAnalyzer {
             }
         }
         return false;
+    }
+
+    private static int previousRealTokenIndex(CommonTokenStream tokens, int fromIndex) {
+        for (int i = fromIndex - 1; i >= 0; i--) {
+            if (tokens.get(i).getChannel() == Token.DEFAULT_CHANNEL) {
+                return i;
+            }
+        }
+        return fromIndex;
     }
 
     public static String detect(CommonTokenStream tokens, int caretTokenIndex, int dotTokenType, Set<Integer> identifierTypes) {

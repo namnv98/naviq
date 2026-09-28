@@ -1,0 +1,390 @@
+# Snapshot keyword gợi ý cho từng câu SQL test (keywords-oracle.txt).
+# KHÔNG sửa tay - ghi lại bằng: mvn test -Dsnapshot.update=true, rồi review diff.
+ADMINISTER KEY MANAGEMENT CREATE KEYSTORE '/tmp/wallet' IDENTIFIED BY pass1|
+  (none)
+ALTER ANALYTIC VIEW av1 COMPILE|
+  compile
+ALTER ATTRIBUTE DIMENSION ad1 COMPILE|
+  compile
+ALTER AUDIT POLICY p1 DROP CONDITION|
+  condition
+ALTER CLUSTER cl1 SIZE 10M|
+  (none)
+ALTER DATABASE LINK lnk1 CONNECT TO scott IDENTIFIED BY tiger|
+  (none)
+ALTER DATABASE OPEN|
+  open
+ALTER DIMENSION dim1 COMPILE|
+  compile
+ALTER DISKGROUP dg1 CHECK|
+  check
+ALTER FLASHBACK ARCHIVE fa1 SET DEFAULT|
+  default
+ALTER FUNCTION f1 COMPILE|
+  compile
+ALTER HIERARCHY h1 COMPILE|
+  compile
+ALTER INDEX idx1 REBUILD|
+  rebuild
+ALTER INMEMORY JOIN GROUP jg1 ADD (t1(c1), t2(c2))|
+  (none)
+ALTER JAVA SOURCE src1 COMPILE|
+  compile
+ALTER LIBRARY lib1 COMPILE|
+  compile
+ALTER LOCKDOWN PROFILE lp1 DISABLE STATEMENT ALTER_SYSTEM|
+  (none)
+ALTER MATERIALIZED VIEW LOG ON users PARALLEL|
+  noparallel, parallel
+ALTER MATERIALIZED VIEW users COMPILE|
+  compile
+ALTER MATERIALIZED ZONEMAP zm1 REBUILD|
+  rebuild
+ALTER OPERATOR op1 COMPILE|
+  compile
+ALTER OUTLINE ol1 REBUILD|
+  rebuild
+ALTER PACKAGE pkg1 COMPILE|
+  compile
+ALTER PMEM FILESTORE fs1 DISMOUNT|
+  dismount
+ALTER PROCEDURE proc1 COMPILE|
+  compile
+ALTER RESOURCE COST CPU_PER_SESSION 1000|
+  (none)
+ALTER ROLE role1 NOT IDENTIFIED|
+  identified
+ALTER ROLLBACK SEGMENT rbs1 ONLINE|
+  online
+ALTER SEQUENCE seq1 INCREMENT BY 1|
+  (none)
+ALTER SESSION SET NLS_LANGUAGE = 'AMERICAN'|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+ALTER SYNONYM syn1 COMPILE|
+  compile
+ALTER TABLE users ADD (new_col NUMBER)|
+  add, column, disable, drop, enable, lob, modify, nested table, rename constraint, set unused, varray, xmltype
+ALTER TABLE users MODIFY (|)
+  (none)
+ALTER TABLESPACE SET tss1 RENAME TO tss2|
+  (none)
+ALTER TABLESPACE ts1 COALESCE|
+  coalesce
+ALTER TRIGGER trg1 DISABLE|
+  disable
+ALTER TYPE ty1 COMPILE|
+  compile
+ALTER USER u1 IDENTIFIED BY newpass|
+  (none)
+ALTER VIEW v1 COMPILE|
+  compile
+ANALYZE TABLE users COMPUTE STATISTICS|
+  (none)
+ASSOCIATE STATISTICS WITH COLUMNS users.id USING f1|
+  (none)
+AUDIT POLICY p1|
+  (none)
+AUDIT SELECT ON users|
+  (none)
+BEGIN CLOSE |END;
+  ., :, :=, @, bindvar, case, constant, exception, into
+BEGIN EXECUTE IMMEDIATE |END;
+  :, :=, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+BEGIN FETCH c1 INTO |END;
+  :, _, bindvar
+BEGIN NULL; |END;
+  :, begin, bindvar, call, case, close, commit, continue, cursor, declare, delete, end, exception, execute immediate, exit, explain plan, fetch, for, forall, function, goto, if, insert, lock table, loop, merge into, null, open, pipe row, pragma, procedure, raise, return, rollback, savepoint, select, set, subtype, type, update, while, with
+BEGIN OPEN v1 FOR SELECT * FROM |END;
+  json_table, only, table, the, xmltable
+BEGIN OPEN |END;
+  ., :, :=, @, _, bindvar, case, constant, exception, into
+CALL proc1(|)
+  :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, select, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, validate_conversion, var_, variance, with, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+COMMENT ON COLUMN users.name IS |'x'
+  :, _, bindvar
+COMMENT ON MATERIALIZED VIEW mv1 IS |'x'
+  :, _, bindvar
+COMMENT ON TABLE users IS |'x'
+  :, _, bindvar
+COMMIT|
+  commit
+CREATE ANALYTIC VIEW av1 CACHE|
+  cache
+CREATE ATTRIBUTE DIMENSION ad1 USING users|
+  (none)
+CREATE AUDIT POLICY p1 ACTIONS SELECT ON users|
+  (none)
+CREATE CLUSTER cl1 (c1 NUMBER)|
+  cache, compute, hashkeys, index, initrans, maxtrans, nocache, noparallel, norowdependencies, parallel, pctfree, pctused, rowdependencies, single table, size, storage, tablespace
+CREATE CONTEXT ctx1 USING pkg1|
+  (none)
+CREATE CONTROLFILE SET DATABASE db1 RESETLOGS|
+  noresetlogs, resetlogs
+CREATE DATABASE LINK lnk1 CONNECT TO scott IDENTIFIED BY tiger|
+  (none)
+CREATE DATABASE db1|
+  (none)
+CREATE DIMENSION dim1 LEVEL lvl1 IS users.id HIERARCHY hh1 (lvl1 CHILD OF lvl1)|
+  administer key management, alter, analyze, associate statistics with, attribute, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, hierarchy, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE DIRECTORY dir1 AS '/tmp'|
+  (none)
+CREATE DISKGROUP dg1 DISK '/dev/sda1'|
+  ,, administer key management, alter, analyze, associate statistics with, attribute, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, disk, drop, exit, explain plan, failgroup, flashback table, force, grant, insert, lock table, merge into, name, noaudit, noforce, prompt_message, purge, quorum, regular, rename, revoke, rollback, savepoint, select, set, show, size, start_cmd, timing, truncate, update, whenever, with
+CREATE EDITION ed1|
+  (none)
+CREATE FLASHBACK ARCHIVE fa1 TABLESPACE ts1|
+  (none)
+CREATE FUNCTION f1 RETURN NUMBER IS BEGIN RETURN 1; END;|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE HIERARCHY h1 USING users|
+  (none)
+CREATE INDEX idx1 ON users (|)
+  :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+CREATE INMEMORY JOIN GROUP jg1 (users(id), orders(user_id))|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE JAVA SOURCE NAMED src1 AS class Foo {}|
+  (none)
+CREATE LIBRARY lib1 AS '/tmp/lib.so'|
+  administer key management, agent, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, credential, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, in, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE LOCKDOWN PROFILE lp1|
+  (none)
+CREATE MATERIALIZED VIEW LOG ON users|
+  (none)
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM users|
+  (none)
+CREATE MATERIALIZED ZONEMAP zm1 ON users (id)|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE OPERATOR op1 BINDING (NUMBER) RETURN NUMBER USING f1|
+  (none)
+CREATE OUTLINE ol1 ON SELECT * FROM users|
+  (none)
+CREATE PACKAGE BODY pkg1 IS END;|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE PACKAGE pkg1 IS PROCEDURE p1; END;|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE PMEM FILESTORE fs1 MOUNTPOINT '/mnt' SIZE 10G|
+  (none)
+CREATE PROCEDURE proc1 IS BEGIN NULL; END;|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE PROFILE prof1 LIMIT SESSIONS_PER_USER 1|
+  (none)
+CREATE RESTORE POINT rp1|
+  (none)
+CREATE ROLE role1|
+  (none)
+CREATE ROLLBACK SEGMENT rbs1|
+  (none)
+CREATE SCHEMA AUTHORIZATION naviq CREATE TABLE t1 (a NUMBER)|
+  as, cache, cluster, clustering, column, compress, compute, default collation, disable, enable, external partition attributes, filesystem_like_logging, flashback archive, for exchange with table, hashing using, indexing, initrans, lob, logging, maxtrans, memoptimize, nested table, no, nocache, nocompress, nologging, noparallel, norowdependencies, on commit, organization, parallel, parent, partition, pctfree, pctused, read, result_cache, row, rowdependencies, segment creation, storage, tablespace, varray, xmltype
+CREATE SEQUENCE seq1 START WITH |
+  (none)
+CREATE SPFILE FROM PFILE|
+  pfile
+CREATE SYNONYM syn1 FOR users|
+  (none)
+CREATE TABLE t1 (id |)
+  ,, annotations, check, constraint, default, encrypt, evaluate using, generated, invisible, not, null, primary key, references, scope is, sort, unique, unusable, virtual, visible, with rowid
+CREATE TABLESPACE SET tss1|
+  (none)
+CREATE TABLESPACE ts1 DATAFILE 'ts1.dbf' SIZE 10M|
+  (none)
+CREATE TRIGGER trg1 BEFORE INSERT ON users FOR EACH ROW BEGIN NULL; END;|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with
+CREATE TYPE ty1 AS OBJECT (a NUMBER)|
+  final, instantiable, not, overriding
+CREATE USER u1 IDENTIFIED BY pass1|
+  (none)
+CREATE VIEW v1 AS SELECT * FROM users|
+  (none)
+DELETE FROM users WHERE |
+  :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, current of, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+DISASSOCIATE STATISTICS FROM COLUMNS users.id|
+  (none)
+DROP ANALYTIC VIEW av1|
+  (none)
+DROP ATTRIBUTE DIMENSION ad1|
+  (none)
+DROP AUDIT POLICY p1|
+  (none)
+DROP CLUSTER cl1|
+  (none)
+DROP CONTEXT ctx1|
+  (none)
+DROP DATABASE LINK lnk1|
+  (none)
+DROP DATABASE|
+  database
+DROP DIRECTORY dir1|
+  (none)
+DROP DISKGROUP dg1|
+  (none)
+DROP EDITION ed1|
+  (none)
+DROP FLASHBACK ARCHIVE fa1|
+  (none)
+DROP FUNCTION f1|
+  (none)
+DROP HIERARCHY h1|
+  (none)
+DROP INDEX idx1|
+  (none)
+DROP INDEXTYPE it1|
+  (none)
+DROP INMEMORY JOIN GROUP jg1|
+  (none)
+DROP JAVA SOURCE src1|
+  (none)
+DROP LIBRARY lib1|
+  (none)
+DROP LOCKDOWN PROFILE lp1|
+  (none)
+DROP MATERIALIZED VIEW LOG ON users|
+  (none)
+DROP MATERIALIZED VIEW mv1|
+  (none)
+DROP MATERIALIZED ZONEMAP zm1|
+  (none)
+DROP OPERATOR op1|
+  (none)
+DROP OUTLINE ol1|
+  (none)
+DROP PACKAGE pkg1|
+  (none)
+DROP PMEM FILESTORE fs1|
+  (none)
+DROP PROCEDURE proc1|
+  (none)
+DROP RESTORE POINT rp1|
+  (none)
+DROP ROLE role1|
+  (none)
+DROP ROLLBACK SEGMENT rbs1|
+  (none)
+DROP SEQUENCE seq1|
+  (none)
+DROP SYNONYM syn1|
+  (none)
+DROP TABLE |
+  (none)
+DROP TABLESPACE SET tss1|
+  (none)
+DROP TABLESPACE ts1|
+  (none)
+DROP TRIGGER trg1|
+  (none)
+DROP TYPE ty1|
+  (none)
+DROP USER u1|
+  (none)
+DROP VIEW |
+  (none)
+EXPLAIN PLAN FOR SELECT * FROM |
+  json_table, only, table, the, xmltable
+FLASHBACK TABLE users TO RESTORE POINT rp1|
+  (none)
+GRANT SELECT ON users TO |
+  public
+INSERT INTO users (|
+  select, with
+LOCK TABLE users IN |
+  exclusive, row, share
+MERGE INTO users u USING orders o ON (u.id = o.user_id) WHEN MATCHED THEN UPDATE SET u.|
+  (none)
+NOAUDIT SELECT ON users|
+  (none)
+PURGE TABLE |
+  (none)
+RENAME users TO users_old|
+  (none)
+REVOKE SELECT ON users FROM |
+  public
+ROLLBACK|
+  rollback
+SAVEPOINT sp1|
+  (none)
+SELECT * FROM |
+  json_table, only, table, the, xmltable
+SET CONSTRAINT ALL |
+  deferred, immediate
+SET TRANSACTION READ ONLY|
+  only
+TRUNCATE CLUSTER cl1|
+  (none)
+TRUNCATE TABLE |
+  (none)
+UPDATE users SET |
+  set, value
+begin\n  select name from users u where u.|\nend;
+  (none)
+insert into orders (|
+  select, with
+merge into orders o using contracts c on (o.id = c.id) when matched then update set o.|
+  (none)
+select * from (select * from users u where u.|
+  (none)
+select * from (select * from users u where u.|)
+  (none)
+select * from (select * from users) x join |
+  ,, grant connect through, json_table, only, revoke connect through, table, the, xmltable
+select * from USE|
+  (none)
+select * from contracts c join contracts c1 join contracts |
+  ,, administer key management, alter, analyze, as of, associate statistics with, audit, begin, call, comment, commit, connect by, create, cross, declare, delete, disassociate statistics from, drop, exit, explain plan, fetch, flashback table, for update, full, grant, group by, having, inner, insert, intersect, join, left, lock table, merge into, minus, model, natural, noaudit, offset, on, order, partition by, pivot, prompt_message, purge, rename, revoke, right, rollback, sample, savepoint, select, set, show, start with, start_cmd, timing, truncate, union, unpivot, update, using, versions between, whenever, where, with
+select * from contracts c join contracts |
+  ,, administer key management, alter, analyze, as of, associate statistics with, audit, begin, call, comment, commit, connect by, create, cross, declare, delete, disassociate statistics from, drop, exit, explain plan, fetch, flashback table, for update, full, grant, group by, having, inner, insert, intersect, join, left, lock table, merge into, minus, model, natural, noaudit, offset, on, order, partition by, pivot, prompt_message, purge, rename, revoke, right, rollback, sample, savepoint, select, set, show, start with, start_cmd, timing, truncate, union, unpivot, update, using, versions between, whenever, where, with
+select * from contracts start with id = 1 connect by prior id = |
+  :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+select * from contracts |
+  ,, administer key management, alter, analyze, as of, associate statistics with, audit, begin, call, comment, commit, connect by, create, cross, declare, delete, disassociate statistics from, drop, exit, explain plan, fetch, flashback table, for update, full, grant, group by, having, inner, insert, intersect, join, left, lock table, merge into, minus, model, natural, noaudit, offset, order, partition by, pivot, prompt_message, purge, rename, revoke, right, rollback, sample, savepoint, select, set, show, start with, start_cmd, timing, truncate, union, unpivot, update, versions between, whenever, where, with
+select * from naviq.us|
+  (none)
+select * from users group by name |
+  !, *, ,, ., :, [, ^, _, administer key management, all, alter, analyze, and, any, associate statistics with, at, audit, avg, begin, between, bindvar, call, case, cast, chr, coalesce, collect, comment, commit, connect_by_root, corr, count, covar_, create, cume_dist, date, day, dbtimezone, declare, decode, decompose, default, delete, dense_rank, disassociate statistics from, distinct, drop, exists, exit, explain plan, extract, false, fetch, first_value, flashback table, for update, grant, greatest, having, in, insert, intersect, interval, is, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, like, like2, like4, likec, listagg, lock table, max, maxvalue, median, member, merge into, min, minus, minvalue, model, new, noaudit, not, ntile, null, nvl, offset, on overflow, or, order, percent_found, percent_isopen, percent_notfound, percent_rank, percent_rowcount, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, prompt_message, purge, rank, ratio_to_report, regr_, rename, revoke, rollback, round, row_number, savepoint, select, sessiontimezone, set, show, some, start_cmd, stddev, submultiset, substr, sum, time, timestamp, timing, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, truncate, union, update, validate_conversion, var_, variance, whenever, with, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable, year, | |
+select * from users order by name |
+  !, *, ,, ., :, [, ^, _, administer key management, all, alter, analyze, and, any, asc, associate statistics with, at, audit, avg, begin, between, bindvar, call, case, cast, chr, coalesce, collect, comment, commit, connect_by_root, corr, count, covar_, create, cume_dist, date, day, dbtimezone, declare, decode, decompose, default, delete, dense_rank, desc, disassociate statistics from, distinct, drop, exists, exit, explain plan, extract, false, fetch, first_value, flashback table, for update, grant, greatest, in, insert, intersect, interval, is, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, like, like2, like4, likec, listagg, lock table, max, maxvalue, median, member, merge into, min, minus, minvalue, new, noaudit, not, ntile, null, nulls, nvl, offset, on overflow, or, order, percent_found, percent_isopen, percent_notfound, percent_rank, percent_rowcount, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, prompt_message, purge, rank, ratio_to_report, regr_, rename, revoke, rollback, round, row_number, savepoint, select, sessiontimezone, set, show, some, start_cmd, stddev, submultiset, substr, sum, time, timestamp, timing, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, truncate, union, update, validate_conversion, var_, variance, whenever, with, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable, year, | |
+select * from users u join contracts c on u.id = c.id where na|
+  bindvar, dense_rank, interval, json_array, json_arrayagg, json_objectagg, json_serialize, json_transform, json_value, minvalue, percent_rank, prediction_details, prediction_probability, to_binary_double, to_binary_float, to_dsinterval, to_yminterval, translate
+select * from users u join orders o on o.user_id = u.id join contracts c on c.id = u.id where c.|
+  (none)
+select * from users u join orders o on o.user_id = u.|
+  (none)
+select * from users u join orders o using (|
+  (none)
+select * from users where exists (select 1 from orders o where o.|)
+  (none)
+select * from users where id in (select 1 from orders o where o.|)
+  (none)
+select * from users where id in (select | from orders)
+  *, :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, unique, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+select * from users where i|
+  bindvar, cume_dist, dbtimezone, distinct, exists, first_value, interval, json_serialize, lag_diff, lag_diff_percent, listagg, median, min, minvalue, ntile, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, ratio_to_report, sessiontimezone, time, timestamp, to_binary_double, to_binary_float, to_dsinterval, to_timestamp, to_timestamp_tz, to_yminterval, trim, validate_conversion, variance, xmlexists, xmlpi, xmlserialize
+select * from usrs|
+  (none)
+select * from us|
+  (none)
+select * from x.|
+  (none)
+select cast(id as N|) from dual
+  (none)
+select id from users u union select u.| from orders
+  (none)
+select id from users union select | from orders
+  *, :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, unique, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+select status, count(*) from orders group by status having |
+  :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_equal, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+select | from users
+  *, :, _, all, any, avg, bindvar, case, cast, chr, coalesce, collect, connect_by_root, corr, count, covar_, cume_dist, cursor, date, dbtimezone, decode, decompose, default, dense_rank, distinct, exists, extract, false, first_value, greatest, interval, json_array, json_arrayagg, json_object, json_objectagg, json_query, json_serialize, json_transform, json_value, lag, lag_diff, lag_diff_percent, last_value, lead, least, listagg, max, maxvalue, median, min, minvalue, new, not, ntile, null, nvl, percent_rank, percentile_cont, percentile_disc, prediction, prediction_bounds, prediction_cost, prediction_details, prediction_probability, prediction_set, prior, rank, ratio_to_report, regr_, round, row_number, sessiontimezone, some, stddev, substr, sum, time, timestamp, to_binary_double, to_binary_float, to_char, to_date, to_dsinterval, to_number, to_timestamp, to_timestamp_tz, to_yminterval, translate, treat, trim, true, unique, validate_conversion, var_, variance, xmlagg, xmlcast, xmlcolattval, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlquery, xmlroot, xmlserialize, xmltable
+with a as (select * from users), b as (select * from a) select * from b bb where bb.|
+  (none)
+with a as (select * from users), b as (select * from a), c as (select * from b) select * from c cc where cc.|
+  (none)
+with r as (select * from users) select * from orders where user_id in (select id from r|)
+  (none)
+with r as (select * from users) select * from r rr join |
+  ,, grant connect through, json_table, only, revoke connect through, table, the, xmltable
+with recent as (select * from users) select * from recent r where r.|
+  (none)
+with recent as (select * from users) select * from re|
+  (none)
+|
+  administer key management, alter, analyze, associate statistics with, audit, begin, call, comment, commit, create, declare, delete, disassociate statistics from, drop, exit, explain plan, flashback table, grant, insert, lock table, merge into, noaudit, prompt_message, purge, rename, revoke, rollback, savepoint, select, set, show, start_cmd, timing, truncate, update, whenever, with

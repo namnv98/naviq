@@ -556,6 +556,7 @@ public class OracleScopeBuilder extends PlSqlParserBaseListener {
         String name = ctx.query_name().getText();
         cur.aliases.put(name, "<cte#" + inner.id + ">");
         cur.derivedScopeAliases.put(name, inner);
+        cur.cteNames.add(name);
 
         // XỬ LÝ paren_column_list: ghi đè projectedColumns của CTE
         var columnList = ctx.paren_column_list();
