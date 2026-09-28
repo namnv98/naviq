@@ -77,6 +77,7 @@ public class PostgresSuggestionService implements SuggestionService {
                 && !matchedRuleNames.contains("colid")
                 && !PostgresMatchedRuleResolver.isRuleEnteredBeforeCaret(syntacticResults, PostgreSQLParser.RULE_typename)) {
             addDataTypeSuggestions(suggests);
+            addCompositeTypeSuggestions(suggests);
         }
 
         if (matchedRuleNames.contains("table_alias")) {
@@ -331,6 +332,18 @@ public class PostgresSuggestionService implements SuggestionService {
 
     private static void addDataTypeSuggestions(List<Suggestion> suggests) {
         SchemaIndex.dataTypes.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.DATATYPE, t)));
+    }
+
+    /**
+     * Mỗi bảng/view/materialized view trong Postgres đồng thời là 1 KIỂU composite cùng tên - hợp lệ ở
+     * mọi vị trí khai báo kiểu (RETURNS users, CAST(x AS users), x::users, cột kiểu users, CREATE
+     * DOMAIN ... AS users, ADD ATTRIBUTE a users...), đã kiểm chứng trên Postgres 18 thật. Thiếu hẳn
+     * trước đây (phát hiện khi so với completion của IntelliJ). Chỉ áp cho vị trí "typename" thật, không
+     * áp cho typed literal trong biểu thức ("users '(1,a,b)'" hợp lệ nhưng là nhiễu).
+     */
+    private static void addCompositeTypeSuggestions(List<Suggestion> suggests) {
+        SchemaIndex.schemaTableIndex.values().forEach(t ->
+                suggests.add(Suggestion.of(t.fullName(), SuggestionType.DATATYPE, "composite (" + t.kind() + ")")));
     }
 
     private static void addTableAliasSuggestions(List<Suggestion> suggests, PostgresSyntacticAnalyzer.Result syn, PostgresSemanticAnalyzer.Result sem) {

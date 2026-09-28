@@ -30,6 +30,12 @@ public final class CompletionFixtures {
     public static final List<String> PG_TABLES = List.of("public.users", "public.orders", "public.contracts", "public.products");
     public static final List<String> PG_VIEWS = List.of("public.active_users");
     public static final List<String> PG_MATVIEWS = List.of("public.daily_totals");
+    /** Mỗi bảng/view/materialized view cũng là 1 kiểu composite cùng tên (RETURNS users, CAST(x AS users)...). */
+    public static final List<String> PG_COMPOSITE_TYPES = List.of("public.users", "public.orders", "public.contracts",
+            "public.products", "public.active_users", "public.daily_totals");
+    /** Mọi tên kiểu hợp lệ ở vị trí khai báo kiểu: kiểu cơ bản + kiểu composite. */
+    public static final List<String> PG_TYPE_NAMES = java.util.stream.Stream.concat(
+            PG_DATATYPES.stream(), PG_COMPOSITE_TYPES.stream()).toList();
 
     public static final List<String> ORA_FUNCTIONS = List.of("count", "sum", "avg", "sysdate");
     public static final List<String> ORA_DATATYPES = List.of("NUMBER", "VARCHAR2", "DATE", "CHAR");

@@ -292,43 +292,43 @@ class PostgresGrammarBreadthTest {
     @Test
     @DisplayName("createfunctionstmt: RETURNS func_type (typename) - phải có datatype thật")
     void createfunctionstmt() {
-        pg("create function f1() returns |").datatypes(PG_DATATYPES);
+        pg("create function f1() returns |").datatypes(PG_TYPE_NAMES);
     }
 
     @Test
     @DisplayName("altercompositetypestmt: ADD ATTRIBUTE a typename - phải có datatype thật, CHƯA gõ tên attribute nên chưa tới lượt kiểu... thực ra ĐÃ gõ 'a' rồi nên đúng vị trí typename")
     void altercompositetypestmt() {
-        pg("alter type mytype add attribute a |").datatypes(PG_DATATYPES);
+        pg("alter type mytype add attribute a |").datatypes(PG_TYPE_NAMES);
     }
 
     @Test
     @DisplayName("createdomainstmt: CREATE DOMAIN AS typename - phải có datatype thật")
     void createdomainstmt() {
-        pg("create domain d1 as |").datatypes(PG_DATATYPES);
+        pg("create domain d1 as |").datatypes(PG_TYPE_NAMES);
     }
 
     @Test
     @DisplayName("removeoperstmt: DROP OPERATOR = (int4, typename) - phải có datatype thật cho tham số thứ 2")
     void removeoperstmt() {
-        pg("drop operator = (int4, |").datatypes(PG_DATATYPES);
+        pg("drop operator = (int4, |").datatypes(PG_TYPE_NAMES);
     }
 
     @Test
     @DisplayName("removeaggrstmt: DROP AGGREGATE agg1(typename) - phải có datatype thật cho kiểu tham số")
     void removeaggrstmt() {
-        pg("drop aggregate agg1(|").datatypes(PG_DATATYPES);
+        pg("drop aggregate agg1(|").datatypes(PG_TYPE_NAMES);
     }
 
     @Test
     @DisplayName("definestmt: CREATE AGGREGATE (sfunc = func_name) - phải có function thật")
     void definestmt() {
-        pg("create aggregate agg2(int4) (sfunc = |").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
+        pg("create aggregate agg2(int4) (sfunc = |").functions(PG_FUNCTIONS).datatypes(PG_TYPE_NAMES);
     }
 
     @Test
     @DisplayName("alteroperatorstmt: SET (restrict = func_name) - phải có function thật")
     void alteroperatorstmt() {
-        pg("alter operator = (int4, int4) set (restrict = |").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
+        pg("alter operator = (int4, int4) set (restrict = |").functions(PG_FUNCTIONS).datatypes(PG_TYPE_NAMES);
     }
 
     @Test

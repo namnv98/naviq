@@ -249,13 +249,17 @@ class PostgresSuggestionServiceTest {
     @Test
     @DisplayName("CAST(x AS t|): chỉ gợi ý đúng datatype có thật khớp prefix 't' (text/timestamp)")
     void castSuggestsMatchingDatatypes() {
-        pg("select cast(id as t|) from users").datatypes("int4", "text", "timestamp");
+        pg("select cast(id as t|) from users")
+                .datatypes("int4", "text", "timestamp",
+                        "public.contracts", "public.products", "public.active_users", "public.daily_totals");
     }
 
     @Test
     @DisplayName("CREATE TABLE x (a t|): vị trí kiểu dữ liệu cột cũng phải gợi ý đúng datatype thật")
     void createTableColumnSuggestsMatchingDatatypes() {
-        pg("create table x (a t|)").datatypes("int4", "text", "timestamp");
+        pg("create table x (a t|)")
+                .datatypes("int4", "text", "timestamp",
+                        "public.contracts", "public.products", "public.active_users", "public.daily_totals");
     }
 
     // =====================================================================
@@ -357,7 +361,7 @@ class PostgresSuggestionServiceTest {
     @Test
     @DisplayName("CREATE FUNCTION ... RETURNS |: phải thấy đúng datatype thật, không tràn 396 keyword rác")
     void createFunctionReturnsSuggestsRealDatatypes() {
-        pg("create function f1() returns |").datatypes(PG_DATATYPES);
+        pg("create function f1() returns |").datatypes(PG_TYPE_NAMES);
     }
 
     @Test
@@ -381,7 +385,7 @@ class PostgresSuggestionServiceTest {
     @Test
     @DisplayName("ADD COLUMN newcol |: đã gõ xong tên cột mới - PHẢI gợi ý đúng datatype thật")
     void addColumnWithNameTypedSuggestsRealDatatype() {
-        pg("alter table users add column newcol |").datatypes(PG_DATATYPES);
+        pg("alter table users add column newcol |").datatypes(PG_TYPE_NAMES);
     }
 
     // =====================================================================
