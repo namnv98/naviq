@@ -28,7 +28,6 @@ import static com.sqlctx.completion.support.CompletionFixtures.*;
  * vị trí chỉ nhận tên cột trần (INSERT (…), SET, USING (…)), gợi ý trùng lặp.
  */
 @ExtendWith(CompletionExpectations.class)
-@ExtendWith(CompletionExpectations.class)
 class PostgresSuggestionServiceTest {
 
     // =====================================================================

@@ -1,9 +1,10 @@
 package com.sqlctx.completion;
 
-import com.sqlctx.completion.support.CompletionFixtures;
 import com.sqlctx.completion.suggestion.CompletionHistory;
 import com.sqlctx.completion.suggestion.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.postgresql.PostgresSuggestionService;
+import com.sqlctx.schema.Dialect;
+import com.sqlctx.schema.SchemaIndex;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -15,6 +16,9 @@ import java.nio.file.Path;
  * target/ij-compare/tool-out.tsv, để so với completion của IntelliJ (xem
  * tools/intellij-compare/README.md). Chỉ chạy khi bật cờ:
  * {@code mvn test -Dtest=IntellijCompareDumpTest -DijCompare=true}.
+ * <p>
+ * Đọc schema từ ĐÚNG DB {@code sqlctx_fixture} thật mà IntelliJ introspect (không dùng
+ * {@code CompletionFixtures} tĩnh) - so sánh phải trên cùng 1 nguồn dữ liệu, không lọc bớt gì.
  */
 @EnabledIfSystemProperty(named = "ijCompare", matches = "true")
 class IntellijCompareDumpTest {
@@ -23,6 +27,13 @@ class IntellijCompareDumpTest {
 
     @Test
     void dumpToolSuggestions() throws Exception {
+        System.setProperty("DB_HOST", "localhost");
+        System.setProperty("DB_PORT", "54329");
+        System.setProperty("DB_DBNAME", "sqlctx_fixture");
+        System.setProperty("DB_USER", "tester");
+        System.setProperty("DB_PASSWORD", "x");
+        SchemaIndex.reload(Dialect.POSTGRES);
+
         var out = new StringBuilder();
         for (String line : Files.readAllLines(DIR.resolve("ij-cases.txt"))) {
             if (line.isBlank()) {
@@ -30,7 +41,6 @@ class IntellijCompareDumpTest {
             }
             String raw = unescape(line);
             CompletionHistory.resetForTests();
-            CompletionFixtures.installPostgres();
             int cursor = raw.indexOf('|');
             String sql = raw.substring(0, cursor) + raw.substring(cursor + 1);
             int i = 0;

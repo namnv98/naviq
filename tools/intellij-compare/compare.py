@@ -1,20 +1,38 @@
 #!/usr/bin/env python3
 """So gợi ý của tool (tool-out.tsv) với IntelliJ (ij-out.tsv) trong target/ij-compare - xem README.md.
 
-Chỉ so trong phạm vi schema fixture (relation, cột kèm tiền tố, role): hàm built-in/bảng pg_catalog
-mà IntelliJ biết thêm và keyword KHÔNG được so. Kết quả: target/ij-compare/compare.txt (+ compare.json).
-Chạy từ thư mục gốc repo: python3 tools/intellij-compare/compare.py
+IntelliJ là mẫu gốc: so TOÀN BỘ relation/cột/role thật trả về, KHÔNG lọc bớt theo danh sách cố định nào
+(DB thật có gì so cái đó - kể cả role nội bộ pg_*, relation ở schema pg_catalog...). Khác biệt không có
+nghĩa tool sai - review bằng Postgres thật rồi mới quyết định sửa. Hàm built-in và keyword vẫn không so
+(không có cách phân biệt tin cậy hàm nào là "built-in" trên cả 2 phía) nhưng vẫn đếm số lượng để biết.
+Kết quả: target/ij-compare/compare.txt (+ compare.json). Chạy từ thư mục gốc repo:
+python3 tools/intellij-compare/compare.py
 """
 import collections
 import json
 import os
 import re
+import subprocess
 
 DIR = "target/ij-compare"
-RELS = {"users", "orders", "contracts", "products", "active_users", "daily_totals"}
-COLS = {"id", "name", "email", "customer_id", "total", "status", "user_id", "amount", "price", "quantity",
-        "description", "x", "y"}
-ROLES = {"app_reader", "app_writer", "postgres"}
+
+
+def _psql_list(sql):
+    """Chạy 1 câu trả về 1 cột trên chính DB fixture thật (docker exec) - dùng để tách role/database
+    thật thay vì đoán qua whitelist: raw dump IntelliJ không phân biệt được role/database (cả 2 đều
+    hiện dạng "<db>@localhost", không tail), phải tra DB thật mới biết đúng loại."""
+    out = subprocess.run(
+        ["docker", "exec", "sqlctx-postgres", "psql", "-U", "tester", "-d", "sqlctx_fixture", "-tA", "-c", sql],
+        capture_output=True, text=True, check=True)
+    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
+
+
+def real_roles():
+    return _psql_list("SELECT rolname FROM pg_roles")
+
+
+def real_databases():
+    return _psql_list("SELECT datname FROM pg_database WHERE NOT datistemplate")
 
 
 def load(path):
@@ -28,32 +46,53 @@ def load(path):
     return d
 
 
-def ij_sets(items):
-    """Phân loại item IntelliJ theo typeText/tailText (script dump không lấy được kind của DB object):
-    relation: typeText = <data source>, tail = " (sqlctx_fixture.public)"; cột: tail = " (<alias|bảng>)";
-    role: typeText = <data source>, không tail; keyword: lớp String."""
-    rels, cols, roles, kws, other = set(), set(), set(), set(), []
+def ij_sets(items, roles_ref):
+    """Phân loại item IntelliJ THUẦN theo cấu trúc typeText/tailText (script dump không lấy được kind
+    thật của DB object). Không loại bỏ gì - mọi item đều rơi vào đúng 1 trong các nhóm sau:
+    - relation: typeText kết thúc "@localhost", tail dạng " (<db>.<schema>)" (đúng 1 dấu chấm) -> relation
+      ở BẤT KỲ schema nào (public, pg_catalog...), không chỉ public.
+    - role: typeText kết thúc "@localhost", KHÔNG có tail, VÀ tên nằm trong pg_roles thật (tra DB sống -
+      role/database đều hiện dạng "<db>@localhost" không tail như nhau trong dump, không thể phân biệt
+      chỉ bằng cấu trúc chuỗi; roles_ref lấy từ chính DB fixture, không phải whitelist tự chọn).
+    - cột: tail dạng " (<gì đó>)" mà typeText KHÔNG kết thúc "@localhost" -> tiền tố lấy đoạn cuối cùng
+      sau dấu chấm (alias hoặc tên bảng/schema.table).
+    - keyword: kind = String.
+    - func: còn lại - không có tail, typeText không kết thúc "@localhost" (hàm built-in trả kiểu X, kiểu
+      dữ liệu cơ bản như "int4" cũng rơi vào đây vì Postgres có hàm cast cùng tên - gộp chung 1 nhóm).
+    - other: phần rất nhỏ không khớp pattern nào ở trên (item lạ, không phải database object).
+    """
+    rels, cols, roles, kws, funcs, other = set(), set(), set(), set(), set(), []
     for it in items:
         s, kind, typ, tail = (it + ["", "", "", ""])[:4]
         m = re.fullmatch(r" \((.+)\)", tail)
+        is_localhost = typ.endswith("@localhost")
         if kind == "String":
             kws.add(s.lower())
-        elif typ.endswith("@localhost") and tail == " (sqlctx_fixture.public)":
+        elif is_localhost and m and m.group(1).count(".") == 1:
             rels.add(s)
-        elif typ.endswith("@localhost") and not tail and s in ROLES:
+        elif is_localhost and not tail and s in roles_ref:
             roles.add(s)
-        elif m and s in COLS and not typ.endswith("@localhost"):
+        elif m and not is_localhost:
             cols.add((m.group(1).split(".")[-1], s))
+        elif not tail and not is_localhost and typ:
+            funcs.add(s.lower())
         else:
             other.append(s)
-    return rels, cols, roles, kws, other
+    return rels, cols, roles, kws, funcs, other
 
 
 def tool_sets(items):
-    rels, cols, roles, kws = set(), set(), set(), set()
+    rels, cols, roles, kws, funcs = set(), set(), set(), set(), set()
     for key, typ in items:
         if typ in ("table", "view", "materialized view"):
             rels.add(key.split(".")[-1])
+        elif typ == "datatype" and "." in key:
+            # Kiểu composite (RETURNS/CAST/CREATE DOMAIN...) = tên 1 relation thật, tool gợi ý dưới
+            # SuggestionType.DATATYPE (đúng: vị trí đó cú pháp là 1 typename) chứ không phải table/view -
+            # kiểu cơ bản (int4, text...) không có dấu chấm nên không lẫn vào đây.
+            rels.add(key.split(".")[-1])
+        elif typ == "datatype":
+            funcs.add(key.lower())  # kiểu cơ bản (int4, text...) - cùng nhóm với func phía IntelliJ
         elif typ == "column":
             q, _, c = key.rpartition(".")
             cols.add((q or None, c))
@@ -61,12 +100,15 @@ def tool_sets(items):
             roles.add(key)
         elif typ == "keyword":
             kws.add(key.lower())
-    return rels, cols, roles, kws
+        elif typ == "function":
+            funcs.add(key.lower())
+    return rels, cols, roles, kws, funcs
 
 
 def main():
     ij = load(os.path.join(DIR, "ij-out.tsv"))
     tool = load(os.path.join(DIR, "tool-out.tsv"))
+    roles_ref = real_roles()
     report, empty_ij = [], []
     for key in tool:
         if key not in ij:
@@ -74,10 +116,8 @@ def main():
         if not ij[key]:
             empty_ij.append(key)
             continue
-        ir, ic, irole, ikw, iother = ij_sets(ij[key])
-        tr, tc, trole, tkw = tool_sets(tool[key])
-        # CTE IntelliJ gợi ý không theo dạng relation của schema - coi là khớp nếu cùng tên
-        ir |= {r for r in tr if r not in RELS and r in set(iother)}
+        ir, ic, irole, ikw, ifunc, iother = ij_sets(ij[key], roles_ref)
+        tr, tc, trole, tkw, tfunc = tool_sets(tool[key])
         tq = {(q, c) for q, c in tc if q}
         diff = {}
         if ir != tr:
@@ -87,11 +127,14 @@ def main():
                            "IntelliJ": sorted(f"{q}.{c}" for q, c in ic)}
         if trole != irole:
             diff["role"] = {"chỉ tool": sorted(trole - irole), "chỉ IntelliJ": sorted(irole - trole)}
-        report.append({"sql": key, "diff": diff, "keyword_tool": len(tkw), "keyword_ij": len(ikw),
-                       "keyword_chung": len(tkw & ikw)})
+        if tfunc != ifunc:
+            diff["hàm/kiểu"] = {"chỉ tool": len(tfunc - ifunc), "chỉ IntelliJ": len(ifunc - tfunc)}
+        if tkw != ikw:
+            diff["keyword"] = {"chỉ tool": len(tkw - ikw), "chỉ IntelliJ": len(ikw - tkw)}
+        report.append({"sql": key, "diff": diff})
 
     same = sum(1 for r in report if not r["diff"])
-    lines = [f"so sánh {len(report)} câu: khớp hoàn toàn (relation/cột/role) {same}, khác {len(report) - same}",
+    lines = [f"so sánh {len(report)} câu (relation/cột/role/hàm/kiểu/keyword): khớp hoàn toàn {same}, khác {len(report) - same}",
              f"bỏ qua {len(empty_ij)} câu IntelliJ trả 0 gợi ý (có thể đúng là rỗng, hoặc popup chưa kịp hiện)"]
     for r in report:
         if r["diff"]:
