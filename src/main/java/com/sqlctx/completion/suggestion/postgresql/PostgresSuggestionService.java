@@ -70,6 +70,11 @@ public class PostgresSuggestionService implements SuggestionService {
         }
 
         Set<String> matchedRuleNames = PostgresMatchedRuleResolver.computeMatchedRuleNames(syntacticResults, syntacticCursor);
+        // Tính 1 LẦN DUY NHẤT cho cả lần gọi suggests() này - isDropRoleContext/isObjectGrantContext/
+        // isTablespaceNamePosition/isRoleOptionListPosition/isCreateRoleVariant đều chỉ đọc danh sách
+        // này (không tự quét lại token stream) - trước đây mỗi helper tự gọi riêng, có case quét tới
+        // 4-6 lần cho cùng 1 caret (review phát hiện).
+        List<Integer> beforeCaret = realTokenTypesBeforeTableName(syntacticResults);
 
         // typename đã ENTER từ trước caret (vd "varchar(|)": đang đứng TRONG type modifier của kiểu đã
         // gõ xong tên) thì vị trí này chỉ nhận literal, không phải tên kiểu dữ liệu mới.
@@ -112,7 +117,7 @@ public class PostgresSuggestionService implements SuggestionService {
         // role_list) nhưng Postgres thật từ chối "cannot use special role specifier in DROP ROLE".
         if (matchedRuleNames.contains("rolespec")) {
             SchemaIndex.roles.forEach(r -> suggests.add(Suggestion.of(r, SuggestionType.ROLE)));
-            if (!isDropRoleContext(syntacticResults)) {
+            if (!isDropRoleContext(beforeCaret)) {
                 suggests.add(Suggestion.of("current_user", SuggestionType.KEYWORD));
                 suggests.add(Suggestion.of("session_user", SuggestionType.KEYWORD));
             }
@@ -120,7 +125,7 @@ public class PostgresSuggestionService implements SuggestionService {
             // QUYỀN TRÊN OBJECT (grantstmt/revokestmt/defaclaction: "GRANT ... ON ... TO/FROM ..." - có
             // ON), KHÔNG hợp lệ ở grantrolestmt/revokerolestmt (GRANT role TO role - không ON, verify
             // thật: "role public does not exist") hay bất kỳ rolespec nào khác (OWNER TO, DROP OWNED...).
-            if (isObjectGrantContext(syntacticResults)) {
+            if (isObjectGrantContext(beforeCaret)) {
                 suggests.add(Suggestion.of("public", SuggestionType.KEYWORD));
             }
         }
@@ -130,7 +135,7 @@ public class PostgresSuggestionService implements SuggestionService {
         // - "TABLESPACE name" dùng chung rule "name" (-> colid) với rất nhiều vị trí khác (đã có if/else
         // riêng phía trên), token TABLESPACE ngay trước caret là tín hiệu rõ ràng, không đa nghĩa như
         // ROLE/USER/GROUP_P - tablespace thật từ pg_tablespace (SchemaIndex.tablespaces).
-        if (matchedRuleNames.contains("colid") && isTablespaceNamePosition(syntacticResults)) {
+        if (matchedRuleNames.contains("colid") && isTablespaceNamePosition(beforeCaret)) {
             SchemaIndex.tablespaces.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.TABLESPACE)));
         }
 
@@ -144,13 +149,13 @@ public class PostgresSuggestionService implements SuggestionService {
         // REPLICATION/BYPASSRLS/INHERIT (+ dạng NO...) và "IN ROLE"/"IN GROUP" đều chạy được. Cố tình
         // BỎ createuser/nocreateuser dù IntelliJ có gợi ý - Postgres 18 thật từ chối "unrecognized role
         // option createuser" (option cũ, đã bỏ từ lâu, IntelliJ gợi sai).
-        if (isRoleOptionListPosition(syntacticResults)) {
+        if (isRoleOptionListPosition(beforeCaret)) {
             for (String kw : ROLE_OPTION_KEYWORDS) {
                 suggests.add(Suggestion.of(kw, SuggestionType.KEYWORD));
             }
             // "IN ROLE"/"IN GROUP" chỉ có ở createoptroleelem (CREATE ROLE/USER/GROUP), KHÔNG có ở
             // alteroptroleelem (ALTER ROLE) - verify thật: "ALTER ROLE x IN ROLE y" báo syntax error.
-            if (isCreateRoleVariant(syntacticResults)) {
+            if (isCreateRoleVariant(beforeCaret)) {
                 suggests.add(Suggestion.of("in role", SuggestionType.KEYWORD));
                 suggests.add(Suggestion.of("in group", SuggestionType.KEYWORD));
             }
@@ -292,11 +297,11 @@ public class PostgresSuggestionService implements SuggestionService {
         // Lọc bỏ đúng tập token rác đã xác nhận (không đụng đến keyword literal HỢP LỆ đã có ở 2 vị trí
         // này như admin/connection limit/inherit/password/role/sysid/unencrypted/user/valid until, hay
         // keyword ở BẤT KỲ vị trí nào khác - chỉ áp dụng đúng 2 context đã verify).
-        if (isRoleOptionListPosition(syntacticResults) || isTablespaceNamePosition(syntacticResults)) {
-            suggests.removeIf(s -> s.getType() == SuggestionType.KEYWORD && PLPGSQL_NOISE_KEYWORDS.contains(s.getKey()));
-        }
-        if (isTablespaceNamePosition(syntacticResults)) {
-            suggests.removeIf(s -> s.getType() == SuggestionType.KEYWORD && TABLESPACE_SIBLING_LEAK_KEYWORDS.contains(s.getKey()));
+        boolean isTablespacePos = isTablespaceNamePosition(beforeCaret);
+        if (isRoleOptionListPosition(beforeCaret) || isTablespacePos) {
+            suggests.removeIf(s -> s.getType() == SuggestionType.KEYWORD
+                    && (PLPGSQL_NOISE_KEYWORDS.contains(s.getKey())
+                            || (isTablespacePos && TABLESPACE_SIBLING_LEAK_KEYWORDS.contains(s.getKey()))));
         }
 
         return suggests;
@@ -638,10 +643,11 @@ public class PostgresSuggestionService implements SuggestionService {
         return out;
     }
 
-    /** {@code DROP ROLE|USER|GROUP [IF EXISTS] role_list} - tái dùng {@link #realTokenTypesBeforeTableName}
-     * (đã skip Identifier/COMMA/IF_P/EXISTS đúng cấu trúc role_list, dù tên gọi hướng theo bảng). */
-    private static boolean isDropRoleContext(PostgresSyntacticAnalyzer.Result syn) {
-        List<Integer> before = realTokenTypesBeforeTableName(syn);
+    /** {@code DROP ROLE|USER|GROUP [IF EXISTS] role_list} - {@code before} từ
+     * {@link #realTokenTypesBeforeTableName} (đã skip Identifier/COMMA/IF_P/EXISTS đúng cấu trúc
+     * role_list, dù tên gọi hướng theo bảng), tính 1 lần ở đầu {@code suggests()} rồi truyền vào - KHÔNG
+     * tự quét lại token stream mỗi helper (trước đây làm vậy, review phát hiện quét thừa 4-6 lần/caret). */
+    private static boolean isDropRoleContext(List<Integer> before) {
         if (before.size() < 2 || before.get(1) != PostgreSQLParser.DROP) {
             return false;
         }
@@ -652,8 +658,7 @@ public class PostgresSuggestionService implements SuggestionService {
     /** grantstmt/revokestmt/defaclaction: {@code GRANT ... ON ... TO|FROM ...} - phân biệt với
      * grantrolestmt/revokerolestmt ({@code GRANT role TO role}, không có ON) bằng chính token ON, không
      * cần biết hết cấu trúc privilege_target/privilege_list (nhiều dạng, không đáng công parse lại). */
-    private static boolean isObjectGrantContext(PostgresSyntacticAnalyzer.Result syn) {
-        List<Integer> before = realTokenTypesBeforeTableName(syn);
+    private static boolean isObjectGrantContext(List<Integer> before) {
         boolean hasGrantOrRevoke = false;
         boolean hasOn = false;
         for (int type : before) {
@@ -668,8 +673,7 @@ public class PostgresSuggestionService implements SuggestionService {
 
     /** {@code TABLESPACE name} - token TABLESPACE ngay trước caret (before.get(0), không skip vì
      * TABLESPACE không nằm trong danh sách skip của {@link #realTokenTypesBeforeTableName}). */
-    private static boolean isTablespaceNamePosition(PostgresSyntacticAnalyzer.Result syn) {
-        List<Integer> before = realTokenTypesBeforeTableName(syn);
+    private static boolean isTablespaceNamePosition(List<Integer> before) {
         return !before.isEmpty() && before.get(0) == PostgreSQLParser.TABLESPACE;
     }
 
@@ -698,12 +702,11 @@ public class PostgresSuggestionService implements SuggestionService {
     /** {@code CREATE ROLE|USER|GROUP ... WITH |} / {@code ALTER ROLE ... WITH |} - token WITH ngay
      * trước caret, VÀ câu lệnh bắt đầu đúng bằng 1 trong 4 dạng trên (kiểm 2 token đầu câu, không phải
      * đoán qua "colid"/"identifier" vì rule đó không preferred - xem chú thích nơi gọi). */
-    private static boolean isRoleOptionListPosition(PostgresSyntacticAnalyzer.Result syn) {
-        List<Integer> before = realTokenTypesBeforeTableName(syn);
+    private static boolean isRoleOptionListPosition(List<Integer> before) {
         if (before.size() < 3 || before.get(0) != PostgreSQLParser.WITH) {
             return false;
         }
-        int first = before.get(before.size() - 1);
+        int first = firstStatementToken(before);
         int second = before.get(before.size() - 2);
         if (first == PostgreSQLParser.CREATE) {
             return second == PostgreSQLParser.ROLE || second == PostgreSQLParser.USER
@@ -715,10 +718,15 @@ public class PostgresSuggestionService implements SuggestionService {
         return false;
     }
 
-    /** Gọi SAU KHI {@link #isRoleOptionListPosition} đã true - câu bắt đầu bằng CREATE (không phải ALTER). */
-    private static boolean isCreateRoleVariant(PostgresSyntacticAnalyzer.Result syn) {
-        List<Integer> before = realTokenTypesBeforeTableName(syn);
-        return !before.isEmpty() && before.get(before.size() - 1) == PostgreSQLParser.CREATE;
+    /** Chỉ gọi khi {@link #isRoleOptionListPosition} đã true - câu bắt đầu bằng CREATE (không phải ALTER). */
+    private static boolean isCreateRoleVariant(List<Integer> before) {
+        return firstStatementToken(before) == PostgreSQLParser.CREATE;
+    }
+
+    /** Token đầu câu lệnh (xa nhất trong {@code before} - {@link #realTokenTypesBeforeTableName} quét
+     * NGƯỢC từ caret về đầu câu, nên phần tử cuối danh sách là token gõ đầu tiên). */
+    private static int firstStatementToken(List<Integer> before) {
+        return before.get(before.size() - 1);
     }
 
     // "ALTER DATABASE name SET TABLESPACE |" cùng dòng với "ALTER DATABASE name (WITH createdb_opt_list?
