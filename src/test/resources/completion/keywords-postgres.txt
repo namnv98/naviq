@@ -3,15 +3,15 @@
 \\d |
   (none)
 alter aggregate agg1(int4) owner to |
-  (none)
+  current_user, session_user
 alter collation c1 |
   owner to, refresh version, rename to, set schema
 alter database db1 set search_path to |
   false, on, true
 alter database db1 set tablespace |
-  absolute, alias, array, assert, backward, call, chain, close, collate, column, commit, connection limit, constant, constraint, continue, current, cursor, debug, default, diagnostics, do, dump, elsif, encoding, error, exception, exit, fetch, first, forward, from current, get, info, insert, is, last, location, log, move, next, no, notice, open, option, outer, owner, perform, print_strict_params, prior, query, raise, relative, reset, return, reverse, rollback, rowtype, schema, scroll, set, slice, sqlstate, stacked, table, tablespace, template, to, type, use_column, use_variable, variable_conflict, warning
+  (none)
 alter default privileges in schema public grant select on tables to |
-  group
+  current_user, group, public, session_user
 alter domain d1 validate constraint |
   (none)
 alter event trigger trg1 |
@@ -27,7 +27,7 @@ alter function f1(int4) depends on extension |
 alter function f1(int4) |
   called on null input, cost, depends on extension, external, immutable, leakproof, no, not leakproof, owner to, parallel, rename to, reset, returns null on null input, rows, security, set, stable, strict, support, volatile
 alter group grp1 add user |
-  (none)
+  current_user, session_user
 alter operator = (int4, int4) set (restrict = |
   all, analyse, analyze, and, any, array, as, asc, asymmetric, both, case, cast, check, collate, column, constraint, create, current_catalog, current_date, current_role, current_time, current_timestamp, current_user, default, deferrable, desc, distinct, do, else, end, except, false, fetch, for, foreign, from, grant, group, having, in, initially, intersect, into, lateral, leading, left, limit, localtime, localtimestamp, none, not, null, offset, on, only, operator, or, order, placing, primary, references, returning, right, select, session_user, setof, some, symmetric, system_user, table, then, to, trailing, true, union, unique, user, using, variadic, when, where, window, with
 alter operator family of1 using btree add |
@@ -39,7 +39,7 @@ alter publication pub1 add table |
 alter role role1 set search_path to |
   false, on, true
 alter role role1 with |
-  absolute, alias, array, assert, backward, call, chain, close, collate, column, commit, connection limit, constant, constraint, continue, current, cursor, debug, default, diagnostics, do, dump, elsif, encrypted, error, exception, exit, fetch, first, forward, get, info, inherit, insert, is, last, log, move, next, no, notice, open, option, outer, password, perform, print_strict_params, prior, query, raise, relative, reset, return, reverse, rollback, rowtype, schema, scroll, set, slice, sqlstate, stacked, table, type, unencrypted, use_column, use_variable, user, valid until, variable_conflict, warning
+  bypassrls, connection limit, createdb, createrole, encrypted, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, superuser, unencrypted, user, valid until
 alter sequence s1 restart with |
   as, cache, cycle, increment, logged, maxvalue, minvalue, no, owned by, restart, sequence name, start, unlogged
 alter server srv1 options (|
@@ -117,7 +117,7 @@ create foreign table ft1 (id int4) server |
 create function f1() returns |
   left, null on null input, right, setof, table
 create group grp1 with |
-  absolute, admin, alias, array, assert, backward, call, chain, close, collate, column, commit, connection limit, constant, constraint, continue, current, cursor, debug, default, diagnostics, do, dump, elsif, encrypted, error, exception, exit, fetch, first, forward, get, in, info, inherit, insert, is, last, log, move, next, no, notice, open, option, outer, password, perform, print_strict_params, prior, query, raise, relative, reset, return, reverse, role, rollback, rowtype, schema, scroll, set, slice, sqlstate, stacked, sysid, table, type, unencrypted, use_column, use_variable, user, valid until, variable_conflict, warning
+  admin, bypassrls, connection limit, createdb, createrole, encrypted, in, in group, in role, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, role, superuser, sysid, unencrypted, user, valid until
 create index idx1 on public.users (|
   cast, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, extract, greatest, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, normalize, nullif, overlay, position, session_user, substring, treat, trim, user, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
 create index idx1 on |
@@ -135,7 +135,7 @@ create policy pol1 on public.users using (|
 create publication pub1 for table |
   in schema, only, where, with
 create role role2 with |
-  absolute, admin, alias, array, assert, backward, call, chain, close, collate, column, commit, connection limit, constant, constraint, continue, current, cursor, debug, default, diagnostics, do, dump, elsif, encrypted, error, exception, exit, fetch, first, forward, get, in, info, inherit, insert, is, last, log, move, next, no, notice, open, option, outer, password, perform, print_strict_params, prior, query, raise, relative, reset, return, reverse, role, rollback, rowtype, schema, scroll, set, slice, sqlstate, stacked, sysid, table, type, unencrypted, use_column, use_variable, user, valid until, variable_conflict, warning
+  admin, bypassrls, connection limit, createdb, createrole, encrypted, in, in group, in role, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, role, superuser, sysid, unencrypted, user, valid until
 create rule r1 as on insert to public.users do |
   also, delete from, insert into, instead, nothing, notify, select, table, update, values, with
 create schema if not exists |
@@ -155,7 +155,7 @@ create table t3 (|
 create table x (a t|)
   (none)
 create tablespace ts2 owner |
-  (none)
+  current_user, session_user
 create transform for int4 language plpgsql2 (|
   from sql with function, to sql with function
 create trigger trg2 before insert on public.users execute function |
@@ -163,7 +163,7 @@ create trigger trg2 before insert on public.users execute function |
 create user mapping for user2 server srv1 options (|
   (none)
 create user user2 with |
-  absolute, admin, alias, array, assert, backward, call, chain, close, collate, column, commit, connection limit, constant, constraint, continue, current, cursor, debug, default, diagnostics, do, dump, elsif, encrypted, error, exception, exit, fetch, first, forward, get, in, info, inherit, insert, is, last, log, move, next, no, notice, open, option, outer, password, perform, print_strict_params, prior, query, raise, relative, reset, return, reverse, role, rollback, rowtype, schema, scroll, set, slice, sqlstate, stacked, sysid, table, type, unencrypted, use_column, use_variable, user, valid until, variable_conflict, warning
+  admin, bypassrls, connection limit, createdb, createrole, encrypted, in, in group, in role, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, role, superuser, sysid, unencrypted, user, valid until
 create view v1 as select | from public.users
   all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, with, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
 deallocate |
@@ -199,7 +199,7 @@ drop operator class oc1 using |
 drop operator family of1 using |
   (none)
 drop owned by |
-  (none)
+  current_user, session_user
 drop role |
   if exists
 drop subscription |
@@ -221,11 +221,11 @@ explain select | from public.users
 fetch next from |
   (none)
 grant app_reader to |
-  (none)
+  current_user, session_user
 grant role1 to |
-  (none)
+  current_user, session_user
 grant select on public.users to |
-  group
+  current_user, group, public, session_user
 import foreign schema public from server srv1 into |
   (none)
 insert into orders (|
@@ -253,9 +253,9 @@ notify |
 prepare p1 as select | from public.users
   all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
 reassign owned by app_reader to |
-  (none)
+  current_user, session_user
 reassign owned by role1 to |
-  (none)
+  current_user, session_user
 refresh materialized view |
   concurrently
 reindex table |
@@ -263,9 +263,9 @@ reindex table |
 reset |
   all, session authorization, time zone, transaction isolation level
 revoke role1 from |
-  (none)
+  current_user, session_user
 revoke select on public.users from |
-  group
+  current_user, group, public, session_user
 security label on table public.users is |
   null
 select * from (select * from users u where u.|

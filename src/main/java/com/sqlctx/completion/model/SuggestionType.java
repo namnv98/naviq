@@ -15,7 +15,8 @@ public enum SuggestionType {
     ROLE("role", 99),
     OTHER("other", 99),
     COMMAND("command", 0),
-    DATABASE("database", 1);
+    DATABASE("database", 1),
+    TABLESPACE("tablespace", 99);
 
     private final String label;
     private final int order;

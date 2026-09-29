@@ -457,9 +457,9 @@ class PostgresGrammarBreadthTest {
     }
 
     @Test
-    @DisplayName("alterdatabasestmt: SET TABLESPACE name - tablespace name qua rule 'name' dùng chung khắp nơi (không chỉ tablespace), quá rủi ro để wire riêng - không gợi ý dữ liệu schema nào (giới hạn đã biết)")
+    @DisplayName("alterdatabasestmt: SET TABLESPACE name - tablespace thật từ pg_tablespace (token TABLESPACE ngay trước caret, không đa nghĩa như ROLE/USER/GROUP_P nên wire riêng được, không cần đụng tới rule 'name' dùng chung khắp nơi)")
     void alterdatabasestmt() {
-        pg("alter database db1 set tablespace |");
+        pg("alter database db1 set tablespace |").tablespaces(PG_TABLESPACES);
     }
 
     @Test
@@ -757,9 +757,9 @@ class PostgresGrammarBreadthTest {
     }
 
     @Test
-    @DisplayName("droptablespacestmt: DROP TABLESPACE name - tên tablespace route qua rule 'name' dùng chung, không gợi ý dữ liệu schema nào (giới hạn đã biết)")
+    @DisplayName("droptablespacestmt: DROP TABLESPACE name - tablespace thật từ pg_tablespace (cùng cơ chế alterdatabasestmt)")
     void droptablespacestmt() {
-        pg("drop tablespace |");
+        pg("drop tablespace |").tablespaces(PG_TABLESPACES);
     }
 
     @Test

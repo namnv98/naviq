@@ -26,10 +26,11 @@ import java.awt.event.ActionListener
 class SqlctxCompletionDumper {
     static final String QUERIES = "tools/intellij-compare/queries.txt"
 
-    // Project đang mở chính là repo sqlctx (có queries.txt); kết quả ghi vào target/ij-compare.
+    // Project đang mở chính là repo sqlctx (có queries.txt); kết quả ghi vào tools/intellij-compare/out
+    // (KHÔNG phải target/ - Maven/IntelliJ rebuild hay xoá sạch target/, mất hết kết quả capture).
     static final String REPO = ProjectManager.getInstance().openProjects.collect { it.basePath }
             .find { new File(it, QUERIES).isFile() }
-    static final String DIR = REPO + "/target/ij-compare"
+    static final String DIR = REPO + "/tools/intellij-compare/out"
 
     // queries.txt: mỗi dòng 1 câu ("|" = con trỏ), bỏ dòng trống/dòng bắt đầu bằng "#".
     static List<String> readQueries() {

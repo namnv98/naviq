@@ -248,6 +248,16 @@ public class OracleSuggestionService implements SuggestionService {
         // "column_name" của Oracle đã tự phủ được các ngữ cảnh tương đương mà không cần tách
         // theo từng parent-rule riêng.
 
+        // TABLESPACE tên (CREATE TABLE...TABLESPACE, ALTER ... TABLESPACE, PARTITION...TABLESPACE,
+        // LOB storage...) - grammar: tablespace: id_expression; id_expression: regular_id | DELIMITED_ID
+        // - dùng ancestor rule "tablespace" (không đa nghĩa như regular_id/id_expression dùng ở rất
+        // nhiều nơi khác) để nhận diện đúng vị trí, không cần quét token. Tablespace thật từ
+        // USER_TABLESPACES (SchemaIndex.tablespaces).
+        if (matchedRuleNames.contains("regular_id")
+                && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_tablespace)) {
+            SchemaIndex.tablespaces.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.TABLESPACE)));
+        }
+
         return suggests;
     }
 

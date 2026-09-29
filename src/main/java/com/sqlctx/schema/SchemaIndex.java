@@ -37,6 +37,8 @@ public class SchemaIndex {
     public static volatile List<String> roles = List.of();
     /** Ngôn ngữ thủ tục thật đã cài (pg_language) - dùng gợi ý ở DO/CREATE FUNCTION ... LANGUAGE |. */
     public static volatile List<String> languages = List.of();
+    /** Tablespace thật (pg_tablespace) - dùng gợi ý ở CREATE/ALTER ... TABLESPACE | (rỗng ở Oracle). */
+    public static volatile List<String> tablespaces = List.of();
 
     static {
         try {
@@ -61,6 +63,7 @@ public class SchemaIndex {
             functions = adapter.loadFunctions();
             roles = adapter.loadRoles();
             languages = adapter.loadLanguages();
+            tablespaces = adapter.loadTablespaces();
             tableIndex = buildIndex(schemas);
             schemaTableIndex = buildSchemaTableIndex(schemas);
         } catch (Exception e) {

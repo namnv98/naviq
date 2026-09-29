@@ -1,5 +1,6 @@
 /.idea/
 /target/
+/tools/intellij-compare/out/
 /dependency-reduced-pom.xml
 /gen/
 hs_err_pid*.log

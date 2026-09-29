@@ -9,9 +9,9 @@ dòng bắt đầu bằng `#` bị bỏ qua. Thêm/bớt câu cần so thì sử
 Hai bước, cả hai cùng đọc `queries.txt`:
 
 1. `ij-completion-dump.groovy` (chạy trong IntelliJ): gọi completion của IntelliJ tại vị trí `|` của từng
-   câu, ghi `target/ij-compare/ij-out.tsv`.
+   câu, ghi `tools/intellij-compare/out/ij-out.tsv`.
 2. `IntellijCompareTest` (Java): chạy tool trên từng câu (schema đọc từ cùng DB `sqlctx_fixture`), lấy
-   kết quả IntelliJ của câu đó trong `ij-out.tsv`, ghi `target/ij-compare/compare.txt`. Câu có trong
+   kết quả IntelliJ của câu đó trong `ij-out.tsv`, ghi `tools/intellij-compare/out/compare.txt`. Câu có trong
    `queries.txt` mà chưa có kết quả IntelliJ (vừa thêm, chưa chạy lại bước 1) được liệt kê riêng.
 
 So theo tên gợi ý (phần sau dấu chấm cuối, không phân biệt hoa/thường) - tool viết `public.users` /
@@ -58,7 +58,7 @@ evaluate(new File("/đường/dẫn/tới/repo/tools/intellij-compare/ij-complet
 ```
 
 Console in `Đang chạy N câu - chờ thông báo Xong`. Trong lúc chạy (~5 phút cho ~200 câu) **không gõ
-phím/click trong IntelliJ**. Xong sẽ có thông báo, kết quả ở `target/ij-compare/ij-out.tsv` (ghi dần ra
+phím/click trong IntelliJ**. Xong sẽ có thông báo, kết quả ở `tools/intellij-compare/out/ij-out.tsv` (ghi dần ra
 `ij-out.partial.tsv`; lỗi ghi ra `ij-error.txt`). Nội dung console và thiết lập auto-complete được trả
 lại như cũ.
 
@@ -78,7 +78,7 @@ Không dùng console **Kotlin**: gọi lồng script Kotlin lỗi `IrScriptSymbo
 mvn -q test -Dtest=IntellijCompareTest -DijCompare=true
 ```
 
-Kết quả ở `target/ij-compare/compare.txt`:
+Kết quả ở `tools/intellij-compare/out/compare.txt`:
 
 ```
 198 câu: giống nhau 38, khác 160
@@ -110,5 +110,5 @@ Các khác biệt đã kiểm chứng trước đây:
 |---|---|
 | `queries.txt` | Danh sách câu SQL cần so (cả 2 phía cùng đọc) |
 | `fixture.sql` | Dựng DB `sqlctx_fixture` |
-| `ij-completion-dump.groovy` | Chạy trong IntelliJ: completion từng câu -> `target/ij-compare/ij-out.tsv` |
-| `../../src/test/java/com/sqlctx/completion/IntellijCompareTest.java` | Chạy tool trên từng câu, so -> `target/ij-compare/compare.txt` |
+| `ij-completion-dump.groovy` | Chạy trong IntelliJ: completion từng câu -> `tools/intellij-compare/out/ij-out.tsv` |
+| `../../src/test/java/com/sqlctx/completion/IntellijCompareTest.java` | Chạy tool trên từng câu, so -> `tools/intellij-compare/out/compare.txt` |

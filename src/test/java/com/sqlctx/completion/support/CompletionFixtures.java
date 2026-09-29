@@ -27,6 +27,8 @@ public final class CompletionFixtures {
     public static final List<String> PG_FUNCTIONS = List.of("count", "sum", "avg", "now");
     public static final List<String> PG_DATATYPES = List.of("int4", "text", "numeric", "bool", "timestamp");
     public static final List<String> PG_LANGUAGES = List.of("plpgsql", "sql");
+    /** Tablespace luôn có sẵn trên MỌI cài đặt Postgres thật (không do fixture.sql tạo). */
+    public static final List<String> PG_TABLESPACES = List.of("pg_default", "pg_global");
     /** Schema trong fixture - gợi ý làm tiền tố ở mọi vị trí tên bảng. */
     public static final List<String> PG_SCHEMAS = List.of("public");
     /** Cột hệ thống có trên mọi bảng/materialized view (xem {@code CompletionExpectation.systemColumns}). */
@@ -76,6 +78,7 @@ public final class CompletionFixtures {
         SchemaIndex.dataTypes = PG_DATATYPES;
         SchemaIndex.roles = PG_ROLES;
         SchemaIndex.languages = PG_LANGUAGES;
+        SchemaIndex.tablespaces = PG_TABLESPACES;
     }
 
     public static void installOracle() {
@@ -102,6 +105,10 @@ public final class CompletionFixtures {
         // Oracle không model role/ngôn ngữ thủ tục - rỗng TƯỜNG MINH, không để sót từ test Postgres.
         SchemaIndex.roles = List.of();
         SchemaIndex.languages = List.of();
+        // Tablespace Oracle: có load thật (loadTablespaces() -> USER_TABLESPACES) nhưng chưa có DB
+        // Oracle thật để đối chiếu tên tablespace fixture hợp lý (khác SYSTEM/SYSAUX/USERS thật tuỳ
+        // cài đặt) - rỗng tường minh, không đoán, không để sót từ test Postgres.
+        SchemaIndex.tablespaces = List.of();
     }
 
     private static void install(Dialect dialect, String schema, List<TableInfo> tables) {

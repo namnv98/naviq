@@ -102,6 +102,14 @@ public final class CompletionExpectation {
         return schemas(keys.toArray(String[]::new));
     }
 
+    public CompletionExpectation tablespaces(String... keys) {
+        return declare(SuggestionType.TABLESPACE, keys);
+    }
+
+    public CompletionExpectation tablespaces(Collection<String> keys) {
+        return tablespaces(keys.toArray(String[]::new));
+    }
+
     /**
      * Cột hệ thống Postgres (ctid, xmin, xmax, cmin, cmax, tableoid) của từng tiền tố - GỘP vào tập
      * 'column' (cùng với {@link #columns}), để không phải liệt kê 6 cột mỗi lần.

@@ -22,8 +22,12 @@ import java.util.TreeSet;
  * <p>
  * Đọc danh sách câu SQL từ tools/intellij-compare/queries.txt (cùng file ij-completion-dump.groovy đọc
  * trong IntelliJ), lấy gợi ý của IntelliJ cho từng câu từ target/ij-compare/ij-out.tsv, chạy tool trên
- * từng câu, ghi target/ij-compare/compare.txt: với mỗi câu, gợi ý chỉ tool có và chỉ IntelliJ có. So theo tên (phần sau dấu chấm cuối, không phân biệt hoa/thường) - tool viết
- * "public.users"/"users.id", IntelliJ viết "users"/"id".
+ * từng câu, ghi target/ij-compare/compare.txt: với mỗi câu, in đủ 4 dòng - toàn bộ gợi ý thật của tool,
+ * toàn bộ gợi ý thật của IntelliJ, rồi mới đến 2 dòng "tool THỪA"/"tool THIẾU" so với IntelliJ (phần
+ * lệch nhau) - tránh đọc nhầm "tool THỪA (0)" thành "tool không gợi ý gì" (chỉ là không có gì thừa so
+ * với IntelliJ, tool vẫn gợi ý bình thường - xem dòng "tool (...)" ở trên để biết chính xác). So theo
+ * tên (phần sau dấu chấm cuối, không phân biệt hoa/thường) - tool viết "public.users"/"users.id",
+ * IntelliJ viết "users"/"id".
  * <p>
  * Schema đọc từ đúng DB {@code sqlctx_fixture} mà IntelliJ introspect. Chỉ chạy khi bật cờ:
  * {@code mvn test -Dtest=IntellijCompareTest -DijCompare=true}.
@@ -31,7 +35,9 @@ import java.util.TreeSet;
 @EnabledIfSystemProperty(named = "ijCompare", matches = "true")
 class IntellijCompareTest {
 
-    private static final Path DIR = Path.of("target/ij-compare");
+    // KHÔNG dùng target/ - Maven/IntelliJ rebuild hay xoá sạch target/, mất hết kết quả capture của
+    // IntelliJ (~5 phút chạy tay) - xem cùng lý do trong ij-completion-dump.groovy.
+    private static final Path DIR = Path.of("tools/intellij-compare/out");
     private static final Path QUERIES = Path.of("tools/intellij-compare/queries.txt");
 
     @Test
@@ -72,8 +78,10 @@ class IntellijCompareTest {
                 continue;
             }
             report.add("\n=== " + query);
-            report.add("chỉ tool (" + onlyTool.size() + "): " + String.join(", ", onlyTool));
-            report.add("chỉ IntelliJ (" + onlyIntellij.size() + "): " + String.join(", ", onlyIntellij));
+            report.add("tool (" + tool.size() + "): " + String.join(", ", tool));
+            report.add("IntelliJ (" + ij.size() + "): " + String.join(", ", ij));
+            report.add("tool THỪA so với IntelliJ (" + onlyTool.size() + "): " + String.join(", ", onlyTool));
+            report.add("tool THIẾU so với IntelliJ (" + onlyIntellij.size() + "): " + String.join(", ", onlyIntellij));
         }
         int compared = queries.size() - missing.size();
         String header = compared + " câu: giống nhau " + same + ", khác " + (compared - same);

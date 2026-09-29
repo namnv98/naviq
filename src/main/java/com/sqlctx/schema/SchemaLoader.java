@@ -103,6 +103,18 @@ public class SchemaLoader {
         return languages;
     }
 
+    public static List<String> loadTablespaces(Connection conn) throws Exception {
+        String sql = "SELECT spcname FROM pg_catalog.pg_tablespace ORDER BY spcname";
+        List<String> tablespaces = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                tablespaces.add(rs.getString("spcname"));
+            }
+        }
+        return tablespaces;
+    }
+
     public static List<String> loadDataTypes(Connection conn) throws Exception {
         String sql = """
                     SELECT typname

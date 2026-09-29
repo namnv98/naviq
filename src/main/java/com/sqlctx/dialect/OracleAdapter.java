@@ -86,6 +86,20 @@ public final class OracleAdapter implements DialectAdapter {
     }
 
     @Override
+    public List<String> loadTablespaces() throws Exception {
+        // USER_TABLESPACES (không phải DBA_TABLESPACES) - đúng nguyên tắc loadRoles() ở trên: view mọi
+        // user thường đều query được, không cần quyền DBA.
+        try (var stmt = connection().createStatement();
+             var rs = stmt.executeQuery("SELECT tablespace_name FROM user_tablespaces ORDER BY tablespace_name")) {
+            var tablespaces = new java.util.ArrayList<String>();
+            while (rs.next()) {
+                tablespaces.add(rs.getString(1));
+            }
+            return tablespaces;
+        }
+    }
+
+    @Override
     public DatabaseList listDatabases() throws Exception {
         try (Statement stmt = connection().createStatement();
              ResultSet rs = stmt.executeQuery("SELECT name FROM v$pdbs ORDER BY name")) {
