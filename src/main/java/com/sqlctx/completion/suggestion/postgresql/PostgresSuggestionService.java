@@ -5,9 +5,11 @@ import com.sqlctx.completion.model.SuggestionType;
 import com.sqlctx.antlr4.postgresql.PostgreSQLParser;
 import com.sqlctx.completion.suggestion.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.DerivedColumnExpander;
+import com.sqlctx.completion.suggestion.KeywordText;
 import com.sqlctx.completion.suggestion.SuggestFilter;
 import com.sqlctx.completion.syntactic.engine.support.RuleCallStack;
 import com.sqlctx.schema.SchemaIndex;
+import com.sqlctx.schema.TableInfo;
 import com.sqlctx.completion.model.Suggestion;
 import com.sqlctx.completion.syntactic.postgresql.PostgresSyntacticAnalyzer;
 import com.sqlctx.completion.semantic.postgresql.PostgresSemanticAnalyzer;
@@ -16,6 +18,8 @@ import com.sqlctx.util.LoggingConfig;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -153,7 +157,7 @@ public class PostgresSuggestionService implements SuggestionService {
             if (isRuleAncestorAnywhere(syntacticResults, PostgreSQLParser.RULE_columnref, PostgreSQLParser.RULE_partitionboundspec)) {
                 SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
             } else {
-                addColumnSuggestions(suggests, semanticResult, true);
+                addColumnSuggestions(suggests, semanticResult, true, true);
             }
         }
 
@@ -216,9 +220,11 @@ public class PostgresSuggestionService implements SuggestionService {
         } else if (matchedRuleNames.contains("colid") && isJoinUsingColumn) {
             addCommonColumnSuggestions(suggests, semanticResult);
         } else if (matchedRuleNames.contains("colid") && isColidPureIdentifierList) {
-            addColumnSuggestions(suggests, semanticResult, false);
+            addColumnSuggestions(suggests, semanticResult, false, false);
         } else if (matchedRuleNames.contains("colid") && (isColumnrefColumn || isColidIndexColumn)) {
-            addColumnSuggestions(suggests, semanticResult, true);
+            // Cột hệ thống không dùng được trong CREATE INDEX (Postgres: "index creation on system
+            // columns is not supported") - chỉ thêm ở vị trí biểu thức thật (columnref).
+            addColumnSuggestions(suggests, semanticResult, true, isColumnrefColumn && !isColidIndexColumn);
         }
 
         if (bareColumnPosition) {
@@ -318,16 +324,10 @@ public class PostgresSuggestionService implements SuggestionService {
     }
 
     private static void addKeywordSuggestions(List<Suggestion> suggests, Integer key, List<Integer> following) {
-        String text = PostgreSQLParser.VOCABULARY.getDisplayName(key).toLowerCase().replace("'", "");
-
-        if (following != null && !following.isEmpty()) {
-            text += " " + following.stream()
-                    .map(f -> PostgreSQLParser.VOCABULARY.getDisplayName(f).toLowerCase().replace("'", ""))
-                    .collect(Collectors.joining(" "));
-            // ví dụ: key=NOT, following=[EXISTS] -> text = "not exists"
+        String text = KeywordText.of(PostgreSQLParser.VOCABULARY, key, following); // null = không phải từ khoá thật
+        if (text != null) {
+            suggests.add(Suggestion.of(text, SuggestionType.KEYWORD));
         }
-
-        suggests.add(Suggestion.of(text, SuggestionType.KEYWORD));
     }
 
     private static void addDataTypeSuggestions(List<Suggestion> suggests) {
@@ -396,7 +396,8 @@ public class PostgresSuggestionService implements SuggestionService {
                 .forEach(suggests::add));
     }
 
-    private static void addColumnSuggestions(List<Suggestion> suggests, PostgresSemanticAnalyzer.Result sem, boolean includeFunctions) {
+    private static void addColumnSuggestions(List<Suggestion> suggests, PostgresSemanticAnalyzer.Result sem,
+                                             boolean includeFunctions, boolean includeSystemColumns) {
         if (includeFunctions) {
             SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
         }
@@ -404,10 +405,12 @@ public class PostgresSuggestionService implements SuggestionService {
             String qualifier = sem.qualifier();
             if (sem.qualifierDerivedScope() != null) {
                 DerivedColumnExpander.addDerivedColumns(suggests, qualifier, sem.qualifierDerivedScope());
-            } else if (sem.qualifierResolvesTo() != null) {
-                SchemaIndex.getColumnsOfTable(sem.qualifierResolvesTo()).forEach(c -> suggests.add(Suggestion.of(qualifier + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
             } else {
-                SchemaIndex.getColumnsOfTable(qualifier).forEach(c -> suggests.add(Suggestion.of(qualifier + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
+                String table = sem.qualifierResolvesTo() != null ? sem.qualifierResolvesTo() : qualifier;
+                SchemaIndex.getColumnsOfTable(table).forEach(c -> suggests.add(Suggestion.of(qualifier + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
+                if (includeSystemColumns) {
+                    addSystemColumns(suggests, qualifier, table);
+                }
             }
         } else if (!sem.visibleAliases().isEmpty()) {
             sem.visibleAliases().forEach((alias, table) -> {
@@ -416,9 +419,30 @@ public class PostgresSuggestionService implements SuggestionService {
                     DerivedColumnExpander.addDerivedColumns(suggests, alias, derived);
                 } else {
                     SchemaIndex.getColumnsOfTable(table).forEach(c -> suggests.add(Suggestion.of(alias + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
+                    if (includeSystemColumns) {
+                        addSystemColumns(suggests, alias, table);
+                    }
                 }
             });
         }
+    }
+
+    /** Cột hệ thống Postgres (tên -> kiểu) - có trên MỌI bảng/materialized view, SELECT được như cột thường. */
+    private static final Map<String, String> SYSTEM_COLUMNS = Map.of(
+            "tableoid", "oid", "xmin", "xid", "cmin", "cid", "xmax", "xid", "cmax", "cid", "ctid", "tid");
+
+    /**
+     * Thêm cột hệ thống (ctid, xmin, xmax, cmin, cmax, tableoid) cho {@code table} nếu nó là bảng hoặc
+     * materialized view - view/subquery/CTE KHÔNG có (Postgres 18: "column ctid does not exist"). Chỉ gọi
+     * ở vị trí biểu thức: INSERT (...), SET, USING (...), CREATE INDEX (...) đều từ chối cột hệ thống.
+     */
+    private static void addSystemColumns(List<Suggestion> suggests, String qualifier, String table) {
+        TableInfo info = SchemaIndex.tableIndex.get(table);
+        if (info == null || !("table".equals(info.kind()) || "materialized view".equals(info.kind()))) {
+            return;
+        }
+        SYSTEM_COLUMNS.forEach((name, type) ->
+                suggests.add(Suggestion.of(qualifier + "." + name, SuggestionType.COLUMN, type)));
     }
 
     private static void addTableNameSuggestions(List<Suggestion> suggests, PostgresSyntacticAnalyzer.Result syn, java.util.Set<String> visibleCteNames) {
@@ -441,6 +465,9 @@ public class PostgresSuggestionService implements SuggestionService {
         SchemaIndex.schemaTableIndex.values().stream()
                 .filter(t -> kinds == null || kinds.contains(t.kind()))
                 .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
+        // Tên schema làm tiền tố ("pg_catalog." rồi chọn tiếp bảng) - hợp lệ ở mọi vị trí tên bảng, kể cả lệnh
+        // DDL (DROP TABLE public.x). Thiếu hẳn trước đây (phát hiện khi so với IntelliJ).
+        SchemaIndex.schemas.forEach(schema -> suggests.add(Suggestion.of(schema.name(), SuggestionType.SCHEMA)));
         if (kinds != null) {
             return; // CTE chỉ tham chiếu được trong câu truy vấn, không phải đích của lệnh DDL/utility
         }

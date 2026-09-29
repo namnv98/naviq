@@ -1,7 +1,8 @@
 // Dump completion của IntelliJ (DatabaseTools) cho từng câu SQL test của sqlctx - xem README.md cùng thư mục.
 // Chạy trong IDE Scripting Console (Groovy, phím Ctrl+Enter - KHÔNG dùng nút Run):
 //   evaluate(new File("<repo>/tools/intellij-compare/ij-completion-dump.groovy"))
-// Đọc <repo>/target/ij-compare/ij-cases.txt, ghi <repo>/target/ij-compare/ij-out.tsv.
+// Đọc câu SQL từ <repo>/tools/intellij-compare/queries.txt, ghi <repo>/target/ij-compare/ij-out.tsv -
+// IntellijCompareTest (Java) đọc cùng queries.txt + file kết quả này để so với tool.
 // Yêu cầu: tab Query Console của data source tên chứa "sqlctx_fixture" đang MỞ (không cần đang chọn).
 // KHÔNG gõ phím/click trong IDE cho tới khi hiện thông báo "Xong".
 import com.intellij.codeInsight.CodeInsightSettings
@@ -23,20 +24,16 @@ import javax.swing.Timer
 import java.awt.event.ActionListener
 
 class SqlctxCompletionDumper {
-    // Thư mục target/ij-compare của project đang mở có file ij-cases.txt (hoặc -Dsqlctx.ijCompareDir)
-    static final String DIR = resolveDir()
+    static final String QUERIES = "tools/intellij-compare/queries.txt"
 
-    static String resolveDir() {
-        def override = System.getProperty("sqlctx.ijCompareDir")
-        if (override) {
-            return override
-        }
-        def hit = ProjectManager.getInstance().openProjects.collect { it.basePath + "/target/ij-compare" }
-                .find { new File(it, "ij-cases.txt").exists() }
-        if (hit == null) {
-            throw new IllegalStateException("Không thấy target/ij-compare/ij-cases.txt trong project nào đang mở - chạy tools/intellij-compare/extract_cases.py trước")
-        }
-        return hit
+    // Project đang mở chính là repo sqlctx (có queries.txt); kết quả ghi vào target/ij-compare.
+    static final String REPO = ProjectManager.getInstance().openProjects.collect { it.basePath }
+            .find { new File(it, QUERIES).isFile() }
+    static final String DIR = REPO + "/target/ij-compare"
+
+    // queries.txt: mỗi dòng 1 câu ("|" = con trỏ), bỏ dòng trống/dòng bắt đầu bằng "#".
+    static List<String> readQueries() {
+        return new File(REPO, QUERIES).readLines("UTF-8").findAll { it.trim() && !it.trim().startsWith("#") }
     }
 
     def project
@@ -105,7 +102,12 @@ class SqlctxCompletionDumper {
         def file = found[0][1]
         FileEditorManager.getInstance(project).openFile(file, true)
         editor = (FileEditorManager.getInstance(project).getEditors(file).find { it instanceof TextEditor } as TextEditor).editor
-        cases = new File(DIR + "/ij-cases.txt").readLines().findAll { it.trim() }.collect { [it, unescape(it)] }
+        if (REPO == null) {
+            throw new IllegalStateException("Không thấy project sqlctx đang mở (thiếu " + QUERIES + ")")
+        }
+        new File(DIR).mkdirs()
+        // [khoá ghi ra file (escape xuống dòng/tab), câu SQL thật]
+        cases = readQueries().collect { [escape(it), it] }
         originalText = editor.document.text
         savedAuto = settings.AUTOCOMPLETE_ON_CODE_COMPLETION
         savedSmart = settings.AUTOCOMPLETE_ON_SMART_TYPE_COMPLETION

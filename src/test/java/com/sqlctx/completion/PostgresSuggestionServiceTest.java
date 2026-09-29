@@ -45,8 +45,9 @@ class PostgresSuggestionServiceTest {
     @Test
     @DisplayName("Gõ tên cột không alias ('i') phải thắng keyword ('int'/'integer') dù cả 2 cùng match prefix")
     void realColumnBeatsGenericKeywordOnPrefix() {
+        // Cột hệ thống: chỉ 4/6 khớp fuzzy "i" (cmin, xmin, ctid, tableoid) - không dùng systemColumns().
         pg("select * from users where i|")
-                .columns("users.email", "users.id")
+                .columns("users.email", "users.id", "users.cmin", "users.xmin", "users.ctid", "users.tableoid")
                 .datatypes("int4", "numeric", "timestamp")
                 .first("users.id");
     }
@@ -87,7 +88,8 @@ class PostgresSuggestionServiceTest {
     @Test
     @DisplayName("JOIN 2 bảng, gõ 'u.' phải CHỈ ra đúng cột của users, không lẫn cột orders")
     void aliasQualifiedColumnsAfterJoin() {
-        pg("select * from users u join orders o on o.user_id = u.|").columns("u.email", "u.id", "u.name");
+        pg("select * from users u join orders o on o.user_id = u.|").columns("u.email", "u.id", "u.name")
+                .systemColumns("u");
     }
 
     @Test
@@ -204,7 +206,8 @@ class PostgresSuggestionServiceTest {
                 .columns("contracts.amount", "contracts.id", "contracts.name", "contracts.status")
                 .functions(PG_FUNCTIONS)
                 .datatypes(PG_DATATYPES)
-                .first("contracts.id");
+                .first("contracts.id")
+                .systemColumns("contracts");
     }
 
     // =====================================================================
@@ -214,7 +217,8 @@ class PostgresSuggestionServiceTest {
     @Test
     @DisplayName("Subquery chưa đóng ngoặc (đang gõ dở) vẫn phải gợi ý được cột bên trong nó")
     void unclosedSubqueryStillSuggestsColumns() {
-        pg("select * from (select * from users u where u.|").columns("u.email", "u.id", "u.name");
+        pg("select * from (select * from users u where u.|").columns("u.email", "u.id", "u.name")
+                .systemColumns("u");
     }
 
     @Test
@@ -269,7 +273,8 @@ class PostgresSuggestionServiceTest {
     @DisplayName("JOIN 3 bảng, gõ alias bảng thứ 3 phải CHỈ ra đúng cột của nó, không lẫn 2 bảng kia")
     void tripleJoinResolvesCorrectTableAmongThree() {
         pg("select * from users u join orders o on o.user_id = u.id join contracts c on c.id = u.id where c.|")
-                .columns("c.amount", "c.id", "c.name", "c.status");
+                .columns("c.amount", "c.id", "c.name", "c.status")
+                .systemColumns("c");
     }
 
     // =====================================================================
@@ -281,13 +286,15 @@ class PostgresSuggestionServiceTest {
     @DisplayName("UPDATE ... FROM u WHERE ... AND u.|: phải resolve đúng cột bảng trong FROM")
     void updateFromResolvesJoinedTableColumns() {
         pg("update orders o set status = 'x' from users u where u.id = o.user_id and u.|")
-                .columns("u.email", "u.id", "u.name");
+                .columns("u.email", "u.id", "u.name")
+                .systemColumns("u");
     }
 
     @Test
     @DisplayName("DELETE ... USING u WHERE ... AND u.|: phải resolve đúng cột bảng trong USING")
     void deleteUsingResolvesJoinedTableColumns() {
-        pg("delete from orders o using users u where u.id = o.user_id and u.|").columns("u.email", "u.id", "u.name");
+        pg("delete from orders o using users u where u.id = o.user_id and u.|").columns("u.email", "u.id", "u.name")
+                .systemColumns("u");
     }
 
     // =====================================================================
@@ -399,7 +406,8 @@ class PostgresSuggestionServiceTest {
         pg("select | from users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -408,7 +416,8 @@ class PostgresSuggestionServiceTest {
         pg("select id, | from users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -417,7 +426,8 @@ class PostgresSuggestionServiceTest {
         pg("select * from users where id = 1 and |")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -426,7 +436,8 @@ class PostgresSuggestionServiceTest {
         pg("select status, count(*) from orders group by status having |")
                 .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("orders");
     }
 
     @Test
@@ -435,14 +446,16 @@ class PostgresSuggestionServiceTest {
         pg("select * from users where id in (select | from orders)")
                 .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id", "users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("orders", "users");
     }
 
     @Test
     @DisplayName("Subquery TƯƠNG QUAN (correlated EXISTS): alias bảng NGOÀI vẫn phải resolve được bên trong subquery")
     void whereExistsCorrelatedResolvesOuterAlias() {
         pg("select * from users u where exists (select 1 from orders o where o.user_id = u.|)")
-                .columns("u.email", "u.id", "u.name");
+                .columns("u.email", "u.id", "u.name")
+                .systemColumns("u");
     }
 
     @Test
@@ -470,7 +483,8 @@ class PostgresSuggestionServiceTest {
         pg("delete from users where |")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     // =====================================================================
@@ -485,7 +499,8 @@ class PostgresSuggestionServiceTest {
         pg("select id, sum(total) over (partition by | order by id) from orders")
                 .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("orders");
     }
 
     @Test
@@ -494,14 +509,16 @@ class PostgresSuggestionServiceTest {
         pg("select id, sum(total) over (partition by status order by |) from orders")
                 .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("orders");
     }
 
     @Test
     @DisplayName("LATERAL subquery: được phép tham chiếu alias của FROM-item ĐỨNG TRƯỚC nó (đúng ngữ nghĩa LATERAL thật của Postgres, verify bằng docs/hành vi chuẩn)")
     void lateralSubqueryResolvesPrecedingAlias() {
         pg("select * from users u, lateral (select * from orders o where o.user_id = u.|) sub")
-                .columns("u.email", "u.id", "u.name");
+                .columns("u.email", "u.id", "u.name")
+                .systemColumns("u");
     }
 
     @Test
@@ -510,7 +527,8 @@ class PostgresSuggestionServiceTest {
         pg("select id from users union select | from orders")
                 .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("orders");
     }
 
     @Test
@@ -519,7 +537,8 @@ class PostgresSuggestionServiceTest {
         pg("with a as (select * from users) select * from a union select | from orders")
                 .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("orders");
     }
 
     // =====================================================================
@@ -580,7 +599,8 @@ class PostgresSuggestionServiceTest {
                 .tables(PG_TABLES)
                 .views(PG_VIEWS)
                 .materializedViews(PG_MATVIEWS)
-                .functions(PG_FUNCTIONS);
+                .functions(PG_FUNCTIONS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
@@ -590,7 +610,8 @@ class PostgresSuggestionServiceTest {
                 .tables("public.contracts", "public.orders", "public.products", "public.users", "r")
                 .views(PG_VIEWS)
                 .materializedViews(PG_MATVIEWS)
-                .functions(PG_FUNCTIONS);
+                .functions(PG_FUNCTIONS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
@@ -607,7 +628,8 @@ class PostgresSuggestionServiceTest {
         pg("select | from users union select id from orders")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -627,7 +649,8 @@ class PostgresSuggestionServiceTest {
         pg(sql)
                 .columns("orders.customer_id", "orders.id", "orders.status", "orders.total", "orders.user_id")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("orders");
     }
 
     // =====================================================================
@@ -639,49 +662,57 @@ class PostgresSuggestionServiceTest {
     @Test
     @DisplayName("DROP VIEW |: chỉ view")
     void dropViewSuggestsOnlyViews() {
-        pg("drop view |").views(PG_VIEWS);
+        pg("drop view |").views(PG_VIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("DROP MATERIALIZED VIEW |: chỉ materialized view")
     void dropMaterializedViewSuggestsOnlyMaterializedViews() {
-        pg("drop materialized view |").materializedViews(PG_MATVIEWS);
+        pg("drop materialized view |").materializedViews(PG_MATVIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("TRUNCATE |: chỉ bảng thường (view/materialized view -> lỗi 42809)")
     void truncateSuggestsOnlyTables() {
-        pg("truncate |").tables(PG_TABLES);
+        pg("truncate |").tables(PG_TABLES)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("LOCK TABLE |: bảng + view (materialized view -> lỗi 42809)")
     void lockTableSuggestsTablesAndViews() {
-        pg("lock table |").tables(PG_TABLES).views(PG_VIEWS);
+        pg("lock table |").tables(PG_TABLES).views(PG_VIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("COMMENT ON TABLE |: chỉ bảng thường")
     void commentOnTableSuggestsOnlyTables() {
-        pg("comment on table |").tables(PG_TABLES);
+        pg("comment on table |").tables(PG_TABLES)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("CREATE INDEX ... ON |: bảng + materialized view (view -> lỗi 42809)")
     void createIndexOnSuggestsTablesAndMaterializedViews() {
-        pg("create index idx1 on |").tables(PG_TABLES).materializedViews(PG_MATVIEWS);
+        pg("create index idx1 on |").tables(PG_TABLES).materializedViews(PG_MATVIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("INSERT INTO |: bảng + view cập nhật được (materialized view -> lỗi 42809)")
     void insertIntoSuggestsTablesAndViews() {
-        pg("insert into |").tables(PG_TABLES).views(PG_VIEWS);
+        pg("insert into |").tables(PG_TABLES).views(PG_VIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("DELETE FROM |: bảng + view (materialized view -> lỗi 42809)")
     void deleteFromSuggestsTablesAndViews() {
-        pg("delete from |").tables(PG_TABLES).views(PG_VIEWS);
+        pg("delete from |").tables(PG_TABLES).views(PG_VIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
@@ -691,7 +722,8 @@ class PostgresSuggestionServiceTest {
                 .tables(PG_TABLES)
                 .views(PG_VIEWS)
                 .materializedViews(PG_MATVIEWS)
-                .functions(PG_FUNCTIONS);
+                .functions(PG_FUNCTIONS)
+                .schemas(PG_SCHEMAS);
     }
 
     // =====================================================================
@@ -712,6 +744,41 @@ class PostgresSuggestionServiceTest {
         pg("insert into orders select | from users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
+    }
+
+    // =====================================================================
+    // U. Cột hệ thống (ctid, xmin, xmax, cmin, cmax, tableoid) + tên schema -
+    // thiếu so với IntelliJ, đã kiểm chứng trên Postgres 18 thật. Cột hệ thống
+    // chỉ có trên bảng/materialized view, và chỉ dùng được ở vị trí biểu thức.
+    // =====================================================================
+
+    @Test
+    @DisplayName("View KHÔNG có cột hệ thống (Postgres: column \"ctid\" does not exist)")
+    void viewHasNoSystemColumns() {
+        pg("select * from active_users where |")
+                .columns("active_users.id", "active_users.name")
+                .functions(PG_FUNCTIONS)
                 .datatypes(PG_DATATYPES);
+    }
+
+    @Test
+    @DisplayName("Materialized view CÓ cột hệ thống như bảng thường")
+    void materializedViewHasSystemColumns() {
+        pg("select * from daily_totals where |")
+                .columns("daily_totals.id", "daily_totals.total")
+                .systemColumns("daily_totals")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES);
+    }
+
+    @Test
+    @DisplayName("Tên schema gợi ý được sau FROM (gõ 'pu' -> 'public', sau đó 'public.' ra bảng)")
+    void schemaNameSuggestedAtRelationPosition() {
+        pg("select * from pu|")
+                .tables("public.products")
+                .schemas("public")
+                .first("public");
     }
 }

@@ -32,6 +32,7 @@ public final class CompletionExpectation {
     private final List<Suggestion> actual;
     private final Map<SuggestionType, List<String>> declared = new EnumMap<>(SuggestionType.class);
     private final List<String> keywordsIncluded = new ArrayList<>();
+    private final List<String> extraColumns = new ArrayList<>();
     private String expectedFirst;
     private boolean verified;
 
@@ -93,6 +94,27 @@ public final class CompletionExpectation {
         return roles(keys.toArray(String[]::new));
     }
 
+    public CompletionExpectation schemas(String... keys) {
+        return declare(SuggestionType.SCHEMA, keys);
+    }
+
+    public CompletionExpectation schemas(Collection<String> keys) {
+        return schemas(keys.toArray(String[]::new));
+    }
+
+    /**
+     * Cột hệ thống Postgres (ctid, xmin, xmax, cmin, cmax, tableoid) của từng tiền tố - GỘP vào tập
+     * 'column' (cùng với {@link #columns}), để không phải liệt kê 6 cột mỗi lần.
+     */
+    public CompletionExpectation systemColumns(String... qualifiers) {
+        for (String q : qualifiers) {
+            for (String c : CompletionFixtures.PG_SYSTEM_COLUMNS) {
+                extraColumns.add(q + "." + c);
+            }
+        }
+        return this;
+    }
+
     public CompletionExpectation aliases(String... keys) {
         return declare(SuggestionType.ALIAS, keys);
     }
@@ -146,11 +168,15 @@ public final class CompletionExpectation {
             }
             List<String> got = keysOf(type);
             List<String> want = declared.getOrDefault(type, List.of());
+            if (type == SuggestionType.COLUMN && !extraColumns.isEmpty()) {
+                want = java.util.stream.Stream.concat(want.stream(), extraColumns.stream()).sorted().toList();
+            }
             if (!got.equals(want)) {
                 List<String> extra = minus(got, want);
                 List<String> missing = minus(want, got);
                 problems.add("'" + type.label() + "': thừa " + extra + ", thiếu " + missing
-                        + (declared.containsKey(type) ? "" : " (loại này không được khai báo -> phải rỗng)"));
+                        + (declared.containsKey(type) || (type == SuggestionType.COLUMN && !extraColumns.isEmpty())
+                        ? "" : " (loại này không được khai báo -> phải rỗng)"));
             }
         }
 

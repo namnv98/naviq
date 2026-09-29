@@ -27,6 +27,10 @@ public final class CompletionFixtures {
     public static final List<String> PG_FUNCTIONS = List.of("count", "sum", "avg", "now");
     public static final List<String> PG_DATATYPES = List.of("int4", "text", "numeric", "bool", "timestamp");
     public static final List<String> PG_LANGUAGES = List.of("plpgsql", "sql");
+    /** Schema trong fixture - gợi ý làm tiền tố ở mọi vị trí tên bảng. */
+    public static final List<String> PG_SCHEMAS = List.of("public");
+    /** Cột hệ thống có trên mọi bảng/materialized view (xem {@code CompletionExpectation.systemColumns}). */
+    public static final List<String> PG_SYSTEM_COLUMNS = List.of("tableoid", "xmin", "cmin", "xmax", "cmax", "ctid");
     public static final List<String> PG_TABLES = List.of("public.users", "public.orders", "public.contracts", "public.products");
     public static final List<String> PG_VIEWS = List.of("public.active_users");
     public static final List<String> PG_MATVIEWS = List.of("public.daily_totals");

@@ -5,6 +5,7 @@ import com.sqlctx.completion.model.SuggestionType;
 import com.sqlctx.antlr4.oracle.PlSqlParser;
 import com.sqlctx.completion.suggestion.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.DerivedColumnExpander;
+import com.sqlctx.completion.suggestion.KeywordText;
 import com.sqlctx.completion.suggestion.SuggestFilter;
 import com.sqlctx.completion.model.Suggestion;
 import com.sqlctx.completion.syntactic.engine.support.RuleCallStack;
@@ -341,15 +342,10 @@ public class OracleSuggestionService implements SuggestionService {
     }
 
     private static void addKeywordSuggestions(List<Suggestion> suggests, Integer key, List<Integer> following) {
-        String text = PlSqlParser.VOCABULARY.getDisplayName(key).toLowerCase().replace("'", "");
-
-        if (following != null && !following.isEmpty()) {
-            text += " " + following.stream()
-                    .map(f -> PlSqlParser.VOCABULARY.getDisplayName(f).toLowerCase().replace("'", ""))
-                    .collect(Collectors.joining(" "));
+        String text = KeywordText.of(PlSqlParser.VOCABULARY, key, following); // null = không phải từ khoá thật
+        if (text != null) {
+            suggests.add(Suggestion.of(text, SuggestionType.KEYWORD));
         }
-
-        suggests.add(Suggestion.of(text, SuggestionType.KEYWORD));
     }
 
     private static void addDataTypeSuggestions(List<Suggestion> suggests) {

@@ -122,49 +122,57 @@ class PostgresGrammarBreadthTest {
     @Test
     @DisplayName("alterextensioncontentsstmt: ALTER EXTENSION ... ADD TABLE any_name - chỉ bảng thường")
     void alterextensioncontentsstmt() {
-        pg("alter extension ext1 add table |").tables(PG_TABLES);
+        pg("alter extension ext1 add table |").tables(PG_TABLES)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("alterpublicationstmt: ALTER PUBLICATION ... ADD TABLE - chỉ bảng thường (publication không nhận view/materialized view)")
     void alterpublicationstmt() {
-        pg("alter publication pub1 add table |").tables(PG_TABLES);
+        pg("alter publication pub1 add table |").tables(PG_TABLES)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("analyzestmt: ANALYZE qualified_name - bảng + materialized view (view bị Postgres bỏ qua)")
     void analyzestmt() {
-        pg("analyze |").tables(PG_TABLES).materializedViews(PG_MATVIEWS);
+        pg("analyze |").tables(PG_TABLES).materializedViews(PG_MATVIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("createpublicationstmt: CREATE PUBLICATION ... FOR TABLE - chỉ bảng thường (publication không nhận view/materialized view)")
     void createpublicationstmt() {
-        pg("create publication pub1 for table |").tables(PG_TABLES);
+        pg("create publication pub1 for table |").tables(PG_TABLES)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("dropstmt: DROP TABLE any_name_list - chỉ bảng thường (view/materialized view -> lỗi 42809)")
     void dropstmt() {
-        pg("drop table |").tables(PG_TABLES);
+        pg("drop table |").tables(PG_TABLES)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("refreshmatviewstmt: REFRESH MATERIALIZED VIEW qualified_name - CHỈ materialized view")
     void refreshmatviewstmt() {
-        pg("refresh materialized view |").materializedViews(PG_MATVIEWS);
+        pg("refresh materialized view |").materializedViews(PG_MATVIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("reindexstmt: REINDEX TABLE qualified_name - bảng + materialized view (view -> lỗi 42809)")
     void reindexstmt() {
-        pg("reindex table |").tables(PG_TABLES).materializedViews(PG_MATVIEWS);
+        pg("reindex table |").tables(PG_TABLES).materializedViews(PG_MATVIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     @Test
     @DisplayName("vacuumstmt: VACUUM qualified_name - bảng + materialized view (view bị Postgres bỏ qua)")
     void vacuumstmt() {
-        pg("vacuum |").tables(PG_TABLES).materializedViews(PG_MATVIEWS);
+        pg("vacuum |").tables(PG_TABLES).materializedViews(PG_MATVIEWS)
+                .schemas(PG_SCHEMAS);
     }
 
     // =====================================================================
@@ -179,7 +187,8 @@ class PostgresGrammarBreadthTest {
         pg("select | from public.users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -188,7 +197,8 @@ class PostgresGrammarBreadthTest {
         pg("create table t2 as select | from public.users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -197,7 +207,8 @@ class PostgresGrammarBreadthTest {
         pg("create materialized view mv1 as select | from public.users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -206,7 +217,8 @@ class PostgresGrammarBreadthTest {
         pg("create view v1 as select | from public.users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -215,7 +227,8 @@ class PostgresGrammarBreadthTest {
         pg("declare cur1 cursor for select | from public.users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -224,7 +237,8 @@ class PostgresGrammarBreadthTest {
         pg("explain select | from public.users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -233,7 +247,8 @@ class PostgresGrammarBreadthTest {
         pg("prepare p1 as select | from public.users")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -242,7 +257,8 @@ class PostgresGrammarBreadthTest {
         pg("delete from public.users where |")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -263,7 +279,8 @@ class PostgresGrammarBreadthTest {
         pg("alter policy pol1 on public.users using (|")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
@@ -272,7 +289,8 @@ class PostgresGrammarBreadthTest {
         pg("create policy pol1 on public.users using (|")
                 .columns("users.email", "users.id", "users.name")
                 .functions(PG_FUNCTIONS)
-                .datatypes(PG_DATATYPES);
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
     }
 
     @Test
