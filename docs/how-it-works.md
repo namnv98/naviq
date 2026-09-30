@@ -10,14 +10,14 @@ Hai tầng độc lập, kết quả ghép ở cuối. Tầng cú pháp cho bi�
 
 Lex câu gốc, không parse. Tìm token tại con trỏ (token caret). Sau đó `CompletionEngineBase` đi trên ATN của parser:
 
-- `enterRule(rule, i)` trả lời: vào rule R ở token thứ i thì thoát ra được ở những token nào. Kết quả chỉ phụ thuộc (R, i) nên được nhớ lại (`ruleExitCache`). Grammar ANTLR không có đệ quy trái nên không thể quay lại đúng (R, i) khi đang tính.
-- `walkRuleBody` duyệt rộng (BFS) trong thân rule trên các cặp (state, token index). Gặp transition khớp token thì tiến 1 token, gặp lời gọi rule con thì gọi `enterRule`, gặp epsilon hoặc predicate đúng thì đi tiếp không tốn token.
+- `enterRule(rule, i)` trả lời: vào rule R ở token thứ i thì thoát ra được ở những token nào. Lần đi không chạm caret chỉ phụ thuộc (R, i) nên được nhớ lại (`ruleExitCache`); lần đi chạm caret sinh gợi ý phụ thuộc call stack nên không được nhớ. Grammar ANTLR không có đệ quy trái nên không thể quay lại đúng (R, i) khi đang tính.
+- `walkRuleBody` duyệt sâu (DFS) trong thân rule trên các cặp (state, token index). Gặp transition khớp token thì tiến 1 token, gặp lời gọi rule con thì gọi `enterRule`, gặp epsilon hoặc predicate đúng thì đi tiếp không tốn token.
 - Khi tới caret không còn token để khớp: mọi token mà transition ở đó chấp nhận chính là gợi ý.
 - `ignoredTokens` (định danh, literal, toán tử, ngoặc, `;`) không bao giờ thành gợi ý keyword.
 - `preferredRules` (`qualified_name`, `columnref`, `typename`, `func_name`, `table_alias`, `colid`, `any_name`): nếu caret nằm trong một rule loại này thì ghi lại *rule* thay vì bung ra từng token bên trong. Đây là cách biết "ở đây cần một tên bảng" mà không liệt kê cả trăm từ khoá có thể mở đầu một tên.
 - Với keyword đơn có chuỗi bắt buộc theo sau (vd `NOT` → `EXISTS`), engine trả luôn chuỗi để gợi ý `not exists`.
 
-Có sẵn biến thể `CompletionEngineWithFlowSet` dùng follow-set tính trước (`FollowSetsByState`) để cắt nhánh sớm; mặc định đang dùng `CompletionEngineDefault`.
+Có sẵn biến thể `CompletionEngineWithFlowSet` dùng follow-set tính trước (`FollowSetsByState`) để cắt nhánh sớm; mặc định đang dùng `CompletionEngineDefault`. Chi tiết thuật toán: [syntactic.md](syntactic.md).
 
 ## 3. Tầng ngữ nghĩa: dựng scope
 

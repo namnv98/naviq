@@ -88,6 +88,7 @@ Tầng REPL chưa có test tự động.
 ## Thiết kế
 
 - [Cách gợi ý hoạt động](docs/how-it-works.md)
+- [Tầng cú pháp hoạt động thế nào](docs/syntactic.md)
 - [Thêm một DB mới](docs/adding-a-dialect.md)
 
 ## Giới hạn

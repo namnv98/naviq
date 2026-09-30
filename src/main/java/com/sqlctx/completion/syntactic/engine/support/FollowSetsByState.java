@@ -13,8 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * đi xuyên qua mọi rule con, KÈM đường gọi ({@link FollowSetWithPath#path()}) đã đi qua để tới từng nhóm token.
  * {@link Token#EPSILON} trong tập nghĩa là rule có thể rỗng (tới được cuối rule mà không cần token).
  * <p>
- * Chỉ phụ thuộc (Parser, state, ignoredTokens), không đụng tới token đã gõ nên cache tĩnh dùng chung được
+ * Chỉ phụ thuộc (ATN, state, ignoredTokens), không đụng tới token đã gõ nên cache tĩnh dùng chung được
  * giữa các lần gọi và giữa các luồng. Key theo NỘI DUNG của {@code ignoredTokens} (equals/hashCode của Map).
+ * Giả định predicate của grammar cho cùng kết quả với mọi parser: predicate đọc trạng thái parser (vd cờ
+ * version, token hiện tại) thì cache giữ kết quả của lần tính đầu tiên.
  */
 public class FollowSetsByState {
 
@@ -25,53 +27,57 @@ public class FollowSetsByState {
     public record FollowSetsHolder(List<FollowSetWithPath> sets, IntervalSet combined) {
     }
 
-    private final Map<Integer, ConcurrentHashMap<Map<Integer, Boolean>, FollowSetsHolder>> cache = new ConcurrentHashMap<>();
+    /** Có ATN trong key (so sánh identity) vì stateNumber chỉ duy nhất trong 1 grammar. */
+    private record Key(ATN atn, int stateNumber, Map<Integer, Boolean> ignoredTokens) {
+    }
+
+    /** Chỗ quay về khi ra khỏi rule con: state tiếp theo trong caller và đường gọi của caller. */
+    private record ReturnTo(ATNState state, RuleCallStack callerStack) {
+    }
+
+    private final Map<Key, FollowSetsHolder> cache = new ConcurrentHashMap<>();
 
     public FollowSetsHolder getOrCompute(Parser parser, ATNState start, Map<Integer, Boolean> ignoredTokens) {
-        return cache.computeIfAbsent(start.stateNumber, k -> new ConcurrentHashMap<>())
-                .computeIfAbsent(ignoredTokens, k -> {
-                    ATNState stop = parser.getATN().ruleToStopState[start.ruleIndex];
-                    List<FollowSetWithPath> sets = computeFollowSets(parser, start, stop, ignoredTokens);
-                    IntervalSet combined = new IntervalSet();
-                    sets.forEach(s -> combined.addAll(s.intervals()));
-                    return new FollowSetsHolder(sets, combined);
-                });
+        return cache.computeIfAbsent(new Key(parser.getATN(), start.stateNumber, ignoredTokens), k -> {
+            List<FollowSetWithPath> sets = computeFollowSets(parser, start, ignoredTokens);
+            IntervalSet combined = new IntervalSet();
+            sets.forEach(s -> combined.addAll(s.intervals()));
+            return new FollowSetsHolder(sets, combined);
+        });
     }
 
     // ── Tính follow-set ──────────────────────────────────────────────
 
-    static List<FollowSetWithPath> computeFollowSets(Parser parser, ATNState start, ATNState stop, Map<Integer, Boolean> ignoredTokens) {
+    static List<FollowSetWithPath> computeFollowSets(Parser parser, ATNState start, Map<Integer, Boolean> ignoredTokens) {
         List<FollowSetWithPath> out = new ArrayList<>();
-        collectFollowSets(parser, start, stop, out, new IdentityHashMap<>(), new RuleCallStack(), ignoredTokens, new ArrayDeque<>());
+        collectFollowSets(parser, start, out, new HashSet<>(), new RuleCallStack(), ignoredTokens, new ArrayDeque<>());
         return out;
     }
 
     /**
      * Đệ quy đi qua epsilon / predicate / rule con, mỗi lần chạm transition khớp token thì ghi 1 {@link FollowSetWithPath}.
      * <p>
-     * {@code returnStates}: các state sẽ quay về khi ra khỏi rule con (thay cho stack của parser thật).
-     * {@code ruleStack} và {@code returnStates} luôn được COPY trước khi đệ quy vào rule con nên các nhánh
-     * anh em không ảnh hưởng nhau. Rule đã có trên {@code ruleStack} thì không vào lại (đệ quy trái -> cắt nhánh).
+     * {@code returns}: chỗ quay về khi ra khỏi rule con (thay cho stack của parser thật); ra khỏi rule con thì
+     * {@code ruleStack} trở lại đường gọi của caller. {@code ruleStack} và {@code returns} luôn được COPY trước khi
+     * đệ quy vào rule con nên các nhánh anh em không ảnh hưởng nhau. Rule đang nằm trên {@code ruleStack} thì
+     * không vào lại (đệ quy trái -> cắt nhánh).
      */
-    private static void collectFollowSets(Parser parser, ATNState s, ATNState stop,
+    private static void collectFollowSets(Parser parser, ATNState s,
                                           List<FollowSetWithPath> out,
-                                          Map<ATNState, Boolean> seen,
+                                          Set<ATNState> seen,
                                           RuleCallStack ruleStack,
                                           Map<Integer, Boolean> ignoredTokens,
-                                          Deque<ATNState> returnStates) {
-        if (seen.containsKey(s)) return;
-        seen.put(s, Boolean.TRUE);
+                                          Deque<ReturnTo> returns) {
+        if (!seen.add(s)) return;
 
-        if (s == stop || s.getStateType() == ATNState.RULE_STOP) {
-            if (!returnStates.isEmpty()) {
-                Deque<ATNState> rest = new ArrayDeque<>(returnStates);
-                ATNState resume = rest.pop();
-                collectFollowSets(parser, resume, stop, out, new IdentityHashMap<>(), ruleStack, ignoredTokens, rest);
+        if (s.getStateType() == ATNState.RULE_STOP) {
+            if (returns.isEmpty()) {
+                out.add(new FollowSetWithPath(IntervalSet.of(Token.EPSILON), ruleStack.copy(), Collections.emptyList()));
                 return;
             }
-            IntervalSet eps = new IntervalSet();
-            eps.add(Token.EPSILON);
-            out.add(new FollowSetWithPath(eps, ruleStack.copy(), Collections.emptyList()));
+            Deque<ReturnTo> rest = new ArrayDeque<>(returns);
+            ReturnTo back = rest.pop();
+            collectFollowSets(parser, back.state(), out, new HashSet<>(), back.callerStack(), ignoredTokens, rest);
             return;
         }
 
@@ -82,18 +88,18 @@ public class FollowSetsByState {
 
                 RuleCallStack nextStack = ruleStack.copy();
                 nextStack.push(rt.target.ruleIndex, RuleCallStack.RuleFrame.NO_TOKEN);
-                Deque<ATNState> nextReturnStates = new ArrayDeque<>(returnStates);
-                nextReturnStates.push(rt.followState);
+                Deque<ReturnTo> nextReturns = new ArrayDeque<>(returns);
+                nextReturns.push(new ReturnTo(rt.followState, ruleStack));
 
-                collectFollowSets(parser, t.target, stop, out, new IdentityHashMap<>(), nextStack, ignoredTokens, nextReturnStates);
+                collectFollowSets(parser, t.target, out, new HashSet<>(), nextStack, ignoredTokens, nextReturns);
             } else if (t instanceof PredicateTransition pt) {
                 if (AtnPredicates.holds(parser, pt)) {
-                    collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens, returnStates);
+                    collectFollowSets(parser, t.target, out, seen, ruleStack, ignoredTokens, returns);
                 }
             } else if (t instanceof WildcardTransition) {
                 out.add(new FollowSetWithPath(IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType), ruleStack.copy(), Collections.emptyList()));
             } else if (t.isEpsilon()) {
-                collectFollowSets(parser, t.target, stop, out, seen, ruleStack, ignoredTokens, returnStates);
+                collectFollowSets(parser, t.target, out, seen, ruleStack, ignoredTokens, returns);
             } else {
                 IntervalSet label = t.label();
                 if (label == null || label.size() == 0) continue;

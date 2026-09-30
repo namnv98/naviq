@@ -22,7 +22,7 @@ import java.util.*;
  *   <li><b>Token đã gõ</b> là các token từ đầu câu tới trước caret. <b>Token caret</b> (phần tử cuối của
  *       {@link #tokens}) là token đang được gõ dở — nó KHÔNG được "ăn", ta hỏi xem chỗ đó có thể là gì.</li>
  *   <li>{@link #enterRule} trả lời câu hỏi: "vào rule R tại token i thì ra khỏi R được ở những token nào?"
- *       (tập <i>exit</i>). Kết quả chỉ phụ thuộc (R, i), nên được nhớ lại trong {@link #ruleExitCache}.</li>
+ *       (tập <i>exit</i>). Lần đi không chạm caret chỉ phụ thuộc (R, i) nên được nhớ trong {@link #ruleExitCache}.</li>
  *   <li>{@link #walkRuleBody} đi trong thân 1 rule: gặp transition khớp token đã gõ thì tiến 1 token,
  *       gặp lời gọi rule con thì hỏi {@link #enterRule}, gặp epsilon thì đi tiếp không tốn token.</li>
  *   <li>Khi tới caret không còn token nào để khớp: mọi token mà transition chấp nhận chính là gợi ý
@@ -46,8 +46,17 @@ public abstract class CompletionEngineBase {
     protected List<InputToken> tokens;
     protected CandidatesResult result;
 
-    /** ruleIndex -> (token index lúc vào rule -> các token index có thể ra khỏi rule). Chỉ lưu khi chưa tới caret. */
+    /**
+     * ruleIndex -> (token index lúc vào rule -> các token index có thể ra khỏi rule). Chỉ lưu những lần đi
+     * KHÔNG chạm caret: lần đi chạm caret sinh gợi ý phụ thuộc call stack, nên phải đi lại với từng caller.
+     */
     protected final Map<Integer, Map<Integer, Set<Integer>>> ruleExitCache = new HashMap<>();
+
+    /**
+     * Số lần đã đi tới caret. Giá trị tuyệt đối không có ý nghĩa: {@link #enterRule} chỉ so trước/sau khi tính
+     * 1 rule, tăng lên nghĩa là lần tính đó (kể cả các rule con bên trong) có tới caret.
+     */
+    private long caretTouches;
 
     public CompletionEngineBase(Parser parser, Map<Integer, Boolean> ignoredTokens, Map<Integer, Boolean> preferredRules) {
         this.parser = parser;
@@ -63,6 +72,7 @@ public abstract class CompletionEngineBase {
     public CandidatesResult collectCandidates(int caretTokenIndex) {
         result = new CandidatesResult();
         ruleExitCache.clear();
+        caretTouches = 0;
         tokens = readTokens(parser.getTokenStream(), caretTokenIndex);
 
         int startRuleIndex = 0;
@@ -80,6 +90,7 @@ public abstract class CompletionEngineBase {
 
     protected final Set<Integer> enterRule(ATNState start, int tokenIndex, RuleCallStack caller) {
         if (isAtCaret(tokenIndex)) {
+            caretTouches++;
             return computeExitsAtCaret(start, tokenIndex, callStackInto(start, tokenIndex, caller));
         }
 
@@ -92,8 +103,15 @@ public abstract class CompletionEngineBase {
         // đặt tạm tập rỗng chỉ để chắc chắn không lặp vô hạn nếu điều đó xảy ra.
         exitsByEntryToken.put(tokenIndex, Collections.emptySet());
 
+        long touchesBefore = caretTouches;
         Set<Integer> exits = computeExitsNotAtCaret(start, tokenIndex, callStackInto(start, tokenIndex, caller));
-        exitsByEntryToken.put(tokenIndex, exits);
+        boolean reachedCaret = caretTouches > touchesBefore;
+        if (reachedCaret) {
+            // Gợi ý vừa sinh phụ thuộc call stack của caller này -> không cache, caller khác phải tự đi lại.
+            exitsByEntryToken.remove(tokenIndex); // bỏ tập rỗng đặt tạm ở trên
+        } else {
+            exitsByEntryToken.put(tokenIndex, exits);
+        }
         return exits;
     }
 
@@ -122,7 +140,7 @@ public abstract class CompletionEngineBase {
     protected abstract boolean isNullable(ATNState state);
 
     // ════════════════════════════════════════════════════════════════
-    // BƯỚC 2 — đi trong thân 1 rule: duyệt rộng (BFS) các transition của ATN
+    // BƯỚC 2 — đi trong thân 1 rule: duyệt (DFS, dùng Deque như stack) các transition của ATN
     // ════════════════════════════════════════════════════════════════
 
     /** Vị trí trong lúc đi: đang ở state nào của ATN, đã "ăn" tới token nào. */
@@ -146,6 +164,9 @@ public abstract class CompletionEngineBase {
             Position cur = queue.pop();
             if (!visited.add(cur.key())) {
                 continue;
+            }
+            if (isAtCaret(cur.tokenIndex())) {
+                caretTouches++;
             }
 
             if (cur.state().getStateType() == ATNState.RULE_STOP) {
@@ -213,7 +234,7 @@ public abstract class CompletionEngineBase {
         }
         for (int type : IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType).toList()) {
             if (!ignoredTokens.containsKey(type)) {
-                result.tokens.putIfAbsent(type, Collections.emptyList());
+                result.addToken(type, Collections.emptyList());
             }
         }
     }

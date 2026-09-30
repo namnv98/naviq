@@ -68,6 +68,13 @@
             <version>5.10.2</version>
             <scope>test</scope>
         </dependency>
+        <!-- ANTLR tool: test dựng grammar nhỏ lúc chạy (ParserInterpreter) để test CompletionEngine -->
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4</artifactId>
+            <version>${antlr4.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.vmware.antlr4-c3</groupId>
             <artifactId>antlr4-c3</artifactId>
