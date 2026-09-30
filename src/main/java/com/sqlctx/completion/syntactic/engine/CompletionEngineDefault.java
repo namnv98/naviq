@@ -20,7 +20,7 @@ public class CompletionEngineDefault extends CompletionEngineBase {
     }
 
     @Override
-    protected boolean isNullable(ATNState state) {
+    protected boolean canExitWithoutConsumingToken(ATNState state) {
         return canReachRuleEndWithoutToken(state);
     }
 

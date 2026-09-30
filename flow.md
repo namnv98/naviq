@@ -6,23 +6,61 @@ Bạn đang chơi 1 trò chơi: mỗi lượt bạn đứng ở **1 căn phòng*
 
 Để đi qua 1 cánh cửa, có 3 loại:
 
-1. **Cửa cần mật khẩu** — bạn phải nói đúng 1 từ cụ thể (vd phải nói "SELECT") thì cửa mới mở, và bạn *tốn 1 lượt nói*
+1. **Cửa cần mật khẩu** — bạn phải đưa đúng 1 từ cụ thể ra đối chiếu (vd đúng từ "SELECT") thì cửa mới mở, và bạn *dùng hết 1 từ trên giấy*
    để qua cửa đó.
-2. **Cửa miễn phí** — mở sẵn, bạn cứ bước qua, không cần nói gì, không tốn lượt nào cả.
+2. **Cửa miễn phí** — mở sẵn, bạn cứ bước qua, không cần đối chiếu gì, không tốn từ nào cả.
 3. **Cửa dẫn vào 1 mê cung con** — bước qua cửa này nghĩa là bạn phải đi hết 1 mê cung nhỏ khác trước (đi qua nhiều
-   phòng, nói nhiều mật khẩu khác), xong xuôi mới được quay lại mê cung chính, đúng tại điểm ngay sau cửa, để tiếp tục
+   phòng, đối chiếu nhiều mật khẩu khác), xong xuôi mới được quay lại mê cung chính, đúng tại điểm ngay sau cửa, để tiếp tục
    đi tiếp.
 
 **ATN chính là tấm bản đồ này.** Mỗi rule trong grammar là 1 mê cung. `RuleTransition` là "cửa dẫn vào mê cung con" (mê
 cung con = rule khác). Cửa miễn phí chính là cái người ta gọi là "epsilon" — chỉ là 1 cái tên kỹ thuật cho "cửa không
-cần nói gì".
+cần đối chiếu gì".
 
 ## Việc engine đang làm
 
-Bạn đưa cho engine 1 câu bạn đã nói (`SELECT name`), engine **giả vờ đi trong mê cung** đúng theo những từ đó — mỗi từ
-bạn nói khớp với đúng 1 cửa cần mật khẩu, nó bước qua. Khi bạn nói hết câu (caret), nó đang đứng ở **1 căn phòng cụ thể
-nào đó**. Lúc đó nó nhìn quanh phòng: *"phòng này có những cửa nào?"* — tên mật khẩu trên mỗi cửa đó chính là **gợi ý**
-cho bạn.
+Quan trọng: engine không nghe bạn *nói* theo thời gian thực. Toàn bộ câu SQL đã được gõ xong và tách sẵn thành 1 dãy
+**từ** (token) trước khi engine bắt đầu đi — giống như bạn đưa nó **1 tờ giấy đã viết sẵn** (`SELECT name`), không phải
+nghe bạn nói trực tiếp. Engine cầm tờ giấy đó, **giả vờ đi trong mê cung** từ đầu, đối chiếu lần lượt từng từ trên giấy
+với cửa mật khẩu trước mặt: khớp thì bước qua, gạch từ đó khỏi tờ giấy (dùng hết 1 từ). Khi tờ giấy hết từ (caret nằm ở
+đó), engine đang đứng ở **1 căn phòng cụ thể nào đó**. Lúc đó nó nhìn quanh phòng: *"phòng này có những cửa nào?"* —
+tên mật khẩu trên mỗi cửa đó chính là **gợi ý** cho bạn.
+
+### Ví dụ cụ thể: `SELECT name |` (caret sau `name`)
+
+Giả sử tờ giấy có 2 từ: `SELECT`, `name`, và caret nằm ngay sau `name` (chưa có từ thứ 3). Engine xuất phát từ phòng
+đầu mê cung `start`, đối chiếu lần lượt:
+
+| Bước | Đã đối chiếu xong tới từ nào | Đang đứng ở đâu | Thử cửa nào | Kết quả |
+|---|---|---|---|---|
+| 1 | (chưa từ nào) | Phòng đầu (`start`) | Cửa mật khẩu `SELECT` | Khớp từ #1 (`SELECT`) → bước qua, dùng hết 1 từ |
+| 2 | `SELECT` | Phòng sau `SELECT` | Cửa dẫn vào mê cung con `columnref` | Cửa miễn phí kiểu "vào mê cung con" → bước vào, không tốn từ |
+| 3 | `SELECT` | Cửa vào của `columnref` | Cửa mật khẩu `Identifier` | Khớp từ #2 (`name`) → bước qua, dùng hết 1 từ |
+| 4 | `SELECT`, `name` | Hết mê cung con `columnref` | — | Hết từ trên giấy đúng lúc chạm hết mê cung con → quay lại mê cung cha, đúng điểm ngay sau cửa vào `columnref` |
+| 5 | `SELECT`, `name` | Phòng ngay sau `columnref`, mê cung cha | Nhìn quanh: cửa nào đang mở? | VD cửa mật khẩu `FROM`, cửa dẫn vào mê cung con `AS`... → đó chính là **gợi ý** trả về |
+
+```mermaid
+flowchart LR
+    S([start]) -->|SELECT<br/>dùng hết 1 từ| P1([sau SELECT])
+    P1 -->|vào mê cung con<br/>columnref, không tốn từ| C0([cửa vào columnref])
+    C0 -->|Identifier = name<br/>dùng hết 1 từ| CEnd([hết columnref])
+    CEnd -->|hết từ trên giấy đúng lúc này<br/>quay lại mê cung cha, không tốn từ| P2(["sau columnref<br/>(HẾT TỪ — đứng lại đây)"])
+    P2 -.->|"cửa mở ở đây<br/>= gợi ý (FROM, AS, ...)"| G[["gợi ý"]]
+
+    style P2 fill:#fdf6b2,stroke:#b8860b
+    style G fill:#e6ffe6,stroke:#2e7d32
+```
+
+**Vì sao phải đi từ đầu (`start`), không nhảy thẳng vào phòng cuối cùng?** Vì phòng đang đứng ở caret phụ thuộc vào cả
+lịch sử đi qua trước đó — cùng đứng "sau `columnref`" nhưng đi từ 2 câu khác nhau thì mê cung cha có thể khác:
+
+| Câu | Ở caret, đứng "sau `columnref`" của... |
+|---|---|
+| `SELECT name \|` | mệnh đề `SELECT` (danh sách cột) → gợi ý tiếp theo là `FROM`, `,`, `AS`... |
+| `SELECT * FROM t WHERE name \|` | mệnh đề `WHERE` (biểu thức điều kiện) → gợi ý tiếp theo là `=`, `>`, `IS`, `AND`... |
+
+Không đi từ đầu thì không biết đang ở nhánh nào trong 2 nhánh đó — đây chính là lý do `computeExitsNotAtCaret`/
+`walkRuleBody` phải mô phỏng lại toàn bộ đường đi, không có đường tắt nào bỏ qua bước này.
 
 ## Sơ đồ minh hoạ
 
@@ -51,7 +89,7 @@ flowchart LR
 > dưới — tạm thời cứ đọc như thể nó không tồn tại cũng được, không ảnh hưởng tới lõi thuật toán dò cửa.
 
 **`collectCandidates(caretTokenIndex)`** — đây là lúc bạn bắt đầu ván chơi. Nó dọn sạch kết quả cũ, đọc lại toàn bộ
-những lời bạn đã nói (`readTokens`), rồi bước chân vào mê cung chính (rule gốc của grammar), tại đúng ô đầu tiên trên
+những từ bạn đã viết sẵn (`readTokens`), rồi bước chân vào mê cung chính (rule gốc của grammar), tại đúng ô đầu tiên trên
 bàn cờ (`tokenIndex = 0`), với 1 cuốn nhật ký còn trắng tinh (`new RuleCallStack()`). Mọi thứ xảy ra sau đó chỉ là hệ
 quả của 1 lời gọi duy nhất: `enterRule(start, 0, stack)`.
 
@@ -59,32 +97,32 @@ quả của 1 lời gọi duy nhất: `enterRule(start, 0, stack)`.
 lớp con đang dùng (`CompletionEngineDefault` hay `CompletionEngineWithFlowSet`), nhưng ý tưởng chung giống nhau: trước
 khi đi, nó tự hỏi *"mình đã từng đứng đúng chỗ này trong mê cung này chưa?"* Nếu rồi, khỏi mất công đi lại, lấy ngay kết
 quả cũ ra dùng (`ruleExitCache`). Nếu chưa, nó đánh dấu tạm "chỗ này coi như ngõ cụt" (phòng khi đi vòng quay lại đúng
-chỗ, khỏi lặp vô tận), ghi thêm rule này vào cuốn nhật ký, rồi mới thật sự đi: hết lời để nói thì nhìn quanh lấy gợi ý,
-còn lời thì dò cửa đi tiếp (`walkRuleBody`). Xong xuôi, nó xoá cái đánh dấu tạm, ghi đè bằng kết quả thật.
+chỗ, khỏi lặp vô tận), ghi thêm rule này vào cuốn nhật ký, rồi mới thật sự đi: hết từ đã viết thì nhìn quanh lấy gợi ý,
+còn từ chưa đối chiếu thì dò cửa đi tiếp (`walkRuleBody`). Xong xuôi, nó xoá cái đánh dấu tạm, ghi đè bằng kết quả thật.
 
 **`canExitWithoutConsumingToken(parser, start)`** — câu hỏi ở đây rất cụ thể: *"đứng ngay tại cửa vào mê cung này, tôi
-có thể coi như xong luôn mà không cần nói thêm lời nào không?"* Nó đi thử các cửa miễn phí và cửa vào mê cung con khác
-(đều không tốn lời), hễ chạm được "hết mê cung" thì đúng — trả lời có. Gặp cửa mật khẩu là dừng ngay nhánh đó, vì cửa
-mật khẩu đồng nghĩa "còn nợ ít nhất 1 lời". Hàm này không thuộc lõi thuật toán dò cửa — nó nằm riêng ở
+có thể coi như xong luôn mà không cần đối chiếu thêm gì không?"* Nó đi thử các cửa miễn phí và cửa vào mê cung con khác
+(đều không tốn từ nào), hễ chạm được "hết mê cung" thì đúng — trả lời có. Gặp cửa mật khẩu là dừng ngay nhánh đó, vì cửa
+mật khẩu đồng nghĩa "còn nợ ít nhất 1 từ". Hàm này không thuộc lõi thuật toán dò cửa — nó nằm riêng ở
 `feature/NullableRuleChecker.java`, chỉ cần `(Parser, ATNState)`, không đụng gì tới cuốn nhật ký hay token đã gõ, nên
 tách ra file riêng được.
 
 **`walkRuleBody(start, startTokenIndex, stack)`** — đây là màn dò đường thật sự bên trong 1 mê cung. Nó đi từng phòng
 một, và với mỗi phòng, xét hết các cửa của phòng đó rồi định tuyến sang đúng người xử lý cửa loại đó. Nếu 1 phòng nào
-chạm tới "hết mê cung" (`RULE_STOP`) đúng lúc hết lời, nó còn tranh thủ hỏi luôn "có phòng VIP nào trên đường đi không"
+chạm tới "hết mê cung" (`RULE_STOP`) đúng lúc hết từ, nó còn tranh thủ hỏi luôn "có phòng VIP nào trên đường đi không"
 (xem mục dưới), rồi mới ghi lại đây là 1 điểm có thể thoát ra.
 
-**`handleRuleDoor`** — xử lý đúng cửa vào mê cung con. Có 2 khả năng: nếu đã hết lời VÀ mê cung con này là "VIP", nó
+**`handleRuleDoor`** — xử lý đúng cửa vào mê cung con. Có 2 khả năng: nếu đã hết từ VÀ mê cung con này là "VIP", nó
 dùng đường tắt (xem mục "Phòng VIP"), không đi vào bên trong. Ngược lại, nó đi hết mê cung con đó bình thường (gọi lại
 `enterRule`), rồi bất kể đi ra ở đâu, luôn tiếp tục từ đúng điểm ngay sau cửa (`rt.followState`) trong mê cung chính.
 
 **`handleFreeDoorWithCondition`** và **`handleFreeDoor`** — đây là 2 kiểu cửa miễn phí: 1 loại có điều kiện đi kèm (mở
-nếu điều kiện đúng), 1 loại mở sẵn hoàn toàn. Cả 2 đều không tốn lời nói, chỉ là bước qua rồi tiếp tục.
+nếu điều kiện đúng), 1 loại mở sẵn hoàn toàn. Cả 2 đều không tốn từ nào, chỉ là bước qua rồi tiếp tục.
 
-**`handlePasswordDoor`** — đây là nơi mọi gợi ý *dạng token* thật sự được sinh ra. Nếu hết lời để nói rồi, trước tiên nó
+**`handlePasswordDoor`** — đây là nơi mọi gợi ý *dạng token* thật sự được sinh ra. Nếu hết từ đã viết rồi, trước tiên nó
 hỏi "phòng mình đang đứng có phải VIP không" — nếu có, chốt tên phòng VIP đó làm gợi ý, không liệt kê token trần trụi
-nữa. Nếu không, tên mật khẩu trên cửa này chính là gợi ý, trừ khi nó nằm trong danh sách bị bỏ qua. Nếu còn lời, nó so
-xem lời tiếp theo có đúng mật khẩu không — đúng thì bước qua (tốn 1 lời), sai thì im lặng, coi như ngõ cụt.
+nữa. Nếu không, tên mật khẩu trên cửa này chính là gợi ý, trừ khi nó nằm trong danh sách bị bỏ qua. Nếu còn từ, nó so
+xem từ tiếp theo có đúng mật khẩu không — đúng thì bước qua (dùng hết 1 từ), sai thì im lặng, coi như ngõ cụt.
 
 ## Vì sao phải đi từ đầu, không nhảy thẳng tới Caret
 
@@ -143,12 +181,12 @@ flowchart LR
 
 ### Đi từng bước qua sơ đồ trên
 
-**Bước 1 — `Bắt đầu → Phòng 1`**: nói `SELECT` (cửa mật khẩu), tốn 1 lời, bước qua.
+**Bước 1 — `Bắt đầu → Phòng 1`**: đối chiếu `SELECT` (cửa mật khẩu), khớp, dùng hết 1 từ, bước qua.
 
 **Bước 2 — `Phòng 1 → Điểm vào (columnref)`**: gặp cửa vào mê cung con — `enterRule()` được gọi đệ quy, đi vào mê cung
 `columnref`. Cuốn nhật ký ghi thêm: `[..., columnref]`.
 
-**Bước 3 — bên trong `M1`**: nói `Identifier` (tên cột đầu tiên), tốn 1 lời, chạm `Hết mê cung con` (`RULE_STOP` của
+**Bước 3 — bên trong `M1`**: đối chiếu `Identifier` (tên cột đầu tiên), khớp, dùng hết 1 từ, chạm `Hết mê cung con` (`RULE_STOP` của
 `columnref`).
 
 **Bước 4 — `quay lại mê cung chính`**: thoát mê cung con, code nhảy đúng tới `rt.followState` — chính là **Ngã rẽ 1**.
@@ -164,10 +202,10 @@ Cuốn nhật ký xoá dòng `columnref` vừa ghi (đã ra khỏi mê cung đó
 **Bước 7 — `Phòng sau FROM → Điểm vào (qualified_name)`**: lại 1 cửa vào mê cung con khác — đệ quy `enterRule()` lần
 nữa, lần này vào mê cung `qualified_name`.
 
-**Bước 8 — bên trong `M2`**: nói `Identifier` (tên bảng), chạm `Hết mê cung con`.
+**Bước 8 — bên trong `M2`**: đối chiếu `Identifier` (tên bảng), khớp, chạm `Hết mê cung con`.
 
 **Bước 9 — `quay lại mê cung chính`**: thoát mê cung con lần 2, nhảy tới `followState` mới — đây chính là **Ngã rẽ 2**,
-hoàn toàn khác Ngã rẽ 1 dù cùng "vừa nói xong 1 Identifier, hết từ".
+hoàn toàn khác Ngã rẽ 1 dù cùng "vừa đối chiếu xong 1 Identifier, hết từ".
 
 **Bước 10 — tại Ngã rẽ 2, nếu hết từ**: nhìn quanh thấy 2 cửa — `WHERE` và "kết thúc câu" (`EOF`/miễn phí) →
 `suggestedTokens = {WHERE, EOF}`.
@@ -183,21 +221,21 @@ nhau (ở đây là 3) không làm code phức tạp hơn, vì đó chỉ là c�
 
 ## Cử trinh sát đi trước: FollowSetsByState
 
-Mọi thứ nói ở trên (`walkRuleBody`, BFS sống) đều là **dò cửa ngay lúc đó**, dựa theo đúng những từ đã gõ. Nhưng có 1
-câu hỏi tách biệt hẳn, không phụ thuộc gì vào việc bạn đã nói gì: *"từ 1 căn phòng cho trước, XUYÊN QUA MỌI mê cung
-con lồng bên trong nó, cuối cùng có những cửa mật khẩu THẬT nào có thể chạm tới, mà không cần biết trước bạn sẽ nói
+Mọi thứ vừa nêu ở trên (`walkRuleBody`, BFS sống) đều là **dò cửa ngay lúc đó**, dựa theo đúng những từ đã gõ. Nhưng có 1
+câu hỏi tách biệt hẳn, không phụ thuộc gì vào việc tờ giấy viết gì: *"từ 1 căn phòng cho trước, XUYÊN QUA MỌI mê cung
+con lồng bên trong nó, cuối cùng có những cửa mật khẩu THẬT nào có thể chạm tới, mà không cần biết trước tờ giấy sẽ viết
 gì?"* Câu hỏi này chỉ phụ thuộc vào **tấm bản đồ** (ATN) — không phụ thuộc câu bạn gõ.
 
 Vì không phụ thuộc câu bạn gõ, ta có thể **cử 1 trinh sát đi trước, dò 1 lần, dùng lại mãi mãi** — không cần chờ tới
 lúc bạn thật sự gõ câu nào cả. Trinh sát lặng lẽ lặn xuyên qua mọi mê cung con của 1 phòng, ghi lại **báo cáo**: *"đứng
-ở phòng này, dù đi đường nào, sớm muộn cũng cần nói 1 trong những mật khẩu sau — và đây là đúng con đường tôi đã đi để
+ở phòng này, dù đi đường nào, sớm muộn cũng cần đối chiếu đúng 1 trong những mật khẩu sau — và đây là đúng con đường tôi đã đi để
 tìm ra từng cái."* Bạn không cần tự đi lại đường đó nữa, cứ giở báo cáo trinh sát ra mà dùng. Đây chính là việc
 `FollowSetsByState` làm, và nó chỉ được `CompletionEngineWithFlowSet` dùng (không phải `CompletionEngineDefault`).
 
 ```mermaid
 flowchart TD
     RS(["RULE_START của phòng R"]) -->|miễn phí| S1(["Phòng S1"])
-    S1 -->|" cửa vào mê cung con M<br/>(không tốn lời) "| M0(["Điểm vào M"])
+    S1 -->|" cửa vào mê cung con M<br/>(không tốn từ) "| M0(["Điểm vào M"])
 
     subgraph MAZE [" Trinh sát lặn xuyên qua mê cung con M "]
         M0 -->|" Identifier<br/>mật khẩu THẬT "| M1(["Hết mê cung con M"])
@@ -205,7 +243,7 @@ flowchart TD
 
     M1 -->|" quay lại R,<br/>đúng tại followState "| S2(["Phòng S2"])
     S2 -->|" COMMA<br/>mật khẩu THẬT "| E1[["Báo cáo trinh sát #1:<br/>mật khẩu = COMMA<br/>đường đi = [M]"]]
-    S2 -->|" miễn phí,<br/>chạm RULE_STOP của R "| E2[["Báo cáo trinh sát #2:<br/>'ra được luôn, không cần nói gì'<br/>(mật khẩu giả EPSILON)<br/>đường đi = []"]]
+    S2 -->|" miễn phí,<br/>chạm RULE_STOP của R "| E2[["Báo cáo trinh sát #2:<br/>'ra được luôn, không cần đối chiếu gì'<br/>(mật khẩu giả EPSILON)<br/>đường đi = []"]]
     E1 --> COMBINED[["Bảng tóm tắt nhanh (combined):<br/>{COMMA, EPSILON}<br/>+ cả tập báo cáo chi tiết từng đường đi"]]
     E2 --> COMBINED
 ```
@@ -219,7 +257,7 @@ Vài điểm quan trọng trong sơ đồ:
   "Phòng VIP": `generateSuggestionsFromFollowSets` ghép đường đi này với nhật ký hiện tại rồi gọi `resolve` y hệt cách
   lưới an toàn hoạt động — chỉ khác là không cần dò sống, đọc thẳng từ báo cáo trinh sát đã có sẵn).
 - Nếu trinh sát lặn tới tận `RULE_STOP` của chính `R` (không cần mở thêm cửa mật khẩu nào), báo cáo ghi lại: *"phòng
-  này ra được luôn, không cần nói gì cả"* — dấu hiệu phòng này **nullable**, biểu diễn bằng 1 "mật khẩu giả" tên
+  này ra được luôn, không cần đối chiếu gì cả"* — dấu hiệu phòng này **nullable**, biểu diễn bằng 1 "mật khẩu giả" tên
   `EPSILON`. Đây chính là chỗ `canExitWithoutConsumingToken` có thể "ăn theo": hỏi thẳng bảng tóm tắt xem có báo cáo
   nào mang mật khẩu giả này không, khỏi cần cử trinh sát đi dò lại lần nữa.
 - Tất cả báo cáo gộp lại thành **1 bảng tóm tắt nhanh** (`combined` — tập hợp mọi mật khẩu từng gặp được, không phân
@@ -240,7 +278,7 @@ flowchart TD
     Dispatch --> Store[["Cất hồ sơ vào văn phòng<br/>(theo đúng phòng + danh sách bỏ qua)"]]
 ```
 
-`enterRule` gọi `ensureComputed` ở **mọi lần** bước vào 1 phòng (cả lúc còn lời lẫn tại caret) — nhưng bản thân
+`enterRule` gọi `ensureComputed` ở **mọi lần** bước vào 1 phòng (cả lúc còn từ lẫn tại caret) — nhưng bản thân
 `ensureComputed` chỉ thật sự cử trinh sát đi khi văn phòng **chưa có hồ sơ** cho đúng cặp (phòng, danh sách bỏ qua)
 này. Nếu có rồi, nó trả về ngay, không làm gì thêm.
 
@@ -268,29 +306,29 @@ Vài hệ quả thực tế đáng chú ý:
 
 ```mermaid
 flowchart LR
-    Q{Đang xử lý<br/>1 phòng R} --> Q1{Còn lời<br/>để nói?}
+    Q{Đang xử lý<br/>1 phòng R} --> Q1{Còn từ<br/>để đối chiếu?}
     Q1 -->|" Có "| CHECK{"Từ tiếp theo có tên<br/>trong bảng tóm tắt không?<br/>(hoặc phòng nullable)"}
     CHECK -->|Không| SKIP[["Ngõ cụt chắc chắn —<br/>KHỎI dò cửa sống,<br/>trinh sát đã xác nhận rồi"]]
     CHECK -->|Có| WALK[["Vẫn phải dò cửa sống như bình thường<br/>(walkRuleBody) — báo cáo chỉ nói<br/>'có khả năng', không nói 'đi tiếp thế nào'"]]
-    Q1 -->|" Hết lời<br/>(tại caret) "| READ[["Đọc THẲNG từ báo cáo trinh sát —<br/>generateSuggestionsFromFollowSets<br/>KHỎI dò cửa sống lại nữa"]]
+    Q1 -->|" Hết từ<br/>(tại caret) "| READ[["Đọc THẲNG từ báo cáo trinh sát —<br/>generateSuggestionsFromFollowSets<br/>KHỎI dò cửa sống lại nữa"]]
 ```
 
-- **Còn lời**: báo cáo trinh sát chỉ dùng để **cắt sớm** (kiểm tra rẻ, khỏi tốn công dò BFS nếu biết chắc ngõ cụt) —
+- **Còn từ**: báo cáo trinh sát chỉ dùng để **cắt sớm** (kiểm tra rẻ, khỏi tốn công dò BFS nếu biết chắc ngõ cụt) —
   nếu có khả năng khớp thì vẫn phải `walkRuleBody` thật để biết chính xác đi tiếp được tới đâu (báo cáo chỉ nói "có
   khả năng", không nói "đi thế nào tiếp").
-- **Hết lời (tại caret)**: báo cáo trinh sát dùng **thay thế hoàn toàn** cho `walkRuleBody` — đọc thẳng danh sách "mật
+- **Hết từ (tại caret)**: báo cáo trinh sát dùng **thay thế hoàn toàn** cho `walkRuleBody` — đọc thẳng danh sách "mật
   khẩu + đường đi" đã có sẵn, ghép với nhật ký hiện tại, xong việc — không cần dò sống lại từ đầu.
 
 ### 1 cải tiến nhỏ so với bản C3 gốc: "nghỉ đúng chỗ" khi mê cung con nullable
 
-Có 1 tình huống dễ bỏ sót: nếu mê cung con `M` (ở sơ đồ trên) tự nó cũng *nullable* (ra khỏi được `M` mà không cần nói
+Có 1 tình huống dễ bỏ sót: nếu mê cung con `M` (ở sơ đồ trên) tự nó cũng *nullable* (ra khỏi được `M` mà không cần đối chiếu
 gì), thì sau khi "hết mê cung con M", trinh sát phải **quay đúng lại `followState` của R** (chỗ ngay sau cửa vào M) để
 lặn tiếp, chứ không phải dừng khựng lại tại chỗ `RULE_STOP` của `M`. Bản đồ dưới đây minh hoạ:
 
 ```mermaid
 flowchart TD
     S1(["Phòng S1 của R"]) -->|" cửa vào mê cung con M<br/>(nullable) "| M0(["Điểm vào M"])
-    subgraph MAZE2 [" M — nullable, không cần nói gì cũng ra được "]
+    subgraph MAZE2 [" M — nullable, không cần đối chiếu gì cũng ra được "]
         M0 -->|miễn phí| MSTOP(["RULE_STOP của M"])
     end
     MSTOP -->|" trinh sát PHẢI quay lại đúng<br/>followState của R "| S2(["Phòng S2 của R<br/>(chỗ ngay sau cửa vào M)"])
@@ -323,44 +361,44 @@ nhật ký của nhánh khác bị sai. Vì vậy mỗi `PipelineEntry` trong h�
 vào bản copy đó, không sửa trực tiếp bản gốc. Nhờ vậy, dù có bao nhiêu nhánh sống song song, mỗi nhánh vẫn "nhớ" đúng
 và chỉ đúng con đường của riêng nó.
 
-### Một tính chất then chốt: "hết lời" là ngưỡng một chiều
+### Một tính chất then chốt: "hết từ" là ngưỡng một chiều
 
-Một khi 1 nhánh nào đó đã **hết lời để nói** (chạm caret), nó **không thể nào "có lời trở lại"** trên chính nhánh đó
-nữa — vì muốn có thêm lời để nói thì phải tốn thêm 1 từ thật (đi qua 1 cửa mật khẩu), mà hết lời rồi thì làm gì còn từ
-nào để tốn. Cửa miễn phí và cửa vào mê cung con (theo đường tắt VIP) đều không tốn lời, nên chúng không đảo ngược được
+Một khi 1 nhánh nào đó đã **hết từ đã viết** (chạm caret), nó **không thể nào "có từ trở lại"** trên chính nhánh đó
+nữa — vì muốn có thêm từ để đối chiếu thì phải dùng thêm 1 từ thật (đi qua 1 cửa mật khẩu), mà hết từ rồi thì làm gì còn từ
+nào để dùng. Cửa miễn phí và cửa vào mê cung con (theo đường tắt VIP) đều không tốn từ, nên chúng không đảo ngược được
 điều này.
 
-Hệ quả: trên mỗi nhánh, có **đúng 1 khoảnh khắc** chuyển từ "còn lời" sang "hết lời" — và khoảnh khắc đó xảy ra ở
+Hệ quả: trên mỗi nhánh, có **đúng 1 khoảnh khắc** chuyển từ "còn từ" sang "hết từ" — và khoảnh khắc đó xảy ra ở
 **đúng 1 vị trí cụ thể** trong tấm bản đồ (hoặc đúng lúc chuẩn bị bước qua 1 cửa vào mê cung con, hoặc đúng lúc đang
 đứng giữa/cuối 1 mê cung bình thường). Toàn bộ cơ chế phòng VIP dưới đây chỉ xoay quanh việc: *"đúng tại khoảnh khắc
 đó, mình đang đứng ở đâu, và có phòng VIP nào liên quan không?"*
 
-### Đường tắt — khi vừa chạm ĐÚNG cửa vào 1 phòng VIP, đúng lúc hết lời
+### Đường tắt — khi vừa chạm ĐÚNG cửa vào 1 phòng VIP, đúng lúc hết từ
 
 ```mermaid
 flowchart TD
-    R1([Phòng bình thường]) -->|" cửa vào phòng VIP<br/>ĐÚNG LÚC hết lời "| shortcut[["Dừng ngay tại đây.<br/>Ghi nhận: gợi ý = tên phòng VIP này.<br/>KHÔNG bước chân vào bên trong."]]
+    R1([Phòng bình thường]) -->|" cửa vào phòng VIP<br/>ĐÚNG LÚC hết từ "| shortcut[["Dừng ngay tại đây.<br/>Ghi nhận: gợi ý = tên phòng VIP này.<br/>KHÔNG bước chân vào bên trong."]]
     style shortcut fill: #cfc
 ```
 
-Đây là việc `handleRuleDoor` làm: nếu đang **đúng tại caret** (không còn lời) VÀ cửa này dẫn vào 1 phòng VIP, nó
+Đây là việc `handleRuleDoor` làm: nếu đang **đúng tại caret** (không còn từ) VÀ cửa này dẫn vào 1 phòng VIP, nó
 **không** đi vào bên trong phòng đó nữa (dù bên trong có phòng VIP con cháu nào khác cũng mặc kệ — đứng ngoài cửa đã đủ
 để trả lời "bạn cần điền 1 thứ thuộc loại phòng này" rồi, không cần biết chi tiết y hệt bên trong nó là gì). Nó chỉ cần
-hỏi thêm đúng 1 câu phụ: *"phòng VIP này có thể coi như 'rỗng' không (chỉ cần bước vào là xong, không cần nói thêm
+hỏi thêm đúng 1 câu phụ: *"phòng VIP này có thể coi như 'rỗng' không (chỉ cần bước vào là xong, không cần đối chiếu thêm
 gì)?"*
 — dùng đúng `canExitWithoutConsumingToken` đã nói ở trên — để biết có nên tiếp tục đi qua `followState` hay dừng hẳn
 (chưa đủ để hoàn thành phòng VIP đó).
 
-### Lưới an toàn dự phòng — khi hết lời mà KHÔNG phải đúng lúc vừa chạm cửa VIP
+### Lưới an toàn dự phòng — khi hết từ mà KHÔNG phải đúng lúc vừa chạm cửa VIP
 
-Không phải lúc nào "hết lời" cũng rơi đúng ngay cửa vào 1 phòng VIP. Có thể bạn đã bước vào phòng VIP từ trước (lúc đó
-còn lời, nên không dùng đường tắt), đi sâu thêm vài bước bình thường bên trong nó, rồi **mới** hết lời — hoặc hết lời
+Không phải lúc nào "hết từ" cũng rơi đúng ngay cửa vào 1 phòng VIP. Có thể bạn đã bước vào phòng VIP từ trước (lúc đó
+còn từ, nên không dùng đường tắt), đi sâu thêm vài bước bình thường bên trong nó, rồi **mới** hết từ — hoặc hết từ
 ngay khi chạm 1 cửa mật khẩu/wildcard bình thường, chẳng liên quan trực tiếp gì tới phòng VIP nào cả.
 
 ```mermaid
 flowchart TD
-    R1([Phòng bình thường]) -->|" cửa vào phòng VIP<br/>NHƯNG CÒN LỜI "| GEinside["Bước vào bình thường<br/>(ghi tên phòng VIP vào nhật ký,<br/>KHÔNG dùng đường tắt vì chưa hết lời)"]
-    GEinside -->|còn lời, tốn 1 từ nữa| deeper[Sâu hơn bên trong]
+    R1([Phòng bình thường]) -->|" cửa vào phòng VIP<br/>NHƯNG CÒN TỪ "| GEinside["Bước vào bình thường<br/>(ghi tên phòng VIP vào nhật ký,<br/>KHÔNG dùng đường tắt vì chưa hết từ)"]
+    GEinside -->|còn từ, dùng thêm 1 từ nữa| deeper[Sâu hơn bên trong]
     deeper -->|" đúng từ NÀY là từ cuối "| hitCaret{{"Giờ mới HẾT LỜI —<br/>đang đứng ở đây, KHÔNG phải<br/>ngay cửa vào 1 phòng VIP nào"}}
     hitCaret -->|" chạm RULE_STOP,<br/>hoặc cửa mật khẩu, hoặc wildcard "| fallback[["Quét lại TOÀN BỘ nhật ký,<br/>từ ngoài vào trong,<br/>tìm phòng VIP GẦN NGOÀI NHẤT<br/>đã từng đi qua"]]
     style fallback fill: #ccf
@@ -368,7 +406,7 @@ flowchart TD
 
 Đây là việc `resolve()` (trong `PreferredRuleResolver`) làm — được gọi tại đúng 3 chỗ trong `walkRuleBody`:
 `RULE_STOP`, cửa mật khẩu (`handlePasswordDoor`), và cửa wildcard (`handleWildcardDoor`) — tức là 3 nơi BFS **thực sự
-chạm đáy** đúng lúc hết lời. Nó quét cuốn nhật ký của đúng nhánh đang đứng, **từ ngoài vào trong**, và dừng ngay ở
+chạm đáy** đúng lúc hết từ. Nó quét cuốn nhật ký của đúng nhánh đang đứng, **từ ngoài vào trong**, và dừng ngay ở
 phòng VIP đầu tiên gặp — đảm bảo luôn chọn phòng VIP bao ngoài nhất, không bao giờ chọn nhầm 1 phòng VIP con cháu nằm
 sâu hơn.
 
@@ -381,19 +419,19 @@ sâu hơn.
 > lưới an toàn gọi `resolve()` tại 3 điểm "chạm đáy" (`RULE_STOP`/cửa mật khẩu/wildcard), với nhật ký của đúng trạng
 > thái hiện tại (`cur.stack()`). Cùng 1 hàm, khác chỗ gọi và khác dữ liệu đưa vào.
 
-Đường tắt và lưới an toàn **không bao giờ cùng chạy cho cùng 1 lần hết-lời trên cùng 1 nhánh** — vì lý do rất đơn giản:
+Đường tắt và lưới an toàn **không bao giờ cùng chạy cho cùng 1 lần hết-từ trên cùng 1 nhánh** — vì lý do rất đơn giản:
 
 Đường tắt, một khi đã chạy và `resolve()` trả về `true` (tìm thấy phòng VIP), **chặn đứng hoàn toàn** việc đi sâu thêm
 vào phòng VIP đó (`return` ngay, không gọi `enterRule`/`walkRuleBody` cho nó nữa). Nên nếu đường tắt đã xử lý xong 1
 phòng VIP, BFS **không bao giờ có cơ hội** đi tiếp vào bên trong để chạm `RULE_STOP`/cửa mật khẩu bên trong phòng đó —
 nghĩa là lưới an toàn không bao giờ được gọi cho phần bên trong phòng VIP đã bị đường tắt xử lý.
 
-Ngược lại, nếu tại đúng khoảnh khắc hết lời, cửa đang đứng trước **không phải** cửa vào 1 phòng VIP (mà là 1 phòng
+Ngược lại, nếu tại đúng khoảnh khắc hết từ, cửa đang đứng trước **không phải** cửa vào 1 phòng VIP (mà là 1 phòng
 bình thường, hoặc đang đứng giữa 1 phòng VIP đã bước vào từ trước) — đường tắt không có cơ hội chạy (điều kiện `atCaret
 && preferred` sai ngay từ đầu, hoặc `resolve()` trả về `false` vì không có phòng VIP nào trên nhật ký) — nên BFS cứ đi
 tiếp bình thường, cho tới khi chạm đáy thật sự, lúc đó lưới an toàn mới vào cuộc.
 
-Nói ngắn gọn: **đúng 1 khoảnh khắc hết-lời trên mỗi nhánh, code hỏi đúng 1 câu duy nhất trước tiên** — *"cửa mình
+Nói ngắn gọn: **đúng 1 khoảnh khắc hết-từ trên mỗi nhánh, code hỏi đúng 1 câu duy nhất trước tiên** — *"cửa mình
 sắp/đang đứng trước có phải VIP không?"* — nếu có, đường tắt chiếm quyền và dừng lại ngay; nếu không, cứ đi tiếp cho
 tới khi chạm đáy rồi mới cần lưới an toàn quét lại nhật ký.
 
@@ -404,10 +442,10 @@ Grammar lồng 3 tầng: `general_element` (GE, VIP) gọi `id_expression` (IDE,
 - **Câu 1**: caret rơi đúng ngay lúc chuẩn bị bước qua cửa vào GE (chưa tốn thêm từ nào để vào sâu bên trong) → đường
   tắt chạy ngay tại cửa GE → ghi nhận **GE**, dừng, không bao giờ chạm tới IDE hay RID (chúng nằm bên trong GE, mà BFS
   chưa từng bước chân vào GE).
-- **Câu 2**: caret rơi muộn hơn — BFS đã thật sự bước vào GE (lúc đó còn lời, không dùng đường tắt), đi sâu thêm vào
-  bên trong, bước tiếp vào IDE (cũng còn lời), rồi *đúng lúc* chuẩn bị bước qua cửa vào RID mới hết lời → đường tắt
+- **Câu 2**: caret rơi muộn hơn — BFS đã thật sự bước vào GE (lúc đó còn từ, không dùng đường tắt), đi sâu thêm vào
+  bên trong, bước tiếp vào IDE (cũng còn từ), rồi *đúng lúc* chuẩn bị bước qua cửa vào RID mới hết từ → đường tắt
   chạy tại cửa RID → ghi nhận **RID**, không phải GE hay IDE (dù cả 2 đã được ghi vào nhật ký, nhưng chúng không phải
-  cửa đang đứng trước đúng lúc hết lời).
+  cửa đang đứng trước đúng lúc hết từ).
 
 Không có mâu thuẫn: GE, IDE, RID không bao giờ *cùng* xuất hiện làm gợi ý cho *cùng 1 vị trí caret* — vị trí caret khác
 nhau (Câu 1 vs Câu 2) dẫn tới phòng VIP được chọn khác nhau, đúng theo đúng nơi caret thực sự đang đứng.
@@ -432,17 +470,17 @@ nhau (Câu 1 vs Câu 2) dẫn tới phòng VIP được chọn khác nhau, đún
 
 ## Hai khái niệm còn lại: "đã đi qua chưa" và "có thể coi như xong không"
 
-**"Đã đi qua đúng chỗ này chưa?"** — mỗi mê cung, tại mỗi vị trí lời nói cụ thể, chỉ cần dò 1 lần. Lần sau có ai (kể cả
+**"Đã đi qua đúng chỗ này chưa?"** — mỗi mê cung, tại mỗi vị trí đối chiếu cụ thể, chỉ cần dò 1 lần. Lần sau có ai (kể cả
 1 nhánh khác) hỏi lại đúng câu đó, cứ trả lời y hệt lần trước, khỏi dò lại. Đây là `ruleExitCache` trong code — nó nhớ
-đúng theo cặp (mê cung, vị trí lời nói), và có 1 mẹo nhỏ: trong lúc đang dò dở, nó tạm ghi "coi như ngõ cụt" vào chỗ nhớ
+đúng theo cặp (mê cung, vị trí đối chiếu), và có 1 mẹo nhỏ: trong lúc đang dò dở, nó tạm ghi "coi như ngõ cụt" vào chỗ nhớ
 đó trước, để nếu lỡ đi vòng quay lại đúng chỗ đang dở này (mê cung có đường vòng), nó không bị lặp mãi — dò xong thật sự
 rồi mới ghi đè lại bằng kết quả thật.
 
-**"Mê cung này có thể coi như xong ngay không, dù chưa nói thêm gì?"** — có những mê cung mà bạn vừa bước vào là có thể
+**"Mê cung này có thể coi như xong ngay không, dù tờ giấy chưa hết từ?"** — có những mê cung mà bạn vừa bước vào là có thể
 coi như xong luôn (không phải cửa nào cũng bắt buộc phải mở), nhờ toàn đường miễn phí dẫn thẳng ra ngoài. Đây là
 `NullableRuleChecker.canExitWithoutConsumingToken()` — nó chỉ đi theo cửa miễn phí (và cửa vào mê cung con khác, vì cửa
-đó cũng không tốn lời) để dò xem có lối nào ra ngoài mà không cần mở cửa mật khẩu nào không. Nếu KHÔNG có lối như vậy,
-thì mê cung cha phải hiểu là "còn nợ ít nhất 1 lời nữa bên trong", và không được phép coi như xong. Câu hỏi này dùng ở
+đó cũng không tốn từ) để dò xem có lối nào ra ngoài mà không cần mở cửa mật khẩu nào không. Nếu KHÔNG có lối như vậy,
+thì mê cung cha phải hiểu là "còn nợ ít nhất 1 từ nữa bên trong", và không được phép coi như xong. Câu hỏi này dùng ở
 2 chỗ: (1) đường tắt VIP trong `handleRuleDoor` (đã nói ở trên), và (2) về mặt lý thuyết, nó cho cùng kết quả với việc
 hỏi thẳng báo cáo trinh sát xem có tờ nào mang "mật khẩu giả" `EPSILON` không (`combined.contains(Token.EPSILON)`) —
 nếu engine đã cử trinh sát đi trước rồi (như `CompletionEngineWithFlowSet`), hỏi thẳng báo cáo đó rẻ hơn là dò sống lại.
@@ -451,7 +489,7 @@ nếu engine đã cử trinh sát đi trước rồi (như `CompletionEngineWith
 
 Một câu hỏi hay: *"nó có duyệt hết mọi nhánh của ATN không, hay chỉ đi theo đúng từ kế tiếp?"*
 
-Câu trả lời: **còn từ để nói thì lọc chặt, chỉ hết từ (tại caret) mới buộc phải liệt kê hết**.
+Câu trả lời: **còn từ để đối chiếu thì lọc chặt, chỉ hết từ (tại caret) mới buộc phải liệt kê hết**.
 
 Nhìn `handlePasswordDoor` (rút gọn, bỏ phần xử lý VIP để thấy rõ phần lọc):
 
@@ -459,7 +497,7 @@ Nhìn `handlePasswordDoor` (rút gọn, bỏ phần xử lý VIP để thấy r�
 }else if(label.contains(tokens.get(cur.tokenIndex()).
 
 type())){
-        // Còn lời để nói: đúng mật khẩu thì bước qua, tốn 1 lời.
+        // Còn từ chưa đối chiếu: đúng mật khẩu thì bước qua, dùng hết 1 từ.
         queue.
 
 push(new PipelineEntry(t.target, cur.tokenIndex() +1,cur.
@@ -471,7 +509,7 @@ stack()));
 
 Với 1 phòng có nhiều cửa mật khẩu khác nhau, chỉ cửa nào trùng đúng tên với từ kế tiếp mới được push tiếp — cửa còn lại
 bị lờ đi ngay, không vào hàng đợi BFS nữa. Ngược lại, 2 loại cửa còn lại thì **luôn đi, không cần kiểm tra gì**, vì
-chúng không tốn lời:
+chúng không tốn từ nào:
 
 ```java
 protected void handleFreeDoor(Transition t, PipelineEntry cur, Deque<PipelineEntry> queue) {
@@ -485,7 +523,7 @@ lại trong hàng đợi làm gợi ý (trừ khi phòng đang đứng là VIP �
 
 | Giai đoạn          | Cửa mật khẩu                                     | Cửa miễn phí / vào mê cung con                                              |
 |--------------------|--------------------------------------------------|-----------------------------------------------------------------------------|
-| Còn từ để nói      | Lọc chặt — chỉ đi đúng cửa khớp từ kế tiếp       | Luôn đi, không cần lọc                                                      |
+| Còn từ để đối chiếu | Lọc chặt — chỉ đi đúng cửa khớp từ kế tiếp       | Luôn đi, không cần lọc                                                      |
 | Hết từ (tại caret) | Liệt kê hết (hoặc chốt tên phòng VIP), không lọc | Luôn đi (không tạo gợi ý, chỉ dẫn đường), trừ đường tắt VIP có thể dừng sớm |
 
 ### Nhưng vẫn có lúc 1 từ khớp được nhiều cửa cùng lúc
@@ -514,6 +552,6 @@ vd `WHERE`/`EOF`) **lẫn** gợi ý từ nhánh B (`DOT`) — cả 2 xuất hi�
 được thắng", nó chỉ đơn giản là **mỗi nhánh đang sống tự lọc theo từ kế tiếp cho riêng nó, với đúng cuốn nhật ký của
 riêng nó** — và nếu nhiều nhánh cùng sống, cùng khớp, thì tất cả cùng tiếp tục.
 
-Không có gì thần bí cả — toàn bộ `CompletionEngineBase` (cùng các file `feature/` đi kèm) chỉ đang làm đúng 1 việc:
-**đi theo đúng những từ bạn đã gõ trong tấm bản đồ đó, rồi khi hết từ để đi, nhìn quanh xem còn cửa nào mở, và nếu
+Không có gì thần bí cả — toàn bộ `CompletionEngineBase` (cùng các file `support/` đi kèm) chỉ đang làm đúng 1 việc:
+**đi theo đúng những từ đã viết sẵn trên giấy, rồi khi hết từ để đối chiếu, nhìn quanh xem còn cửa nào mở, và nếu
 đang đứng trong 1 phòng VIP thì chốt luôn tên phòng đó** — kết quả của toàn bộ hành trình chính là gợi ý trả về.

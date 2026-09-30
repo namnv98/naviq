@@ -47,7 +47,7 @@ public class CompletionEngineWithFlowSet extends CompletionEngineBase {
     }
 
     @Override
-    protected boolean isNullable(ATNState state) {
+    protected boolean canExitWithoutConsumingToken(ATNState state) {
         return followSetsOf(state).combined().contains(Token.EPSILON);
     }
 
