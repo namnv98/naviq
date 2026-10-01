@@ -54,12 +54,14 @@ public class OracleSuggestionService implements SuggestionService {
             cursorCharPos = sql.length();
         }
         int cursorOffset = cursorCharPos;
-        OracleSemanticAnalyzer.Result semanticResult = OracleSemanticAnalyzer.analyze(sql, cursorOffset);
-
         char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length()) ? sql.charAt(cursorOffset - 1) : ' ';
         boolean stillMidIdentifier = Character.isLetterOrDigit(charBeforeCursor) || charBeforeCursor == '_';
         int syntacticCursor = stillMidIdentifier ? cursorOffset - 1 : cursorOffset;
         OracleSyntacticAnalyzer.Result syntacticResults = OracleSyntacticAnalyzer.analyze(sql, syntacticCursor);
+        // tầng cú pháp chạy TRƯỚC: nó biết tại caret grammar cho phép loại token nào, tầng ngữ nghĩa
+        // chèn token giả đúng loại đó để parse không vỡ (vd "varchar(|)" chỉ nhận số)
+        int caretTokenType = OracleSyntacticAnalyzer.caretTokenTypeToInsert(syntacticResults.candidates());
+        OracleSemanticAnalyzer.Result semanticResult = OracleSemanticAnalyzer.analyze(sql, cursorOffset, caretTokenType);
 
         for (var entry : syntacticResults.candidates().tokens.entrySet()) {
             int tokenType = entry.getKey();

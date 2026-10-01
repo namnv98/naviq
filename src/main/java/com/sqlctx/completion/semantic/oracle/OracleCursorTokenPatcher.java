@@ -2,6 +2,7 @@ package com.sqlctx.completion.semantic.oracle;
 
 import com.sqlctx.antlr4.oracle.PlSqlLexer;
 import com.sqlctx.antlr4.oracle.PlSqlParser;
+import com.sqlctx.completion.semantic.CaretToken;
 import org.antlr.v4.runtime.*;
 
 import java.util.ArrayList;
@@ -17,7 +18,7 @@ import java.util.List;
  * token đó làm điểm mốc.
  * <p>
  * - Nếu cursor rơi vào KHOẢNG TRỐNG giữa 2 token (không thuộc token DEFAULT_CHANNEL nào)
- * -> chèn 1 CommonToken giả (kiểu REGULAR_ID) vào ĐÚNG vị trí đó trong danh sách token,
+ * -> chèn 1 {@link CaretToken} (kiểu REGULAR_ID) vào ĐÚNG vị trí đó trong danh sách token,
  * rồi dựng lại token stream từ danh sách đã chèn qua ListTokenSource.
  * <p>
  * SỬA LẦN NÀY: bản trước dùng nhầm PostgreSQLLexer/PostgreSQLParser (chỉ đổi tên class/package,
@@ -28,11 +29,6 @@ import java.util.List;
  * CLOSE_PAREN/DOT của Postgres).
  */
 public final class OracleCursorTokenPatcher {
-    /**
-     * Text placeholder chèn vào SQL - chọn 1 chuỗi gần như không thể trùng input thật.
-     */
-    public static final String CURSOR_PLACEHOLDER = "zzzcursorzzz";
-
     private OracleCursorTokenPatcher() {
     }
 
@@ -43,7 +39,12 @@ public final class OracleCursorTokenPatcher {
     ) {
     }
 
-    public static PatchResult patch(String sql, int cursorOffset) {
+    /**
+     * @param caretTokenType loại token giả chèn vào khoảng trống tại caret - do tầng cú pháp chọn theo
+     *                       những gì grammar cho phép ở đó (xem OracleSyntacticAnalyzer.caretTokenTypeToInsert).
+     *                       Sau dấu chấm cụt thì luôn là định danh.
+     */
+    public static PatchResult patch(String sql, int cursorOffset, int caretTokenType) {
         CharStream input = CharStreams.fromString(sql);
         PlSqlLexer lexer = new PlSqlLexer(input);
         // Không tắt thì ký tự lạ (vd '\' của meta-command CLI) khiến ANTLR in "token recognition error..."
@@ -91,26 +92,18 @@ public final class OracleCursorTokenPatcher {
         if (reuseRealToken && tokens.get(caretIdx).getType() == PlSqlParser.PERIOD) {
             // "o.|" - dấu chấm CỤT: grammar Oracle bắt buộc id_expression ngay sau PERIOD, nên nếu
             // để nguyên thì lỗi cú pháp ở đây khiến ANTLR bỏ cả subquery đang chứa nó (bug thật:
-            // "... IN (select 1 from orders o where o.|)" mất alias o). Chèn placeholder NGAY SAU dấu
-            // chấm để thành "o.zzzcursorzzz" hợp lệ; caret vẫn trỏ vào dấu chấm vì
+            // "... IN (select 1 from orders o where o.|)" mất alias o). Chèn CaretToken NGAY SAU dấu
+            // chấm để thành "o.<định danh>" hợp lệ; caret vẫn trỏ vào dấu chấm vì
             // OracleSemanticAnalyzer.detect() dựa vào đó để nhận ra qualifier.
             Token dot = tokens.get(caretIdx);
-            CommonToken placeholder = new CommonToken(
-                    tokenSource, PlSqlParser.REGULAR_ID, Token.DEFAULT_CHANNEL,
-                    dot.getStopIndex() + 1, dot.getStopIndex() + CURSOR_PLACEHOLDER.length());
-            placeholder.setText(CURSOR_PLACEHOLDER);
-            working.add(caretIdx + 1, placeholder);
+            working.add(caretIdx + 1, new CaretToken(tokenSource, PlSqlParser.REGULAR_ID, dot.getStopIndex() + 1));
             finalCaretIdx = caretIdx;
             patched = true;
         } else if (reuseRealToken) {
             finalCaretIdx = caretIdx;
             patched = false;
         } else {
-            CommonToken placeholder = new CommonToken(
-                    tokenSource, PlSqlParser.REGULAR_ID, Token.DEFAULT_CHANNEL,
-                    cursorOffset, cursorOffset + CURSOR_PLACEHOLDER.length() - 1);
-            placeholder.setText(CURSOR_PLACEHOLDER);
-            working.add(gapInsertAt, placeholder);
+            working.add(gapInsertAt, new CaretToken(tokenSource, caretTokenType, cursorOffset));
             finalCaretIdx = gapInsertAt;
             patched = true;
         }

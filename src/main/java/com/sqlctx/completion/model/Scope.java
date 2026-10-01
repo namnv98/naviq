@@ -70,6 +70,18 @@ public class Scope implements DerivedScope {
         this.parent = parent;
     }
 
+    /**
+     * Bỏ mọi tên rỗng (alias, bảng, CTE, cột chiếu ra). Tên SQL thật không bao giờ rỗng; tên rỗng chỉ
+     * đến từ token giả tại con trỏ (CaretToken, text rỗng) - vd "from |" bị parse thành bảng "" -
+     * hoặc từ phần cuối rỗng của "schema." đang gõ dở.
+     */
+    public void dropUnnamedEntries() {
+        aliases.entrySet().removeIf(e -> e.getKey().isEmpty() || e.getValue().isEmpty());
+        derivedScopeAliases.keySet().removeIf(String::isEmpty);
+        cteNames.removeIf(String::isEmpty);
+        projectedColumns.removeIf(String::isEmpty);
+    }
+
     public List<Scope> visibilityChain() {
         Deque<Scope> chain = new ArrayDeque<>();
         for (Scope s = this; s != null; s = s.parent) {

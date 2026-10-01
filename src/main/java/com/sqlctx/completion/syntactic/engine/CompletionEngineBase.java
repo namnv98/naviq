@@ -240,6 +240,12 @@ public abstract class CompletionEngineBase {
             RuleCallStack withCallee = cur.stack().copy();
             withCallee.push(rt.target.ruleIndex, cur.tokenIndex());
             if (reportPreferredRule(withCallee)) {
+                // đường tắt không bước vào trong -> lấy luôn tập token mở đầu được phòng VIP này
+                for (int type : atn.nextTokens(rt.target).toList()) {
+                    if (type >= Token.MIN_USER_TOKEN_TYPE) {
+                        result.caretTokenTypes.add(type);
+                    }
+                }
                 if (canExitWithoutConsumingToken(rt.target)) {
                     queue.push(new PipelineEntry(rt.followState, cur.tokenIndex(), cur.stack()));
                 }
@@ -270,6 +276,7 @@ public abstract class CompletionEngineBase {
             queue.push(new PipelineEntry(t.target, cur.tokenIndex() + 1, cur.stack()));
             return;
         }
+        result.caretTokenTypes.addAll(IntervalSet.of(Token.MIN_USER_TOKEN_TYPE, atn.maxTokenType).toList());
         if (reportPreferredRule(cur.stack())) {
             return;
         }
@@ -308,10 +315,13 @@ public abstract class CompletionEngineBase {
             return;
         }
 
+        List<Integer> types = label.toList();
+        // ghi TRƯỚC khi chốt phòng VIP / lọc ignoredTokens: định danh, literal bị lọc khỏi gợi ý nhưng
+        // chính chúng quyết định token giả bên tầng ngữ nghĩa nên là loại gì
+        result.caretTokenTypes.addAll(types);
         if (reportPreferredRule(cur.stack())) {
             return;
         }
-        List<Integer> types = label.toList();
         // Chỉ khi cửa có đúng 1 mật khẩu thì mới biết chắc chuỗi lời đi liền sau nó.
         List<Integer> following = types.size() == 1 ? FollowingTokensFinder.getFollowingTokens(t, ignoredTokens) : Collections.emptyList();
         for (int type : types) {

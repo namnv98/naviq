@@ -12,7 +12,9 @@ import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Tầng cú pháp - wrap toàn bộ việc gọi AntlrCompletionEngineFix (setup
@@ -108,6 +110,25 @@ public class OracleSyntacticAnalyzer {
             int caretTokenIndex,
             CandidatesResult candidates) {
 
+    }
+
+    /**
+     * Loại token giả mà tầng ngữ nghĩa nên chèn tại caret để parse đi qua được: định danh nếu grammar
+     * cho phép (hầu hết mọi chỗ), không thì literal số, rồi literal chuỗi (vd "varchar(|)" chỉ nhận số -
+     * chèn định danh ở đó làm parser bỏ cả subquery bao ngoài). Không dự đoán được gì (tầng cú pháp
+     * không phục hồi lỗi, token trước caret sai là rỗng) hoặc không loại nào hợp lệ thì vẫn là định danh.
+     */
+    public static int caretTokenTypeToInsert(CandidatesResult candidates) {
+        Set<Integer> types = candidates.caretTokenTypes;
+        if (types.isEmpty() || types.contains(PlSqlParser.REGULAR_ID)) {
+            return PlSqlParser.REGULAR_ID;
+        }
+        for (int type : List.of(PlSqlParser.UNSIGNED_INTEGER, PlSqlParser.APPROXIMATE_NUM_LIT, PlSqlParser.CHAR_STRING)) {
+            if (types.contains(type)) {
+                return type;
+            }
+        }
+        return PlSqlParser.REGULAR_ID;
     }
 
     public static Result analyze(String sql, int cursorOffset) {

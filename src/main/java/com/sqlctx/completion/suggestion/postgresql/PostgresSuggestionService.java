@@ -56,12 +56,14 @@ public class PostgresSuggestionService implements SuggestionService {
             cursorCharPos = sql.length();
         }
         int cursorOffset = cursorCharPos;
-        PostgresSemanticAnalyzer.Result semanticResult = PostgresSemanticAnalyzer.analyze(sql, cursorOffset);
-
         char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length()) ? sql.charAt(cursorOffset - 1) : ' ';
         boolean stillMidIdentifier = Character.isLetterOrDigit(charBeforeCursor) || charBeforeCursor == '_';
         int syntacticCursor = stillMidIdentifier ? cursorOffset - 1 : cursorOffset;
         PostgresSyntacticAnalyzer.Result syntacticResults = PostgresSyntacticAnalyzer.analyze(sql, syntacticCursor);
+        // tầng cú pháp chạy TRƯỚC: nó biết tại caret grammar cho phép loại token nào, tầng ngữ nghĩa
+        // chèn token giả đúng loại đó để parse không vỡ (vd "varchar(|)" chỉ nhận số)
+        int caretTokenType = PostgresSyntacticAnalyzer.caretTokenTypeToInsert(syntacticResults.candidates());
+        PostgresSemanticAnalyzer.Result semanticResult = PostgresSemanticAnalyzer.analyze(sql, cursorOffset, caretTokenType);
 
         for (var entry : syntacticResults.candidates().tokens.entrySet()) {
             int tokenType = entry.getKey();

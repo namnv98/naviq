@@ -2,6 +2,7 @@ package com.sqlctx.completion.semantic.postgresql;
 
 import com.sqlctx.antlr4.postgresql.PostgreSQLLexer;
 import com.sqlctx.antlr4.postgresql.PostgreSQLParser;
+import com.sqlctx.completion.semantic.CaretToken;
 import org.antlr.v4.runtime.*;
 
 import java.util.ArrayList;
@@ -19,18 +20,13 @@ import java.util.List;
  * dựa trên khoảng số [start, stop], không cần liệt kê ký tự nào là chữ/số/_/dấu chấm).
  * <p>
  * - Nếu cursor rơi vào KHOẢNG TRỐNG giữa 2 token (không thuộc token DEFAULT_CHANNEL nào)
- * -> chèn 1 CommonToken giả (kiểu Identifier) vào ĐÚNG vị trí đó trong danh sách token,
+ * -> chèn 1 {@link CaretToken} (kiểu Identifier) vào ĐÚNG vị trí đó trong danh sách token,
  * rồi dựng lại token stream từ danh sách đã chèn qua ListTokenSource. Vì đây là chèn
  * TOKEN (không phải nối chuỗi ký tự), token giả KHÔNG BAO GIỜ bị lexer gộp dính vào
  * token thật liền kề, bất kể chèn bên trái hay bên phải 1 identifier - loại bỏ tận gốc
  * lớp bug "lexer nối chữ" mà cách chèn vào String mắc phải.
  */
 public final class PostgresCursorTokenPatcher {
-    /**
-     * Text placeholder chèn vào SQL - chọn 1 chuỗi gần như không thể trùng input thật.
-     */
-    public static final String CURSOR_PLACEHOLDER = "zzzcursorzzz";
-
     private PostgresCursorTokenPatcher() {
     }
 
@@ -41,7 +37,11 @@ public final class PostgresCursorTokenPatcher {
     ) {
     }
 
-    public static PatchResult patch(String sql, int cursorOffset) {
+    /**
+     * @param caretTokenType loại token giả chèn vào khoảng trống tại caret - do tầng cú pháp chọn theo
+     *                       những gì grammar cho phép ở đó (xem PostgresSyntacticAnalyzer.caretTokenTypeToInsert)
+     */
+    public static PatchResult patch(String sql, int cursorOffset, int caretTokenType) {
         CharStream input = CharStreams.fromString(sql);
         PostgreSQLLexer lexer = new PostgreSQLLexer(input);
         // Không tắt thì ký tự lạ (vd '\' của meta-command CLI) khiến ANTLR in "token recognition error..."
@@ -90,11 +90,7 @@ public final class PostgresCursorTokenPatcher {
             finalCaretIdx = caretIdx;
             patched = false;
         } else {
-            CommonToken placeholder = new CommonToken(
-                    tokenSource, PostgreSQLParser.Identifier, Token.DEFAULT_CHANNEL,
-                    cursorOffset, cursorOffset + CURSOR_PLACEHOLDER.length() - 1);
-            placeholder.setText(CURSOR_PLACEHOLDER);
-            working.add(gapInsertAt, placeholder);
+            working.add(gapInsertAt, new CaretToken(tokenSource, caretTokenType, cursorOffset));
             finalCaretIdx = gapInsertAt;
             patched = true;
         }

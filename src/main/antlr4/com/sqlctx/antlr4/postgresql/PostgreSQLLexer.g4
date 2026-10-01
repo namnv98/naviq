@@ -38,10 +38,6 @@ options {
    caseInsensitive = true;
 }
 
-@header
-{
-package com.sqlctx.antlr4.postgresql;
-}
 @members
 {
 }

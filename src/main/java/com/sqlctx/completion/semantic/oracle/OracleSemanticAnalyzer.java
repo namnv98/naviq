@@ -5,6 +5,7 @@ import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import com.sqlctx.completion.model.Scope;
+import com.sqlctx.completion.semantic.ScopeTree;
 import com.sqlctx.util.LoggingConfig;
 
 import java.util.HashSet;
@@ -41,10 +42,10 @@ public class OracleSemanticAnalyzer {
      * @return kết quả resolve, hoặc Result toàn null/rỗng nếu parse lỗi nặng - KHÔNG BAO GIỜ throw
      * ra ngoài, completion không được sập vì lý do này.
      */
-    public static Result analyze(String sql, int rawCursorOffset) {
+    public static Result analyze(String sql, int rawCursorOffset, int caretTokenType) {
         final int cursorOffset = Math.max(0, Math.min(rawCursorOffset, sql.length()));
         try {
-            OracleCursorTokenPatcher.PatchResult patch = OracleCursorTokenPatcher.patch(sql, cursorOffset);
+            OracleCursorTokenPatcher.PatchResult patch = OracleCursorTokenPatcher.patch(sql, cursorOffset, caretTokenType);
             CommonTokenStream tokens = patch.tokenStream();
             PlSqlParser parser = new PlSqlParser(tokens);
             Set<Integer> offendingTokens = new HashSet<>();
@@ -59,12 +60,12 @@ public class OracleSemanticAnalyzer {
                 }
             });
             ParseTree tree = parser.unit_statement();
-            OracleScopeBuilder model = new OracleScopeBuilder();
-            model.offendingTokenIndices.addAll(offendingTokens);
-            ParseTreeWalker.DEFAULT.walk(model, tree);
+            ScopeTree scopes = new ScopeTree(offendingTokens);
+            ParseTreeWalker.DEFAULT.walk(new OracleScopeBuilder(scopes), tree);
+            scopes.dropUnnamedEntries();
 
             String danglingQualifier = detect(tokens, patch.caretTokenIndex(), PlSqlParser.PERIOD, IDENTIFIER_TOKEN_TYPES);
-            model.recordDanglingDot(cursorOffset, danglingQualifier);
+            scopes.recordDanglingDot(cursorOffset, danglingQualifier);
 
             // "x.|" gõ dở trong subquery (FROM (...) hoặc IN (...)): lỗi cú pháp ở dấu chấm cụt khiến
             // ANTLR phục hồi bằng cách ĐÓNG query_block của subquery TRƯỚC dấu chấm - scopeAt(dấu chấm)
@@ -74,18 +75,18 @@ public class OracleSemanticAnalyzer {
             int scopeTokenIndex = danglingQualifier != null
                     ? previousRealTokenIndex(tokens, patch.caretTokenIndex())
                     : patch.caretTokenIndex();
-            var scope = model.scopeAt(scopeTokenIndex);
-            if (scope != model.root() && crossesRealSemicolon(tokens, scope, patch.caretTokenIndex())) {
-                // scopeAt() có 1 fallback (xem javadoc ở đó) chọn "scope gần caret nhất theo điểm
+            var scope = scopes.scopeAtOrNearestBefore(scopeTokenIndex);
+            if (scope != scopes.root() && crossesRealSemicolon(tokens, scope, patch.caretTokenIndex())) {
+                // scopeAtOrNearestBefore() chọn "scope gần caret nhất theo điểm
                 // bắt đầu" khi không scope nào phủ trọn caret - đúng ý đồ cho câu bị gõ dở/lỗi cú
                 // pháp (chưa có ";"). NHƯNG nếu giữa điểm ĐÓNG THẬT của scope đó và caret có 1 dấu
                 // ";" THẬT (đã lex đúng, không phải lỗi) - đây là ranh giới statement rõ ràng, câu
                 // trước đã hoàn toàn kết thúc và caret đang ở 1 statement MỚI không liên quan, vd
                 // "SELECT ... FROM users WHERE id=1; |" trong PL/SQL block - scope SELECT không
                 // được phép rò alias/cột sang đây. Bỏ qua fallback, coi như không tìm được scope.
-                scope = model.root();
+                scope = scopes.root();
             }
-            var result = model.resolveAt(cursorOffset, scope);
+            var result = scopes.resolveAt(cursorOffset, scope);
             String ddlTargetAlias = scope != null && scope.isDdlTargetScope ? scope.primaryAlias() : null;
             // Tên CTE (WITH cte AS (...)) - giống hệt lý do bên PostgresSemanticAnalyzer (bug thật:
             // trước đây không gợi ý được tên CTE lúc đang gõ dở FROM). Dùng visibleCteNames()

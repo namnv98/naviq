@@ -24,10 +24,6 @@ options {
     tokenVocab=PlSqlLexer;
     superClass=PlSqlParserBase;
 }
-@header
-{
-package com.sqlctx.antlr4.oracle;
-}
 
 sql_script
     : (

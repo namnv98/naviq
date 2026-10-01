@@ -337,4 +337,26 @@ class OracleSuggestionServiceTest {
                 .columns("users.email", "users.id", "users.name")
                 .functions(ORA_FUNCTIONS);
     }
+
+    // =====================================================================
+    // Q. Token giả tại con trỏ (CaretToken) KHÔNG được lọt thành cột chiếu ra của CTE/subquery
+    // =====================================================================
+
+    @Test
+    @DisplayName("CTE tự tham chiếu, gõ 'r.|' trong chính nó: không được gợi ý cột giả của token con trỏ - bug thật đã sửa")
+    void caretTokenNotProjectedFromSelfReferencingCte() {
+        ora("with r as (select id from users union all select r.| from r) select * from r").columns("r.id");
+    }
+
+    @Test
+    @DisplayName("CTE là UNION: cột chiếu ra lấy theo nhánh ĐẦU (không phải nhánh cuối) - bug thật đã sửa")
+    void unionCteProjectsFirstBranchColumns() {
+        ora("with r as (select id from users union all select total from orders) select r.| from r").columns("r.id");
+    }
+
+    @Test
+    @DisplayName("Subquery trong FROM là UNION: cột chiếu ra lấy theo nhánh ĐẦU - bug thật đã sửa")
+    void unionFromSubqueryProjectsFirstBranchColumns() {
+        ora("select x.| from (select id from users union select total from orders) x").columns("x.id");
+    }
 }

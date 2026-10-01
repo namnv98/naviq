@@ -2,6 +2,7 @@ package com.sqlctx.completion.semantic.postgresql;
 
 import com.sqlctx.antlr4.postgresql.PostgreSQLParser;
 import com.sqlctx.completion.model.Scope;
+import com.sqlctx.completion.semantic.ScopeTree;
 import com.sqlctx.util.LoggingConfig;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -28,11 +29,11 @@ public class PostgresSemanticAnalyzer {
      * token-scan qua DmlTargetResolver) nếu parse lỗi nặng - KHÔNG BAO GIỜ throw ra ngoài,
      * completion không được sập vì lý do này.
      */
-    public static Result analyze(String sql, int rawCursorOffset) {
+    public static Result analyze(String sql, int rawCursorOffset, int caretTokenType) {
         final int cursorOffset = Math.max(0, Math.min(rawCursorOffset, sql.length()));
 
         try {
-            PostgresCursorTokenPatcher.PatchResult patch = PostgresCursorTokenPatcher.patch(sql, cursorOffset);
+            PostgresCursorTokenPatcher.PatchResult patch = PostgresCursorTokenPatcher.patch(sql, cursorOffset, caretTokenType);
             CommonTokenStream tokens = patch.tokenStream();
 
             PostgreSQLParser parser = new PostgreSQLParser(tokens);
@@ -49,14 +50,14 @@ public class PostgresSemanticAnalyzer {
             });
             ParseTree tree = parser.root();
 
-            PostgresScopeBuilder model = new PostgresScopeBuilder();
-            model.offendingTokenIndices.addAll(offendingTokens);
-            ParseTreeWalker.DEFAULT.walk(model, tree);
+            ScopeTree scopes = new ScopeTree(offendingTokens);
+            ParseTreeWalker.DEFAULT.walk(new PostgresScopeBuilder(scopes), tree);
+            scopes.dropUnnamedEntries();
 
             // caretTokenIndex đã được PostgresCursorTokenPatcher tính SẴN, đúng cho cả 2 case
             // (borrow token thật / chèn token giả) - không cần dò lại lần nữa ở đây.
-            var scope = model.scopeAt(patch.caretTokenIndex());
-            var result = model.resolveAt(cursorOffset, scope);
+            var scope = scopes.scopeAt(patch.caretTokenIndex());
+            var result = scopes.resolveAt(cursorOffset, scope);
             String ddlTargetAlias = scope != null && scope.isDdlTargetScope ? scope.primaryAlias() : null;
             // Tên CTE (WITH cte AS (...)) đang HIỂN THỊ ở scope hiện tại - đăng ký ngay khi WITH
             // clause đóng xong (xem PostgresScopeBuilder.exitWith_clause), TRƯỚC KHI người dùng gõ

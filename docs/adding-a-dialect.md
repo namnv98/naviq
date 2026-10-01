@@ -7,6 +7,6 @@ Mọi thứ phụ thuộc DB nằm sau `dialect/DialectAdapter`: kết nối, t�
 3. Viết `XxxAdapter implements DialectAdapter`. Xem `PostgresAdapter` làm mẫu.
 4. Thêm một `case` trong `DialectAdapters.of`.
 5. Sửa chỗ đổi chuỗi tên dialect thành enum ở `SqlctxCli`, `ContextManager`, `ConnectionProfileStore` (3 chỗ, vì `Dialect` là enum đóng).
-6. Muốn có gợi ý SQL: thêm grammar ANTLR trong `src/main/antlr4/xxx/` và một `SuggestionService`, trả về từ `DialectAdapter.suggest`.
+6. Muốn có gợi ý SQL: thêm grammar ANTLR trong `src/main/antlr4/com/sqlctx/antlr4/xxx/` (không cần `@header { package ... }`, plugin tự sinh theo thư mục; grammar chỉ để `import` thì đặt trong `src/main/antlr4/imports/`) và một `SuggestionService`, trả về từ `DialectAdapter.suggest`.
 
 Không có gì trong `cli/` phải sửa.
