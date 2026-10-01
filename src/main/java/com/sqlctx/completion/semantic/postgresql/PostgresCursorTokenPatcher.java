@@ -4,186 +4,80 @@ import com.sqlctx.antlr4.postgresql.PostgreSQLLexer;
 import com.sqlctx.antlr4.postgresql.PostgreSQLParser;
 import com.sqlctx.completion.semantic.CaretToken;
 import org.antlr.v4.runtime.*;
+import org.antlr.v4.runtime.misc.Pair;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
- * Thay thế cho PostgresScopeBuilder.withCursorPlaceholder (thao tác trên String, dễ gây lexer
- * NỐI CHỮ khi cursor đứng sát 1 identifier - xem lịch sử bug). Cách này thao tác trực
- * tiếp trên DANH SÁCH TOKEN đã lex xong từ sql GỐC (không sửa 1 ký tự nào của sql):
- * <p>
- * - Nếu cursor rơi vào GIỮA span của 1 token thật thuộc DEFAULT_CHANNEL (kể cả đứng
- * NGAY SAU token đó, tức "đã gõ xong, cursor ở cuối") -> KHÔNG chèn gì cả, dùng thẳng
- * token đó làm điểm mốc (mirror "!patched" của bản cũ, nhưng tổng quát hơn: cover luôn
- * cả case "ngay sau dấu chấm" LẪN "ngay sau ký tự identifier" bằng 1 điều kiện DUY NHẤT
- * dựa trên khoảng số [start, stop], không cần liệt kê ký tự nào là chữ/số/_/dấu chấm).
- * <p>
- * - Nếu cursor rơi vào KHOẢNG TRỐNG giữa 2 token (không thuộc token DEFAULT_CHANNEL nào)
- * -> chèn 1 {@link CaretToken} (kiểu Identifier) vào ĐÚNG vị trí đó trong danh sách token,
- * rồi dựng lại token stream từ danh sách đã chèn qua ListTokenSource. Vì đây là chèn
- * TOKEN (không phải nối chuỗi ký tự), token giả KHÔNG BAO GIỜ bị lexer gộp dính vào
- * token thật liền kề, bất kể chèn bên trái hay bên phải 1 identifier - loại bỏ tận gốc
- * lớp bug "lexer nối chữ" mà cách chèn vào String mắc phải.
+ * Chuẩn bị token stream để parse được câu đang gõ dở: caret đứng sau 1 định danh/dấu chấm thì dùng
+ * luôn token đó làm mốc, đứng ở khoảng trống thì chèn {@link CaretToken}; rồi đóng các ngoặc còn mở.
+ * Thao tác trên danh sách token, không sửa chuỗi SQL (chèn chữ vào chuỗi thì lexer dính nó vào định
+ * danh liền kề).
  */
 public final class PostgresCursorTokenPatcher {
-    private PostgresCursorTokenPatcher() {
-    }
 
-    public record PatchResult(
-            CommonTokenStream tokenStream,
-            int caretTokenIndex,
-            boolean patched
-    ) {
-    }
-
-    /**
-     * @param caretTokenType loại token giả chèn vào khoảng trống tại caret - do tầng cú pháp chọn theo
-     *                       những gì grammar cho phép ở đó (xem PostgresSyntacticAnalyzer.caretTokenTypeToInsert)
-     */
-    public static PatchResult patch(String sql, int cursorOffset, int caretTokenType) {
-        CharStream input = CharStreams.fromString(sql);
-        PostgreSQLLexer lexer = new PostgreSQLLexer(input);
-        // Không tắt thì ký tự lạ (vd '\' của meta-command CLI) khiến ANTLR in "token recognition error..."
-        // thẳng ra System.err, đè lên màn hình terminal.
-        lexer.removeErrorListeners();
-        CommonTokenStream rawStream = new CommonTokenStream(lexer);
-        rawStream.fill();
-        List<Token> tokens = new ArrayList<>(rawStream.getTokens());
-
-        // BUG FIX: PHẢI gắn source thật (lexer + input) cho MỌI token tự tạo. Constructor
-        // rút gọn "new CommonToken(type, text)" gán source = CommonToken.EMPTY_SOURCE
-        // (Pair<null,null>) -> getTokenSource() trả null -> nếu ANTLR cần error-recovery
-        // (single-token insertion) NGAY TẠI hoặc GẦN token này (vd thiếu ")" thật sự phía
-        // sau placeholder), DefaultErrorStrategy.getMissingSymbol() gọi thẳng
-        // currentSymbol.getTokenSource().getInputStream() -> NPE, crash toàn bộ parse
-        // thay vì chỉ parse lỗi cục bộ như bình thường.
-        org.antlr.v4.runtime.misc.Pair<TokenSource, CharStream> tokenSource =
-                new org.antlr.v4.runtime.misc.Pair<>(lexer, input);
-
-        int gapInsertAt = 0;
-        int caretIdx = -1;
-        boolean reuseRealToken = false;
-
-        for (int i = 0; i < tokens.size(); i++) {
-            Token t = tokens.get(i);
-            if (t.getType() == Token.EOF) {
-                break;
-            }
-            int start = t.getStartIndex();
-            int stop = t.getStopIndex();
-            if (t.getChannel() == Token.DEFAULT_CHANNEL && start <= cursorOffset - 1 && cursorOffset - 1 <= stop && isReusableCaretAnchor(t)) {
-                caretIdx = i;
-                reuseRealToken = true;
-                break;
-            }
-            if (stop < cursorOffset) {
-                gapInsertAt = i + 1;
-            }
-        }
-
-        List<Token> working = new ArrayList<>(tokens);
-        int finalCaretIdx;
-        boolean patched;
-
-        if (reuseRealToken) {
-            finalCaretIdx = caretIdx;
-            patched = false;
-        } else {
-            working.add(gapInsertAt, new CaretToken(tokenSource, caretTokenType, cursorOffset));
-            finalCaretIdx = gapInsertAt;
-            patched = true;
-        }
-
-        int openCount = 0;
-        for (Token t : working) {
-            if (t.getType() == Token.EOF) break;
-            if (t.getChannel() != Token.DEFAULT_CHANNEL) continue;
-            if (t.getType() == PostgreSQLParser.OPEN_PAREN) openCount++;
-            else if (t.getType() == PostgreSQLParser.CLOSE_PAREN) openCount--;
-        }
-        // Ngoặc của LỜI GỌI HÀM chưa đóng mà phía sau caret còn cả 1 mệnh đề (vd "count(| from t"):
-        // ")" phải nằm NGAY SAU vùng đang gõ, không phải cuối input - đóng ở cuối làm
-        // "from t" bị nuốt vào trong ngoặc, parse lỗi và mất hẳn bảng FROM. Ngoặc subquery/danh
-        // sách (đứng sau SELECT/FROM/IN/...) vẫn đóng ở cuối như cũ.
-        int closeAfterCaret = Math.min(countFunctionParensToCloseAfterCaret(working, finalCaretIdx), openCount);
-        if (closeAfterCaret > 0) {
-            for (int k = 0; k < closeAfterCaret; k++) {
-                CommonToken closeParen = new CommonToken(
-                        tokenSource, PostgreSQLParser.CLOSE_PAREN, Token.DEFAULT_CHANNEL,
-                        cursorOffset, cursorOffset);
-                closeParen.setText(")");
-                working.add(finalCaretIdx + 1, closeParen);
-            }
-            openCount -= closeAfterCaret;
-        }
-        if (openCount > 0) {
-            int eofIdx = working.size() - 1;
-            for (int k = 0; k < openCount; k++) {
-                CommonToken closeParen = new CommonToken(
-                        tokenSource, PostgreSQLParser.CLOSE_PAREN, Token.DEFAULT_CHANNEL,
-                        cursorOffset, cursorOffset);
-                closeParen.setText(")");
-                working.add(eofIdx, closeParen);
-            }
-        }
-
-        CommonTokenStream finalStream = new CommonTokenStream(new ListTokenSource(working));
-        finalStream.fill();
-        return new PatchResult(finalStream, finalCaretIdx, patched);
-    }
-
-    private static final java.util.Set<Integer> CLAUSE_START_TOKENS = java.util.Set.of(
+    private static final Set<Integer> CLAUSE_START_TOKENS = Set.of(
             PostgreSQLParser.FROM, PostgreSQLParser.WHERE, PostgreSQLParser.GROUP_P, PostgreSQLParser.ORDER,
             PostgreSQLParser.HAVING, PostgreSQLParser.LIMIT, PostgreSQLParser.OFFSET, PostgreSQLParser.UNION,
             PostgreSQLParser.INTERSECT, PostgreSQLParser.EXCEPT, PostgreSQLParser.WINDOW, PostgreSQLParser.RETURNING);
 
-    /**
-     * Số ngoặc "(" chưa đóng bao quanh caret, tính từ ngoặc TRONG CÙNG ra ngoài, mà mỗi ngoặc đứng
-     * ngay sau 1 tên hàm (Identifier) - và token thật kế tiếp sau vùng caret là 1 keyword mở mệnh
-     * đề (FROM/WHERE/...). Dừng ở ngoặc đầu tiên không thỏa (ngoặc subquery/danh sách).
-     */
-    private static int countFunctionParensToCloseAfterCaret(List<Token> working, int caretIdx) {
-        int next = -1;
-        for (int i = caretIdx + 1; i < working.size(); i++) {
-            Token t = working.get(i);
-            if (t.getType() == Token.EOF) break;
-            if (t.getChannel() == Token.DEFAULT_CHANNEL) {
-                next = i;
-                break;
-            }
-        }
-        if (next < 0 || !CLAUSE_START_TOKENS.contains(working.get(next).getType())) {
-            return 0;
-        }
-        java.util.Deque<Integer> unclosed = new java.util.ArrayDeque<>();
-        for (int i = 0; i < working.size(); i++) {
-            Token t = working.get(i);
-            if (t.getType() == Token.EOF) break;
-            if (t.getChannel() != Token.DEFAULT_CHANNEL) continue;
-            if (t.getType() == PostgreSQLParser.OPEN_PAREN) unclosed.push(i);
-            else if (t.getType() == PostgreSQLParser.CLOSE_PAREN && !unclosed.isEmpty()) unclosed.pop();
-        }
-        int count = 0;
-        for (int openIdx : unclosed) { // innermost trước
-            if (openIdx >= caretIdx) continue;
-            int prev = openIdx - 1;
-            while (prev >= 0 && working.get(prev).getChannel() != Token.DEFAULT_CHANNEL) prev--;
-            if (prev < 0 || working.get(prev).getType() != PostgreSQLParser.Identifier) break;
-            count++;
-        }
-        return count;
+    private PostgresCursorTokenPatcher() {
     }
 
-    private static boolean isReusableCaretAnchor(Token t) {
-        // ĐẶC CÁCH BẮT BUỘC cho DOT: nhờ patch grammar "indirection_el: DOT
-        // (attr_name|STAR)??", "u." tự nó ĐÃ hợp lệ về cú pháp mà KHÔNG cần token nào theo
-        // sau. Nếu coi DOT là "không growable" rồi chèn placeholder NGAY SAU nó (như mọi
-        // gap khác), placeholder sẽ bị hiểu thành chính "attr_name" của dấu chấm đó ->
-        // checkDanglingDot() thấy attr_name KHÔNG null nữa -> tưởng đây là "a.b" hoàn
-        // chỉnh, không phải "a." cụt -> KHÔNG ghi vào danglingDotQualifier -> vô hiệu hoá
-        // toàn bộ cơ chế phát hiện "gõ dở sau dấu chấm" (lý do duy nhất grammar được patch
-        // DOT?? ngay từ đầu). Phải tái dùng THẲNG token DOT làm caret, không chèn gì cả.
+    public record PatchResult(CommonTokenStream tokenStream, int caretTokenIndex) {
+    }
+
+    /** @param caretTokenType loại token giả chèn tại caret, do tầng cú pháp chọn */
+    public static PatchResult patch(String sql, int cursorOffset, int caretTokenType) {
+        CharStream input = CharStreams.fromString(sql);
+        PostgreSQLLexer lexer = new PostgreSQLLexer(input);
+        lexer.removeErrorListeners(); // không thì ký tự lạ (vd '\' của meta-command) in lỗi ra stderr, vỡ terminal
+        CommonTokenStream raw = new CommonTokenStream(lexer);
+        raw.fill();
+        List<Token> tokens = new ArrayList<>(raw.getTokens());
+        // Token tự tạo phải có source thật: khi phục hồi lỗi gần nó, DefaultErrorStrategy.getMissingSymbol()
+        // đọc getTokenSource().getInputStream() - source rỗng thì NPE, hỏng cả lần parse.
+        Pair<TokenSource, CharStream> source = new Pair<>(lexer, input);
+
+        int caretIdx = anchorTokenIndex(tokens, cursorOffset);
+        if (caretIdx < 0) {
+            caretIdx = gapIndex(tokens, cursorOffset);
+            tokens.add(caretIdx, new CaretToken(source, caretTokenType, cursorOffset));
+        }
+
+        int unclosed = unclosedParens(tokens);
+        // Ngoặc lời gọi hàm mà sau caret còn cả 1 mệnh đề ("count(| from t"): đóng ngay sau caret - đóng ở
+        // cuối thì "from t" bị nuốt vào trong ngoặc. Ngoặc subquery/danh sách vẫn đóng ở cuối.
+        int closeAfterCaret = Math.min(functionParensBeforeClause(tokens, caretIdx), unclosed);
+        for (int k = 0; k < closeAfterCaret; k++) {
+            tokens.add(caretIdx + 1, closeParen(source, cursorOffset));
+        }
+        for (int k = closeAfterCaret; k < unclosed; k++) {
+            tokens.add(tokens.size() - 1, closeParen(source, cursorOffset)); // trước EOF
+        }
+
+        CommonTokenStream stream = new CommonTokenStream(new ListTokenSource(tokens));
+        stream.fill();
+        return new PatchResult(stream, caretIdx);
+    }
+
+    /** Token thật ngay trước caret mà caret đang "dính" vào (định danh đang gõ, hoặc dấu chấm); -1 nếu không có. */
+    private static int anchorTokenIndex(List<Token> tokens, int cursorOffset) {
+        for (int i = 0; i < tokens.size() && tokens.get(i).getType() != Token.EOF; i++) {
+            Token t = tokens.get(i);
+            if (t.getChannel() == Token.DEFAULT_CHANNEL && t.getStartIndex() < cursorOffset
+                    && cursorOffset - 1 <= t.getStopIndex() && isAnchor(t)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * DOT luôn là mốc: grammar patch "DOT (attr_name|STAR)??" làm "u." tự hợp lệ; chèn token sau nó thì
+     * token đó thành attr_name, checkDanglingDot() không còn thấy dấu chấm cụt.
+     */
+    private static boolean isAnchor(Token t) {
         if (t.getType() == PostgreSQLParser.DOT) {
             return true;
         }
@@ -193,5 +87,84 @@ public final class PostgresCursorTokenPatcher {
         }
         char last = text.charAt(text.length() - 1);
         return Character.isLetterOrDigit(last) || last == '_';
+    }
+
+    /** Vị trí chèn: ngay sau token cuối cùng kết thúc trước caret. */
+    private static int gapIndex(List<Token> tokens, int cursorOffset) {
+        int at = 0;
+        for (int i = 0; i < tokens.size() && tokens.get(i).getType() != Token.EOF; i++) {
+            if (tokens.get(i).getStopIndex() < cursorOffset) {
+                at = i + 1;
+            }
+        }
+        return at;
+    }
+
+    private static int unclosedParens(List<Token> tokens) {
+        int open = 0;
+        for (Token t : tokens) {
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
+            if (t.getType() == PostgreSQLParser.OPEN_PAREN) {
+                open++;
+            } else if (t.getType() == PostgreSQLParser.CLOSE_PAREN) {
+                open--;
+            }
+        }
+        return Math.max(open, 0);
+    }
+
+    /**
+     * Số ngoặc "(" chưa đóng bao quanh caret, từ trong ra ngoài, mà đứng ngay sau tên hàm - chỉ khi token
+     * thật kế tiếp sau caret mở 1 mệnh đề (FROM/WHERE/...). Dừng ở ngoặc đầu tiên không phải của hàm.
+     */
+    private static int functionParensBeforeClause(List<Token> tokens, int caretIdx) {
+        int next = nextRealToken(tokens, caretIdx);
+        if (next < 0 || !CLAUSE_START_TOKENS.contains(tokens.get(next).getType())) {
+            return 0;
+        }
+        Deque<Integer> unclosed = new ArrayDeque<>();
+        for (int i = 0; i < tokens.size(); i++) {
+            Token t = tokens.get(i);
+            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
+                continue;
+            }
+            if (t.getType() == PostgreSQLParser.OPEN_PAREN) {
+                unclosed.push(i);
+            } else if (t.getType() == PostgreSQLParser.CLOSE_PAREN && !unclosed.isEmpty()) {
+                unclosed.pop();
+            }
+        }
+        int count = 0;
+        for (int openIdx : unclosed) { // trong cùng trước
+            if (openIdx >= caretIdx) {
+                continue;
+            }
+            int prev = openIdx - 1;
+            while (prev >= 0 && tokens.get(prev).getChannel() != Token.DEFAULT_CHANNEL) {
+                prev--;
+            }
+            if (prev < 0 || tokens.get(prev).getType() != PostgreSQLParser.Identifier) {
+                break;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    private static int nextRealToken(List<Token> tokens, int fromIdx) {
+        for (int i = fromIdx + 1; i < tokens.size() && tokens.get(i).getType() != Token.EOF; i++) {
+            if (tokens.get(i).getChannel() == Token.DEFAULT_CHANNEL) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static Token closeParen(Pair<TokenSource, CharStream> source, int offset) {
+        CommonToken t = new CommonToken(source, PostgreSQLParser.CLOSE_PAREN, Token.DEFAULT_CHANNEL, offset, offset);
+        t.setText(")");
+        return t;
     }
 }
