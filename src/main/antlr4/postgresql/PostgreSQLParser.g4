@@ -7,6 +7,9 @@ tokenVocab = PostgreSQLLexer;
 superClass = PostgreSQLParserBase;
 }
 
+@header {
+package com.sqlctx.antlr4.postgresql;
+}
 
 root
    : stmtblock EOF

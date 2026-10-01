@@ -24,6 +24,10 @@ options {
     superClass=PlSqlLexerBase;
     caseInsensitive = true;
 }
+@header
+{
+package com.sqlctx.antlr4.oracle;
+}
 
 ABORT:                        'ABORT';
 ABS:                          'ABS';
