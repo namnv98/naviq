@@ -2,11 +2,11 @@
 
 Hai tầng độc lập, kết quả ghép ở cuối. Tầng cú pháp cho biết *loại gì* hợp lệ tại con trỏ; tầng ngữ nghĩa cho biết *tên gì* đang có trong scope. Mã nằm ở `completion/`.
 
-## 1. Chuẩn bị đầu vào
+## 1. Chuẩn bị đầu vào (`completion/input`)
 
 `CompletionInputPreparer` tách phần đang gõ dở (`prefix`) và biết có đang ở dạng `alias.` không (`dotMode`). Nếu con trỏ đang dính vào cuối một định danh thì tầng cú pháp dùng vị trí lùi 1 ký tự, để hỏi "ở đây có thể là gì" thay vì coi định danh dở là token đã gõ xong.
 
-## 2. Tầng cú pháp: đi trên ATN
+## 2. Tầng cú pháp: đi trên ATN (`completion/syntactic`)
 
 Lex câu gốc, không parse. Tìm token tại con trỏ (token caret). Sau đó `CompletionEngineBase` đi trên ATN của parser:
 
@@ -19,7 +19,7 @@ Lex câu gốc, không parse. Tìm token tại con trỏ (token caret). Sau đó
 
 Có sẵn biến thể `CompletionEngineWithFlowSet` dùng follow-set tính trước (`FollowSetsByState`) để cắt nhánh sớm; mặc định đang dùng `CompletionEngineDefault`. Chi tiết thuật toán: [syntactic.md](syntactic.md).
 
-## 3. Tầng ngữ nghĩa: dựng scope
+## 3. Tầng ngữ nghĩa: dựng scope (`completion/semantic`)
 
 `CursorTokenPatcher` lex câu và, nếu con trỏ rơi vào khoảng trống giữa hai token, chèn một token giả (kiểu Identifier) vào *danh sách token* chứ không nối chuỗi ký tự. Nối chuỗi từng làm lexer dính placeholder vào định danh liền kề. Sau đó parse, và `ScopeBuilder` (một parse-tree listener) đi qua cây:
 
@@ -30,7 +30,7 @@ Có sẵn biến thể `CompletionEngineWithFlowSet` dùng follow-set tính trư
 
 Mọi callback đều phải chịu null/thiếu: lỗi ở đâu thì bỏ đúng chỗ đó, không làm hỏng phần scope đã dựng được. Ngoại lệ không lọt ra ngoài; bị ghi vào log file.
 
-## 4. Ghép và lọc
+## 4. Ghép và lọc (`completion/suggestion`)
 
 `PostgresSuggestionService` / `OracleSuggestionService` lấy tập rule khớp ở caret rồi chọn nguồn:
 
@@ -42,9 +42,9 @@ Mọi callback đều phải chịu null/thiếu: lỗi ở đâu thì bỏ đú
 
 Rồi loại nhiễu theo ngữ cảnh (`MatchedRuleResolver`): định danh đã đóng bằng khoảng trắng thì không gợi ý tiếp, `varchar(|)` không gợi ý kiểu mới, tên sequence/index không gợi ý tên bảng, partition bound không gợi ý cột, v.v.
 
-## 5. Xếp hạng (`SuggestFilter`)
+## 5. Xếp hạng (`completion/ranking`)
 
-So sánh tuần tự, bậc sau chỉ xét khi bậc trước bằng nhau:
+`SuggestFilter` so sánh tuần tự, bậc sau chỉ xét khi bậc trước bằng nhau:
 
 1. loại khớp: chính xác < tiền tố < fuzzy (subsequence);
 2. thói quen rõ ràng (đã chọn đủ nhiều lần gần đây) đứng trước;

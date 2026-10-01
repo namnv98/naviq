@@ -1,7 +1,7 @@
 package com.sqlctx.completion.support;
 
 import com.sqlctx.completion.model.Suggestion;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
+import com.sqlctx.completion.input.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.oracle.OracleSuggestionService;
 import com.sqlctx.completion.suggestion.postgresql.PostgresSuggestionService;
 

@@ -1,4 +1,4 @@
-package com.sqlctx.completion.suggestion;
+package com.sqlctx.completion.ranking;
 
 import com.sqlctx.completion.model.Suggestion;
 

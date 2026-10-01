@@ -2,7 +2,7 @@ package com.sqlctx.dialect;
 
 import com.sqlctx.antlr4.oracle.PlSqlLexer;
 import com.sqlctx.completion.model.Suggestion;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
+import com.sqlctx.completion.input.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.oracle.OracleSuggestionService;
 import com.sqlctx.datasource.OracleDataSource;
 import com.sqlctx.schema.Dialect;

@@ -1,6 +1,6 @@
 package com.sqlctx.completion.support;
 
-import com.sqlctx.completion.suggestion.CompletionHistory;
+import com.sqlctx.completion.ranking.CompletionHistory;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;

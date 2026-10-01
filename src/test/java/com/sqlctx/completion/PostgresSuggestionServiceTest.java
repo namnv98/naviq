@@ -1,7 +1,7 @@
 package com.sqlctx.completion;
 
 import com.sqlctx.completion.support.CompletionExpectations;
-import com.sqlctx.completion.suggestion.CompletionHistory;
+import com.sqlctx.completion.ranking.CompletionHistory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

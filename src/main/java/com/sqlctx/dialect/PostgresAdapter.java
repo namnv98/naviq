@@ -2,7 +2,7 @@ package com.sqlctx.dialect;
 
 import com.sqlctx.antlr4.postgresql.PostgreSQLLexer;
 import com.sqlctx.completion.model.Suggestion;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
+import com.sqlctx.completion.input.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.postgresql.PostgresSuggestionService;
 import com.sqlctx.datasource.PostgresDataSource;
 import com.sqlctx.schema.Dialect;

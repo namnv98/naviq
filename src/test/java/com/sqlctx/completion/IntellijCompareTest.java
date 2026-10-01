@@ -1,7 +1,7 @@
 package com.sqlctx.completion;
 
-import com.sqlctx.completion.suggestion.CompletionHistory;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
+import com.sqlctx.completion.ranking.CompletionHistory;
+import com.sqlctx.completion.input.CompletionInputPreparer;
 import com.sqlctx.completion.suggestion.postgresql.PostgresSuggestionService;
 import com.sqlctx.schema.Dialect;
 import com.sqlctx.schema.SchemaIndex;

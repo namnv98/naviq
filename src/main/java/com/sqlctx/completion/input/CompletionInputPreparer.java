@@ -1,4 +1,4 @@
-package com.sqlctx.completion.suggestion;
+package com.sqlctx.completion.input;
 
 public class CompletionInputPreparer {
     public record PrepareCompletionInput(String sql, int cursor, String prefix, boolean dotMode, String sqlSearch,

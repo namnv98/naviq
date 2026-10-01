@@ -1,8 +1,8 @@
 package com.sqlctx.cli.terminal;
 
-import com.sqlctx.completion.suggestion.CompletionHistory;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
-import com.sqlctx.completion.suggestion.SuggestFilter;
+import com.sqlctx.completion.ranking.CompletionHistory;
+import com.sqlctx.completion.input.CompletionInputPreparer;
+import com.sqlctx.completion.ranking.SuggestFilter;
 import com.sqlctx.datasource.ConnectionProfileStore;
 import com.sqlctx.dialect.DialectAdapters;
 import com.sqlctx.schema.SchemaIndex;

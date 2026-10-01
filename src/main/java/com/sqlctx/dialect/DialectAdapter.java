@@ -1,7 +1,7 @@
 package com.sqlctx.dialect;
 
 import com.sqlctx.completion.model.Suggestion;
-import com.sqlctx.completion.suggestion.CompletionInputPreparer;
+import com.sqlctx.completion.input.CompletionInputPreparer;
 import com.sqlctx.schema.Dialect;
 import com.sqlctx.schema.SchemaInfo;
 import org.antlr.v4.runtime.CharStream;
