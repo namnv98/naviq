@@ -1,6 +1,7 @@
 package com.sqlctx.completion.semantic.postgresql;
 
 import com.sqlctx.antlr4.postgresql.PostgreSQLParser;
+import com.sqlctx.completion.model.CaretScope;
 import com.sqlctx.completion.model.Scope;
 import com.sqlctx.completion.semantic.ScopeTree;
 import com.sqlctx.util.LoggingConfig;
@@ -91,7 +92,7 @@ public class PostgresSemanticAnalyzer {
         Map<String, Scope> visibleDerivedScopes,
         String ddlTargetAlias,
         Set<String> visibleCteNames
-    ) {
+    ) implements CaretScope {
 
         public static Result empty() {
             return new Result(null, null, null, Map.of(), Map.of(), null, Set.of());

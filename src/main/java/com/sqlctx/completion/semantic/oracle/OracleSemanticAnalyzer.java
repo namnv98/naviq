@@ -4,6 +4,7 @@ import com.sqlctx.antlr4.oracle.PlSqlParser;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
+import com.sqlctx.completion.model.CaretScope;
 import com.sqlctx.completion.model.Scope;
 import com.sqlctx.completion.semantic.ScopeTree;
 import com.sqlctx.util.LoggingConfig;
@@ -160,7 +161,7 @@ public class OracleSemanticAnalyzer {
             Map<String, Scope> visibleDerivedScopes,
             String ddlTargetAlias,
             java.util.Set<String> visibleCteNames
-    ) {
+    ) implements CaretScope {
         public static Result empty() {
             return new Result(null, null, null, Map.of(), Map.of(), null, java.util.Set.of());
         }

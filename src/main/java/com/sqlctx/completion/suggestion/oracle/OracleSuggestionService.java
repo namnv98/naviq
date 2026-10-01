@@ -1,46 +1,35 @@
 package com.sqlctx.completion.suggestion.oracle;
 
-import com.sqlctx.completion.suggestion.SuggestionService;
-import com.sqlctx.completion.model.SuggestionType;
+import com.sqlctx.antlr4.oracle.PlSqlLexer;
 import com.sqlctx.antlr4.oracle.PlSqlParser;
 import com.sqlctx.completion.input.CompletionInputPreparer;
-import com.sqlctx.completion.suggestion.DerivedColumnExpander;
-import com.sqlctx.completion.suggestion.KeywordText;
-import com.sqlctx.completion.ranking.SuggestFilter;
+import com.sqlctx.completion.model.CandidatesResult;
 import com.sqlctx.completion.model.Suggestion;
-import com.sqlctx.completion.syntactic.engine.support.RuleCallStack;
-import com.sqlctx.schema.SchemaIndex;
-import com.sqlctx.completion.syntactic.oracle.OracleSyntacticAnalyzer;
+import com.sqlctx.completion.model.SuggestionType;
+import com.sqlctx.completion.ranking.SuggestFilter;
 import com.sqlctx.completion.semantic.oracle.OracleSemanticAnalyzer;
+import com.sqlctx.completion.suggestion.SuggestionService;
+import com.sqlctx.completion.syntactic.oracle.OracleSyntacticAnalyzer;
+import com.sqlctx.schema.SchemaIndex;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.TokenStream;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
 
-import static java.util.Objects.isNull;
+import static com.sqlctx.completion.suggestion.SuggestionSupport.*;
 
 /**
- * Orchestrator - CHỈ điều phối, không tự chứa logic parse/resolve nào. Toàn bộ chi
- * tiết nằm ở các class chuyên trách:
- * <p>
- * SchemaIndex          - biết schema có gì (bảng, cột, hàm, kiểu dữ liệu) - DÙNG CHUNG mọi dialect
- * OracleSemanticAnalyzer     - tầng ngữ nghĩa (OracleScopeBuilder: alias/scope/CTE/subquery)
- * OracleSyntacticAnalyzer - tầng cú pháp (AntlrCompletionEngine generic + PlSqlParser cụ thể)
- * OracleMatchedRuleResolver, OracleAliasNameSuggester - PHẢI là bản Oracle-specific riêng (không import được từ
- * package Postgres) - file này giả định chúng tồn tại đúng ở com.sqlctx.oracle.suggests (cùng
- * package), nhưng nội dung của chúng KHÔNG nằm trong phạm vi sửa lần này (chưa được cung cấp).
- * <p>
- * 2 tầng (Semantic/Syntactic) ĐỘC LẬP, không tầng nào thay được tầng kia.
+ * Ghép gợi ý cho Oracle, cùng cách với PostgresSuggestionService. Khác grammar: bảng chỉ qua 1 rule
+ * {@code tableview_name}; cột trần dùng chung {@code column_name} (SET, USING, INSERT (...), CREATE INDEX...) nên
+ * không phải tách theo rule cha như colid của Postgres; còn {@code general_element}/{@code regular_id} bị dùng
+ * chung cho cả biến PL/SQL, cursor... nên phải loại trừ theo ngữ cảnh.
  */
 public class OracleSuggestionService implements SuggestionService {
-    private static final Logger LOG = com.sqlctx.util.LoggingConfig.of(OracleSuggestionService.class);
 
     public static List<Suggestion> suggests(CompletionInputPreparer.PrepareCompletionInput input) {
-        var suggests = suggests(input.sql(), input.cursor());
-        return SuggestFilter.filter(suggests, input.prefix(), input.dotMode());
+        return SuggestFilter.filter(suggests(input.sql(), input.cursor()), input.prefix(), input.dotMode());
     }
 
     @Override
@@ -49,435 +38,171 @@ public class OracleSuggestionService implements SuggestionService {
     }
 
     public static List<Suggestion> suggests(String sql, Integer cursorCharPos) {
-        var suggests = new ArrayList<Suggestion>();
-        if (isNull(cursorCharPos)) {
-            cursorCharPos = sql.length();
-        }
-        int cursorOffset = cursorCharPos;
-        char charBeforeCursor = (cursorOffset > 0 && cursorOffset <= sql.length()) ? sql.charAt(cursorOffset - 1) : ' ';
-        boolean stillMidIdentifier = Character.isLetterOrDigit(charBeforeCursor) || charBeforeCursor == '_';
-        int syntacticCursor = stillMidIdentifier ? cursorOffset - 1 : cursorOffset;
-        OracleSyntacticAnalyzer.Result syntacticResults = OracleSyntacticAnalyzer.analyze(sql, syntacticCursor);
-        // tầng cú pháp chạy TRƯỚC: nó biết tại caret grammar cho phép loại token nào, tầng ngữ nghĩa
-        // chèn token giả đúng loại đó để parse không vỡ (vd "varchar(|)" chỉ nhận số)
-        int caretTokenType = OracleSyntacticAnalyzer.caretTokenTypeToInsert(syntacticResults.candidates());
-        OracleSemanticAnalyzer.Result semanticResult = OracleSemanticAnalyzer.analyze(sql, cursorOffset, caretTokenType);
+        int cursorOffset = cursorCharPos != null ? cursorCharPos : sql.length();
+        int syntacticCursor = syntacticCursor(sql, cursorOffset);
+        OracleSyntacticAnalyzer.Result syn = OracleSyntacticAnalyzer.analyze(sql, syntacticCursor);
+        CandidatesResult candidates = syn.candidates();
+        // tầng cú pháp chạy trước: tầng ngữ nghĩa chèn token giả đúng loại grammar cho phép tại caret
+        OracleSemanticAnalyzer.Result sem = OracleSemanticAnalyzer.analyze(sql, cursorOffset,
+                OracleSyntacticAnalyzer.caretTokenTypeToInsert(candidates));
 
-        for (var entry : syntacticResults.candidates().tokens.entrySet()) {
-            int tokenType = entry.getKey();
-            List<Integer> following = entry.getValue();   // <-- chuỗi token chắc chắn theo sau
-            addKeywordSuggestions(suggests, tokenType, following);
-        }
+        List<Suggestion> suggests = new ArrayList<>();
+        addKeywords(suggests, PlSqlParser.VOCABULARY, candidates);
 
-        Set<String> matchedRuleNames = OracleMatchedRuleResolver.computeMatchedRuleNamesV1(syntacticResults, syntacticCursor);
+        Set<String> rules = OracleMatchedRuleResolver.computeMatchedRuleNamesV1(syn, syntacticCursor);
+        boolean jsonReturnType = rules.contains("json_value_return_type") || rules.contains("json_query_return_type");
+        // cursor_name của CLOSE/OPEN: general_element ở đây kéo theo type_spec/datatype ảo
+        boolean cursorName = hasAncestor(candidates, PlSqlParser.RULE_general_element, PlSqlParser.RULE_cursor_name);
 
-        // "cursor_name: general_element | bind_variable" (CLOSE/OPEN cursor_name) - bug thật phát
-        // hiện qua GrammarBreadthTest: general_element ở đây bị ATN báo ẢO thêm "type_spec"/
-        // "datatype" (cùng loại sibling-ambiguity đã gặp ở Postgres createfunctionstmt), khiến
-        // "CLOSE |"/"OPEN |" gợi ý nhầm NUMBER/VARCHAR2... trong khi cursor_name không liên quan gì
-        // tới kiểu dữ liệu. Tính TRƯỚC (không đợi tới khối general_element phía dưới) để dùng chặn
-        // ở đây luôn.
-        boolean isGeneralElementCursorName =
-                isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_general_element, PlSqlParser.RULE_cursor_name);
-
-        // typename (Postgres) -> Oracle KHÔNG có rule tên "typename": type_spec là rule bao ngoài
-        // (gồm cả REF/%ROWTYPE/%TYPE), datatype là kiểu dữ liệu "thuần" (NUMBER/VARCHAR2/...) -
-        // check cả 2 vì tuỳ vị trí trong grammar sẽ khớp rule nào.
-        if ((matchedRuleNames.contains("type_spec") || matchedRuleNames.contains("datatype")
-                || matchedRuleNames.contains("json_value_return_type") || matchedRuleNames.contains("json_query_return_type"))
-                && !isGeneralElementCursorName && !isExecuteImmediatePhantomTypeSpec(syntacticResults)) {
-            addDataTypeSuggestions(suggests);
+        if ((rules.contains("type_spec") || rules.contains("datatype") || jsonReturnType)
+                && !cursorName && !isExecuteImmediatePhantomTypeSpec(candidates)) {
+            addDataTypes(suggests);
         }
 
-        // table_alias - rule TÊN GIỐNG HỆT Postgres, đã verify tồn tại thật trong PlSqlParser.g4
-        // ("table_alias : identifier | quoted_string ;"), không cần đổi.
-        if (matchedRuleNames.contains("table_alias")) {
-            addTableAliasSuggestions(suggests, syntacticResults, semanticResult);
+        if (rules.contains("table_alias")) {
+            addTableAlias(suggests, syn, sem);
         }
 
-        // any_name / qualified_name (Postgres, 2 rule riêng nhưng CÙNG dùng để suggest bảng) ->
-        // Oracle GỘP CHUNG thành 1 rule duy nhất "tableview_name" cho mọi vị trí tham chiếu bảng
-        // (FROM, table_ref, ALTER TABLE, general_table_ref, CREATE INDEX...) - chỉ cần 1 check,
-        // không cần 2 check trùng lặp như bản gốc.
-        // 2 vị trí tableview_name KHÔNG phải tên bảng để chọn (bug thật - hiện toàn bộ bảng schema):
-        // - table_wild ("t.*" trong SELECT list): tiền tố hợp lệ chỉ là alias/bảng ĐÃ có trong FROM,
-        //   không phải mọi bảng; cột đã được gợi ý qua general_element.
-        // - ngay sau 1 định danh ("from contracts |"): 2 định danh liền nhau thì cái sau là alias,
-        //   không thể là tên bảng - đây là nhánh ảo của ATN.
-        boolean isTableWild = isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_table_wild);
-        if (matchedRuleNames.contains("tableview_name") && !isTableWild && !followsIdentifier(syntacticResults)) {
-            addTableNameSuggestions(suggests, syntacticResults, semanticResult.visibleCteNames());
+        // tableview_name không phải tên bảng để chọn: trong table_wild ("t.*", tiền tố chỉ là alias đã có), và ngay
+        // sau 1 định danh ("from contracts |" - định danh thứ 2 là alias)
+        if (rules.contains("tableview_name")
+                && !hasAncestor(candidates, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_table_wild)
+                && !followsIdentifier(syn)) {
+            addTableNames(suggests, syn, candidates, sem.visibleCteNames());
         }
 
-        // columnref (Postgres, 1 rule gộp chung mọi biểu thức cột) -> Oracle TÁCH thành 2 rule:
-        // "general_element" (chain "t.col" trong biểu thức - SELECT list/WHERE/HAVING...) và
-        // "column_name" (vị trí cột TRẦN - ORDER BY/GROUP BY/danh sách cột trong ngoặc).
-        //
-        // KHÁC BIỆT QUAN TRỌNG với Postgres: "column_name" của Oracle được TÁI DÙNG y hệt ở hầu
-        // hết các vị trí mà Postgres cần tách riêng "colid" theo TỪNG parent-rule khác nhau (xem
-        // các biến isColidXxx đã BỊ XOÁ bên dưới) - vd column_based_update_set_clause (SET),
-        // paren_column_list (JOIN...USING, INSERT (col,...), ALTER TABLE DROP COLUMN),
-        // index_expr (CREATE INDEX) ĐỀU dùng chung "column_name". Nên 1 check duy nhất
-        // "column_name" đã phủ được tương đương ~5-6 check colid-theo-parent-rule của Postgres -
-        // đây là ĐƠN GIẢN HOÁ THẬT SỰ nhờ grammar Oracle đồng nhất hơn ở điểm này, không phải bỏ
-        // sót.
-        //
-        // "general_element" thì NGƯỢC LẠI vẫn bị overload giống "colid" (dùng cả cho cursor_name
-        // và assignable_element - biến PL/SQL cục bộ, KHÔNG phải cột bảng) - vẫn cần loại trừ 2
-        // trường hợp đó bằng parent-context giống cơ chế Postgres đã dùng.
-        boolean isGeneralElementAssignTarget =
-                isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_general_element, PlSqlParser.RULE_assignable_element);
-        // INSERT INTO t VALUES (|) - "expression" ở values_clause route qua general_element,
-        // nhưng ở vị trí này KHÔNG có bảng nào trong scope để gợi ý cột (giống INSERT ... VALUES
-        // của Postgres không gợi ý cột).
-        boolean isGeneralElementInsertValues =
-                isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_general_element, PlSqlParser.RULE_values_clause);
+        addColumnSuggestions(suggests, rules, candidates, syn, sem, cursorName, jsonReturnType);
 
-        // "ORDER BY name |" (đã gõ XONG 1 order_by_elements hoàn chỉnh, kể cả có NULLS FIRST/LAST
-        // hay không) - order_by_elements: expression (ASC|DESC)? (NULLS (FIRST|LAST))? toàn bộ
-        // phần đuôi đều optional nên walk ATN coi rule này "đóng được", rồi tại order_by_clause:
-        // order_by_elements (COMMA order_by_elements)* vẫn tiếp tục khám phá LƯỢT LẶP TIẾP THEO
-        // như thể KHÔNG CẦN dấu phẩy - lộ ra general_element/regular_id (cột mới) dù thực tế
-        // Oracle bắt buộc phải có "," trước order_by_elements kế tiếp.
-        //
-        // CHÚ Ý: KHÔNG dùng ancestor-path của general_element/regular_id để phát hiện case này
-        // (đã thử, gây regression ở offsetClauseDoesNotCrash) - candidates().rules chỉ lưu ĐÚNG 1
-        // path "relevant nhất" cho mỗi rule id (PreferredRuleResolver.recordIfMoreRelevant), nên
-        // khi general_element khớp ở NHIỀU nhánh derivation khác nhau tại CÙNG caret (vd order by
-        // bị lặp giả VÀ offset_clause's expression hợp lệ cùng lúc match general_element), path
-        // ghi lại có thể là nhánh SAI, khiến ancestor-check suy luận nhầm cho cả nhánh đúng. Thay
-        // bằng quét THUẦN TOKEN THẬT lùi từ caret: chỉ suppress khi xác nhận được cụ thể đang đứng
-        // ngay sau 1 order_by_elements đã đóng KHÔNG có dấu phẩy, KHÔNG đi qua bất kỳ từ khóa nào
-        // đánh dấu đã rời sang mệnh đề khác (OFFSET/FETCH/FOR) hay dấu phẩy/ORDER BY (hợp lệ).
-        boolean isOrderByElementsWithoutComma = isImmediatelyAfterOrderByElementsNoComma(syntacticResults);
-        boolean isRegularIdOrderByWithoutComma = isOrderByElementsWithoutComma;
-
-        // "JSON_VALUE(col, path RETURNING VARCHAR2 |)" - general_element khớp ở 1 derivation HOÀN
-        // TOÀN KHÁC (ancestor tận atom của expression NGOÀI CÙNG, không hề đi qua
-        // json_value_return_clause/json_value_return_type) cùng lúc với json_value_return_type -
-        // đây là vị trí chỉ nên gợi ý datatype, cột lọt vào là noise. Suppress general_element khi
-        // json_value_return_type/json_query_return_type CŨNG được match cùng lúc.
-        boolean isGeneralElementJsonReturnType = matchedRuleNames.contains("json_value_return_type")
-                || matchedRuleNames.contains("json_query_return_type");
-
-        boolean shouldSuggestColumnsViaGeneralElement = matchedRuleNames.contains("general_element")
-                && !isGeneralElementCursorName && !isGeneralElementAssignTarget && !isGeneralElementInsertValues
-                && !isOrderByElementsWithoutComma && !isGeneralElementJsonReturnType;
-
-        // "regular_id" cũng bị overload giống "general_element" - trong VALUES (|), ATN còn
-        // khớp cả nhánh other_function (hàm không có tham số, vd COUNT) đi qua regular_id, nên
-        // cần loại trừ y hệt cho vị trí này.
-        boolean isRegularIdInsertValues =
-                isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_values_clause);
-        boolean shouldSuggestColumnsViaRegularId = matchedRuleNames.contains("regular_id")
-                && !isRegularIdInsertValues && !isRegularIdOrderByWithoutComma;
-
-        // "MERGE ... WHEN MATCHED THEN UPDATE SET |" - vế TRÁI của merge_element (column_name)
-        // chỉ nên gợi ý cột bảng TARGET, không phải bảng USING (source) - dù cả 2 cùng visible
-        // trong scope của merge_statement (xem OracleScopeBuilder.enterMerge_statement). Vế PHẢI
-        // (expression sau EQUALS_OP) vẫn cần thấy cả 2 nên KHÔNG áp giới hạn này - chỉ áp khi
-        // column_name có ancestor merge_element (chính là vị trí LHS).
-        boolean isColumnNameMergeUpdateTarget = matchedRuleNames.contains("column_name")
-                && semanticResult.ddlTargetAlias() != null
-                && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_merge_element);
-
-        // "MERGE ... WHEN NOT MATCHED THEN INSERT (|)" - paren_column_list ở đây (khác VALUES(...))
-        // chỉ nên gợi ý cột bảng TARGET (bảng đang INSERT vào), không phải bảng USING/source - y hệt
-        // lý do isColumnNameMergeUpdateTarget, chỉ khác ancestor rule (merge_insert_clause thay vì
-        // merge_element).
-        boolean isColumnNameMergeInsertTarget = matchedRuleNames.contains("column_name")
-                && semanticResult.ddlTargetAlias() != null
-                && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_merge_insert_clause);
-
-        // "JOIN ... USING (|)" - paren_column_list dùng chung y hệt INSERT column-list, nhưng theo
-        // đúng ngữ nghĩa Oracle USING chỉ CỘT CHUNG TÊN giữa các bảng tham gia join mới hợp lệ,
-        // không phải mọi cột của mọi bảng.
-        boolean isColumnNameJoinUsing = matchedRuleNames.contains("column_name")
-                && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_join_using_part);
-
-        // "ALTER TABLE ... ADD new_col |" / "... MODIFY existing_col |" - column_name/regular_id
-        // của chính add_column_clause/modify_column_clauses lại xuất hiện làm candidate NGAY TẠI vị
-        // trí đang chờ datatype (sau khi tên cột đã gõ xong) - đây là artifact của việc ATN dò được
-        // NHIỀU alternative cùng bắt đầu bằng column_name (column_definition/virtual_column_definition
-        // cho ADD; modify_col_properties/modify_col_visibility/modify_col_substitutable cho MODIFY),
-        // ghi đè lẫn nhau qua PreferredRuleResolver.recordIfMoreRelevant (chỉ giữ 1 path "gần nhất"
-        // mỗi rule id). KHÔNG thể loại trừ bằng ancestor đơn thuần vì CÙNG ancestor đó (vd
-        // modify_col_visibility) cũng là path hợp lệ DUY NHẤT được ghi nhận cho vị trí ĐẦU (chưa gõ
-        // tên cột - lúc đó ĐÚNG là cần gợi ý cột có sẵn để chọn sửa/xoá). Phân biệt bằng tín hiệu
-        // đáng tin cậy hơn: "datatype" CŨNG được match cùng lúc CHỈ xảy ra khi tên cột đã gõ xong
-        // (đang chờ kiểu dữ liệu) - ở vị trí đầu, "datatype" không thể là candidate hợp lệ.
-        boolean isAlterColumnAwaitingDatatype = matchedRuleNames.contains("datatype")
-                && (isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_add_column_clause)
-                        || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_column_name, PlSqlParser.RULE_modify_column_clauses));
-        boolean isAlterRegularIdAwaitingDatatype = matchedRuleNames.contains("datatype")
-                && (isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_add_column_clause)
-                        || isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_modify_column_clauses));
-
-        // "u." đứng ngay trước 1 lỗi cú pháp khác (vd chuỗi chưa đóng phía trước) - PlSqlParser.g4
-        // KHÔNG patch general_element_part cho phép PERIOD cụt (id_expression bắt buộc ngay sau
-        // PERIOD, xem javadoc đầu OracleScopeBuilder.java) nên walk ATN cú pháp không tìm được rule nào
-        // khớp tại vị trí này (matchedRuleNames rỗng hoàn toàn) - CHỈ tầng semantic (dangling-dot
-        // detector trong OracleSemanticAnalyzer.detect(), thuần dựa token stream, độc lập với việc parse
-        // có thành công hay không) mới resolve được qualifier "u". Phải tự kích hoạt gợi ý cột theo
-        // qualifier đó, không thể chờ matchedRuleNames vì nó không bao giờ khớp trong case này.
-        boolean qualifierResolvedByDanglingDot = semanticResult.qualifier() != null;
-
-        // "column_name" là rule PHỤ TRÁCH CHÍNH cột trần trong ORDER BY (xem chú thích ở khối
-        // check "column_name" phía trên) - THIẾU "!isOrderByElementsWithoutComma" ở đây là bug
-        // thật (phát hiện lúc viết test đi đúng đường production): "order by name |" (đã gõ xong
-        // 1 cột, có khoảng trắng) vẫn cứ gợi ý lại cột dù đây chính xác là vị trí biến suppress
-        // này sinh ra để xử lý - general_element/regular_id đã check đúng, chỉ riêng nhánh này bị
-        // bỏ sót khi "column_name" được thêm vào sau.
-        boolean shouldSuggestColumnsViaColumnName = matchedRuleNames.contains("column_name")
-                && !isColumnNameMergeInsertTarget && !isColumnNameJoinUsing && !isAlterColumnAwaitingDatatype
-                && !isOrderByElementsWithoutComma;
-
-        if (isColumnNameMergeUpdateTarget || isColumnNameMergeInsertTarget) {
-            addTargetOnlyColumnSuggestions(suggests, semanticResult);
-        } else if (isColumnNameJoinUsing) {
-            addCommonColumnSuggestions(suggests, semanticResult);
-        } else if (qualifierResolvedByDanglingDot || shouldSuggestColumnsViaColumnName || shouldSuggestColumnsViaGeneralElement
-                || (shouldSuggestColumnsViaRegularId && !isAlterRegularIdAwaitingDatatype)) {
-            // Hàm CHỈ hợp lệ ở vị trí BIỂU THỨC (general_element) - column_name/regular_id còn là định
-            // danh THUẦN: INSERT INTO t (|, UPDATE t SET |, ALTER TABLE t MODIFY (|, kiểu cột
-            // "CREATE TABLE t (id |)" (bug thật: cả 4 vị trí từng gợi ý count/sum/avg/sysdate).
-            addColumnSuggestions(suggests, semanticResult, shouldSuggestColumnsViaGeneralElement);
-        }
-
-        // Toàn bộ khối "colid + parent-context" của Postgres (isColidAlias/isColidDropTarget/
-        // isColumnrefColumn/isColidIndexColumn/isColidSetTarget/isColidUsingClauseColumn/
-        // isColidInsert) ĐÃ XOÁ - Oracle không có rule "colid", và như giải thích ở trên,
-        // "column_name" của Oracle đã tự phủ được các ngữ cảnh tương đương mà không cần tách
-        // theo từng parent-rule riêng.
-
-        // TABLESPACE tên (CREATE TABLE...TABLESPACE, ALTER ... TABLESPACE, PARTITION...TABLESPACE,
-        // LOB storage...) - grammar: tablespace: id_expression; id_expression: regular_id | DELIMITED_ID
-        // - dùng ancestor rule "tablespace" (không đa nghĩa như regular_id/id_expression dùng ở rất
-        // nhiều nơi khác) để nhận diện đúng vị trí, không cần quét token. Tablespace thật từ
-        // USER_TABLESPACES (SchemaIndex.tablespaces).
-        if (matchedRuleNames.contains("regular_id")
-                && isRuleAncestorAnywhere(syntacticResults, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_tablespace)) {
+        if (rules.contains("regular_id") && hasAncestor(candidates, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_tablespace)) {
             SchemaIndex.tablespaces.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.TABLESPACE)));
         }
-
         return suggests;
     }
 
-    /**
-     * "BEGIN EXECUTE IMMEDIATE |END;" - ATN còn dò ra nhánh ẢO coi "EXECUTE IMMEDIATE" là khai báo
-     * biến PL/SQL (variable_declaration: identifier type_spec), lộ type_spec ngay tại vị trí thực
-     * chất là BIỂU THỨC (chuỗi SQL động) - bug thật: gợi ý NUMBER/VARCHAR2/... ở đây.
-     */
-    private static boolean isExecuteImmediatePhantomTypeSpec(OracleSyntacticAnalyzer.Result syn) {
-        return isRuleAncestorAnywhere(syn, PlSqlParser.RULE_general_element, PlSqlParser.RULE_execute_immediate)
-                && isRuleAncestorAnywhere(syn, PlSqlParser.RULE_type_spec, PlSqlParser.RULE_variable_declaration);
+    /** Cột đến từ 3 rule: column_name (cột trần), general_element (biểu thức), regular_id - mỗi rule có ngữ cảnh loại trừ riêng. */
+    private static void addColumnSuggestions(List<Suggestion> suggests, Set<String> rules, CandidatesResult candidates,
+                                             OracleSyntacticAnalyzer.Result syn, OracleSemanticAnalyzer.Result sem,
+                                             boolean cursorName, boolean jsonReturnType) {
+        // "ORDER BY name |": order_by_elements đóng được nên ATN đi tiếp lượt lặp như thể không cần dấu phẩy
+        boolean orderByWithoutComma = isImmediatelyAfterOrderByElementsNoComma(syn);
+        boolean awaitingDatatype = rules.contains("datatype");
+
+        boolean viaGeneralElement = rules.contains("general_element")
+                && !cursorName
+                && !hasAncestor(candidates, PlSqlParser.RULE_general_element, PlSqlParser.RULE_assignable_element) // biến PL/SQL
+                && !hasAncestor(candidates, PlSqlParser.RULE_general_element, PlSqlParser.RULE_values_clause)      // INSERT ... VALUES (|)
+                && !orderByWithoutComma
+                && !jsonReturnType; // "RETURNING VARCHAR2 |": general_element ảo của biểu thức ngoài cùng
+
+        boolean viaRegularId = rules.contains("regular_id")
+                && !hasAncestor(candidates, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_values_clause)
+                && !orderByWithoutComma
+                // "ALTER TABLE t ADD c |" / "MODIFY c |": tên cột đã gõ xong, đang chờ kiểu (datatype cùng khớp)
+                && !(awaitingDatatype && (hasAncestor(candidates, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_add_column_clause)
+                || hasAncestor(candidates, PlSqlParser.RULE_regular_id, PlSqlParser.RULE_modify_column_clauses)));
+
+        boolean columnName = rules.contains("column_name");
+        // MERGE: vế trái SET và INSERT (|) chỉ được là cột bảng đích, không phải bảng USING
+        boolean mergeTarget = columnName && sem.ddlTargetAlias() != null
+                && (hasAncestor(candidates, PlSqlParser.RULE_column_name, PlSqlParser.RULE_merge_element)
+                || hasAncestor(candidates, PlSqlParser.RULE_column_name, PlSqlParser.RULE_merge_insert_clause));
+        boolean joinUsing = columnName && hasAncestor(candidates, PlSqlParser.RULE_column_name, PlSqlParser.RULE_join_using_part);
+        boolean viaColumnName = columnName && !mergeTarget && !joinUsing && !orderByWithoutComma
+                && !(awaitingDatatype && (hasAncestor(candidates, PlSqlParser.RULE_column_name, PlSqlParser.RULE_add_column_clause)
+                || hasAncestor(candidates, PlSqlParser.RULE_column_name, PlSqlParser.RULE_modify_column_clauses)));
+
+        // "u." trước 1 lỗi cú pháp khác: grammar không cho dấu chấm cụt nên không rule nào khớp, chỉ tầng ngữ nghĩa
+        // (dò trên token) biết qualifier
+        boolean danglingDot = sem.qualifier() != null;
+
+        if (mergeTarget) {
+            addTargetColumns(suggests, sem);
+        } else if (joinUsing) {
+            addCommonColumns(suggests, sem);
+        } else if (danglingDot || viaColumnName || viaGeneralElement || viaRegularId) {
+            // hàm chỉ hợp lệ ở vị trí biểu thức; column_name/regular_id còn là định danh thuần (INSERT INTO t (|...)
+            if (viaGeneralElement) {
+                addFunctions(suggests);
+            }
+            addColumns(suggests, sem, null);
+        }
+    }
+
+    /** "BEGIN EXECUTE IMMEDIATE |": nhánh ảo coi "EXECUTE IMMEDIATE" là khai báo biến, lộ type_spec ở vị trí biểu thức. */
+    private static boolean isExecuteImmediatePhantomTypeSpec(CandidatesResult candidates) {
+        return hasAncestor(candidates, PlSqlParser.RULE_general_element, PlSqlParser.RULE_execute_immediate)
+                && hasAncestor(candidates, PlSqlParser.RULE_type_spec, PlSqlParser.RULE_variable_declaration);
     }
 
     private static boolean followsIdentifier(OracleSyntacticAnalyzer.Result syn) {
-        var ts = syn.tokenStream();
-        for (int i = syn.caretTokenIndex() - 1; i >= 0; i--) {
-            Token t = ts.get(i);
-            if (t.getChannel() != Token.DEFAULT_CHANNEL) {
-                continue;
-            }
-            return t.getType() == PlSqlParser.REGULAR_ID || t.getType() == PlSqlParser.DELIMITED_ID;
-        }
-        return false;
-    }
-
-    private static boolean isRuleAncestorAnywhere(OracleSyntacticAnalyzer.Result syn, int ruleId, int ancestorRuleIdToFind) {
-        List<RuleCallStack.RuleFrame> path = syn.candidates().rules.get(ruleId);
-        if (path == null) return false;
-        return path.stream().anyMatch(f -> f.ruleId() == ancestorRuleIdToFind);
+        int previous = previousTokenType(syn.tokenStream(), syn.caretTokenIndex());
+        return previous == PlSqlParser.REGULAR_ID || previous == PlSqlParser.DELIMITED_ID;
     }
 
     /**
-     * "ORDER BY name NULLS FIRST |" / "ORDER BY name |" - true khi caret đứng ngay sau 1
-     * order_by_elements ĐÃ HOÀN CHỈNH mà CHƯA có dấu phẩy nào theo sau (tức vị trí "lặp giả" mà
-     * ATN nhầm là có thể gõ cột mới - xem chú thích ở nơi gọi).
-     * <p>
-     * Thuần dựa vào 1-2 TOKEN THẬT ngay trước caret (không dùng ancestor-path của rule - không
-     * đáng tin, xem chú thích nơi gọi; KHÔNG quét lùi tìm ORDER kiểu boundary-keyword - đã thử,
-     * vỡ ở windowFrameBoundSuggestsKeywordsAndColumns vì "ROWS BETWEEN ... AND |" cũng đi qua
-     * order_by_clause trong cùng OVER(...) mà ROWS/BETWEEN/AND không nằm trong danh sách boundary
-     * liệt kê được hết). Cố tình BẢO THỦ - chỉ suppress ở đúng 2 hình dạng đuôi order_by_elements
-     * chắc chắn không lẫn với construct nào khác: (1) token ngay trước caret là ASC/DESC/FIRST/
-     * LAST (từ khóa CHỈ xuất hiện trong đuôi order_by_elements, không dùng ở đâu khác quanh đây);
-     * (2) token ngay trước caret là 1 định danh trần (REGULAR_ID/DELIMITED_ID) MÀ token trước đó
-     * nữa là BY hoặc COMMA (tức "ORDER BY name |" - tên cột đơn giản, không phải biểu thức phức
-     * tạp). Bỏ qua case biểu thức phức tạp hơn ("ORDER BY UPPER(name) |") - false negative chấp
-     * nhận được (không suppress) còn hơn false positive (suppress nhầm chỗ khác).
+     * Caret ngay sau 1 order_by_elements đã hoàn chỉnh mà chưa có dấu phẩy. Chỉ nhìn 1-2 token thật trước caret
+     * (path tổ tiên của rule không tin được: mỗi rule chỉ giữ 1 path), và bảo thủ - chỉ 2 dạng chắc chắn:
+     * ASC/DESC/NULLS FIRST/NULLS LAST ngay trước caret, hoặc "BY|, định_danh |". Biểu thức phức tạp
+     * ("ORDER BY UPPER(name) |") bỏ qua: thà không lọc còn hơn lọc nhầm.
      */
     private static boolean isImmediatelyAfterOrderByElementsNoComma(OracleSyntacticAnalyzer.Result syn) {
-        var tokenStream = syn.tokenStream();
-        var lexer = (com.sqlctx.antlr4.oracle.PlSqlLexer) tokenStream.getTokenSource();
-        int i = syn.caretTokenIndex() - 1;
-
-        while (i >= 0 && tokenStream.get(i).getChannel() != Token.DEFAULT_CHANNEL) {
-            i--;
-        }
+        var tokens = syn.tokenStream();
+        int i = previousRealIndex(tokens, syn.caretTokenIndex());
         if (i < 0) {
             return false;
         }
-        int immediateType = tokenStream.get(i).getType();
-        if (immediateType == PlSqlParser.ASC || immediateType == PlSqlParser.DESC) {
+        int type = tokens.get(i).getType();
+        if (type == PlSqlParser.ASC || type == PlSqlParser.DESC) {
             return true;
         }
-        if (immediateType == PlSqlParser.FIRST || immediateType == PlSqlParser.LAST) {
-            // FIRST/LAST cũng dùng ở "FETCH FIRST n ROWS ONLY" (row-limiting clause, không phải
-            // order_by_elements) - CHỈ tính là đuôi order_by_elements khi token liền trước nó là
-            // NULLS ("NULLS FIRST"/"NULLS LAST"), không đứng riêng lẻ.
-            int j = i - 1;
-            while (j >= 0 && tokenStream.get(j).getChannel() != Token.DEFAULT_CHANNEL) {
-                j--;
-            }
-            return j >= 0 && tokenStream.get(j).getType() == PlSqlParser.NULLS;
+        int j = previousRealIndex(tokens, i);
+        if (type == PlSqlParser.FIRST || type == PlSqlParser.LAST) {
+            // FIRST/LAST còn ở "FETCH FIRST n ROWS" - chỉ tính khi đi sau NULLS
+            return j >= 0 && tokens.get(j).getType() == PlSqlParser.NULLS;
         }
-        // SỬA (bug thật, phát hiện lúc viết test đi đúng đường production): dùng
-        // lexer.isIdentifier() thay vì chỉ check REGULAR_ID/DELIMITED_ID - y hệt lý do đã sửa ở
-        // OracleAliasNameSuggester. Tên cột hoàn toàn BÌNH THƯỜNG như "name" lại được lexer gán
-        // token type RIÊNG (1 trong ~2300 non-reserved keyword của Oracle), KHÔNG PHẢI REGULAR_ID -
-        // "order by name |" (cột tên "name") không được nhận diện, cột bị gợi ý lại dù đã gõ xong.
-        if (!lexer.isIdentifier(immediateType)) {
+        // tên cột thường như "name" có token type riêng (non-reserved keyword), không phải REGULAR_ID
+        if (!((PlSqlLexer) tokens.getTokenSource()).isIdentifier(type) || j < 0) {
             return false;
         }
-
-        int j = i - 1;
-        while (j >= 0 && tokenStream.get(j).getChannel() != Token.DEFAULT_CHANNEL) {
-            j--;
-        }
-        if (j < 0) {
-            return false;
-        }
-        int beforeIdentifierType = tokenStream.get(j).getType();
-        return beforeIdentifierType == PlSqlParser.BY || beforeIdentifierType == PlSqlParser.COMMA;
+        int beforeIdentifier = tokens.get(j).getType();
+        return beforeIdentifier == PlSqlParser.BY || beforeIdentifier == PlSqlParser.COMMA;
     }
 
-    private static void addKeywordSuggestions(List<Suggestion> suggests, Integer key, List<Integer> following) {
-        String text = KeywordText.of(PlSqlParser.VOCABULARY, key, following); // null = không phải từ khoá thật
-        if (text != null) {
-            suggests.add(Suggestion.of(text, SuggestionType.KEYWORD));
+    private static int previousRealIndex(TokenStream tokens, int fromIndex) {
+        int i = fromIndex - 1;
+        while (i >= 0 && tokens.get(i).getChannel() != Token.DEFAULT_CHANNEL) {
+            i--;
         }
+        return i;
     }
 
-    private static void addDataTypeSuggestions(List<Suggestion> suggests) {
-        SchemaIndex.dataTypes.forEach(t -> suggests.add(Suggestion.of(t, SuggestionType.DATATYPE, t)));
-    }
-
-    private static void addTableAliasSuggestions(List<Suggestion> suggests, OracleSyntacticAnalyzer.Result syn, OracleSemanticAnalyzer.Result sem) {
+    private static void addTableAlias(List<Suggestion> suggests, OracleSyntacticAnalyzer.Result syn, OracleSemanticAnalyzer.Result sem) {
         var tableName = OracleAliasNameSuggester.extractTableNameForImplicitAlias(syn.tokenStream(), syn.caretTokenIndex());
         if (tableName != null) {
-            String alias = OracleAliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName);
-            suggests.add(Suggestion.of(alias, SuggestionType.ALIAS));
+            suggests.add(Suggestion.of(OracleAliasNameSuggester.suggestAlias(sem.visibleAliases(), tableName), SuggestionType.ALIAS));
         }
     }
 
-    private static java.util.Map<String, List<Suggestion>> columnsPerVisibleAlias(OracleSemanticAnalyzer.Result sem) {
-        var perAlias = new java.util.LinkedHashMap<String, List<Suggestion>>();
-        sem.visibleAliases().forEach((alias, table) -> {
-            var cols = new ArrayList<Suggestion>();
-            var derived = sem.visibleDerivedScopes().get(alias);
-            if (derived != null) {
-                DerivedColumnExpander.addDerivedColumns(cols, alias, derived);
-            } else {
-                SchemaIndex.getColumnsOfTable(table).forEach(c -> cols.add(Suggestion.of(alias + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
-            }
-            perAlias.put(alias, cols);
-        });
-        return perAlias;
-    }
-
-    /**
-     * JOIN ... USING (|): chỉ gợi ý cột có TÊN xuất hiện ở ít nhất 2 alias visible (cột chung
-     * giữa các bảng tham gia join), mỗi alias đóng góp 1 gợi ý dạng alias.cột. Mirror y hệt
-     * Postgres OracleSuggestionService.addCommonColumnSuggestions.
-     */
-    private static void addCommonColumnSuggestions(List<Suggestion> suggests, OracleSemanticAnalyzer.Result sem) {
-        var perAlias = columnsPerVisibleAlias(sem);
-        var aliasCountByColumn = new java.util.HashMap<String, Integer>();
-        perAlias.values().forEach(cols -> cols.stream()
-                .map(s -> s.getKey().substring(s.getKey().indexOf('.') + 1).toLowerCase())
-                .distinct()
-                .forEach(name -> aliasCountByColumn.merge(name, 1, Integer::sum)));
-        perAlias.values().forEach(cols -> cols.stream()
-                .filter(s -> aliasCountByColumn.get(s.getKey().substring(s.getKey().indexOf('.') + 1).toLowerCase()) >= 2)
-                .forEach(suggests::add));
-    }
-
-    /** Như addColumnSuggestions, nhưng chỉ gợi ý cột của đúng 1 alias - {@link OracleSemanticAnalyzer.Result#ddlTargetAlias()}. */
-    private static void addTargetOnlyColumnSuggestions(List<Suggestion> suggests, OracleSemanticAnalyzer.Result sem) {
-        String alias = sem.ddlTargetAlias();
-        String table = sem.visibleAliases().get(alias);
-        if (table == null) {
-            return;
-        }
-        var derived = sem.visibleDerivedScopes().get(alias);
-        if (derived != null) {
-            DerivedColumnExpander.addDerivedColumns(suggests, alias, derived);
-        } else {
-            SchemaIndex.getColumnsOfTable(table).forEach(c -> suggests.add(Suggestion.of(alias + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
-        }
-    }
-
-    private static void addColumnSuggestions(List<Suggestion> suggests, OracleSemanticAnalyzer.Result sem, boolean includeFunctions) {
-        if (includeFunctions) {
-            SchemaIndex.functions.forEach(fn -> suggests.add(Suggestion.of(fn, SuggestionType.FUNCTION)));
-        }
-        if (sem.qualifier() != null) {
-            String qualifier = sem.qualifier();
-            if (sem.qualifierDerivedScope() != null) {
-                DerivedColumnExpander.addDerivedColumns(suggests, qualifier, sem.qualifierDerivedScope());
-            } else if (sem.qualifierResolvesTo() != null) {
-                SchemaIndex.getColumnsOfTable(sem.qualifierResolvesTo()).forEach(c -> suggests.add(Suggestion.of(qualifier + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
-            } else {
-                SchemaIndex.getColumnsOfTable(qualifier).forEach(c -> suggests.add(Suggestion.of(qualifier + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
-            }
-        } else if (!sem.visibleAliases().isEmpty()) {
-            sem.visibleAliases().forEach((alias, table) -> {
-                var derived = sem.visibleDerivedScopes().get(alias);
-                if (derived != null) {
-                    DerivedColumnExpander.addDerivedColumns(suggests, alias, derived);
-                } else {
-                    SchemaIndex.getColumnsOfTable(table).forEach(c -> suggests.add(Suggestion.of(alias + "." + c.name(), SuggestionType.COLUMN, c.dataType())));
-                }
-            });
-        }
-    }
-
-    private static void addTableNameSuggestions(List<Suggestion> suggests, OracleSyntacticAnalyzer.Result syn, java.util.Set<String> visibleCteNames) {
-        // "tableview_name" dùng CHUNG cho mọi vị trí tham chiếu bảng/view (xem comment ở nơi gọi) -
-        // nhưng DROP VIEW chỉ nên gợi ý VIEW thật, không phải bảng (bug thật phát hiện qua
-        // GrammarBreadthTest: "DROP VIEW |" gợi ý cả TABLE, dù DROP VIEW một bảng thật là câu lệnh
-        // vô nghĩa/sai ngữ nghĩa). Tương tự, DROP TABLE chỉ nên gợi ý TABLE, không phải VIEW.
-        boolean isDropView = isRuleAncestorAnywhere(syn, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_drop_view);
-        boolean isDropTable = isRuleAncestorAnywhere(syn, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_drop_table);
+    /** DROP VIEW chỉ gợi ý view, DROP TABLE chỉ bảng; CTE không DROP được. */
+    private static void addTableNames(List<Suggestion> suggests, OracleSyntacticAnalyzer.Result syn,
+                                      CandidatesResult candidates, Set<String> visibleCteNames) {
+        boolean dropView = hasAncestor(candidates, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_drop_view);
+        boolean dropTable = hasAncestor(candidates, PlSqlParser.RULE_tableview_name, PlSqlParser.RULE_drop_table);
+        var tables = SchemaIndex.schemaTableIndex.values().stream();
 
         int caretTokenIndex = syn.caretTokenIndex();
         var tokenStream = syn.tokenStream();
-        if (caretTokenIndex >= 2) {
-            Token tok = tokenStream.get(caretTokenIndex - 1);
-            // DOT (Postgres) -> Oracle: dấu chấm là token PERIOD (xem PlSqlLexer.g4: "PERIOD: '.';").
-            if (tok.getType() == PlSqlParser.PERIOD) {
-                Token prev = tokenStream.get(caretTokenIndex - 2);
-                // Identifier (Postgres, 1 token) -> Oracle có 2 loại identifier: REGULAR_ID (không
-                // quote) và DELIMITED_ID (có quote "..."), tên schema có thể là 1 trong 2.
-                if (prev.getType() == PlSqlParser.REGULAR_ID || prev.getType() == PlSqlParser.DELIMITED_ID) {
-                    String schema = prev.getText();
-                    SchemaIndex.getTablesBySchema(schema).stream()
-                            .filter(t -> !isDropView || "view".equalsIgnoreCase(t.kind()))
-                            .filter(t -> !isDropTable || "table".equalsIgnoreCase(t.kind()))
-                            .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
-                    return;
-                }
+        if (caretTokenIndex >= 2 && tokenStream.get(caretTokenIndex - 1).getType() == PlSqlParser.PERIOD) {
+            Token prev = tokenStream.get(caretTokenIndex - 2);
+            if (prev.getType() == PlSqlParser.REGULAR_ID || prev.getType() == PlSqlParser.DELIMITED_ID) {
+                tables = SchemaIndex.getTablesBySchema(prev.getText()).stream();
+                visibleCteNames = Set.of(); // "schema." đang gõ: chỉ bảng của schema đó
             }
         }
-        SchemaIndex.schemaTableIndex.values().stream()
-                .filter(t -> !isDropView || "view".equalsIgnoreCase(t.kind()))
-                .filter(t -> !isDropTable || "table".equalsIgnoreCase(t.kind()))
+        tables.filter(t -> !dropView || "view".equalsIgnoreCase(t.kind()))
+                .filter(t -> !dropTable || "table".equalsIgnoreCase(t.kind()))
                 .forEach(t -> suggests.add(Suggestion.of(t.fullName(), SuggestionType.fromLabel(t.kind()))));
-        // Tên CTE cũng là 1 "bảng" hợp lệ để gõ trong FROM - không áp dụng cho DROP VIEW/DROP TABLE
-        // (CTE không phải đối tượng có thể DROP). Cùng bug/lý do đã sửa bên Postgres.
-        if (!isDropView && !isDropTable) {
+        if (!dropView && !dropTable) {
             visibleCteNames.forEach(name -> suggests.add(Suggestion.of(name, SuggestionType.TABLE)));
         }
     }
