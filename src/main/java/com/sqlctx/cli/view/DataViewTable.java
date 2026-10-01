@@ -11,97 +11,41 @@ import java.util.List;
 import org.jline.builtins.Less;
 import org.jline.builtins.Options;
 import org.jline.builtins.Source;
-import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
-import org.jline.utils.NonBlockingReader;
 import org.jline.utils.WCWidth;
 
 public class DataViewTable {
 
     private static final int DEFAULT_MAX_FIELD_WIDTH = 5000;
 
-    private static final boolean ASCII =
+    static final boolean ASCII =
         System.getProperty("os.name").toLowerCase().contains("win");
 
+    /**
+     * Vừa màn hình (cả rộng lẫn cao) thì in thẳng bảng có khung; không vừa thì mở {@link GridView} toàn màn
+     * hình (header dính, cột đầu đứng yên, cuộn dòng/cột, xem bản ghi) thay vì cắt bớt cột hoặc đẩy qua less.
+     */
     public static void print(
             Terminal terminal,
             List<String> columns,
             List<List<String>> rows,
             Runnable afterScreenCleared) throws Exception {
 
-        int termWidth = effectiveWidth(terminal);
         int[] widths = calcWidths(columns, rows, DEFAULT_MAX_FIELD_WIDTH);
-        int tableWidth = calcTableWidth(widths);
-
-        PrintWriter out = terminal.writer();
-
-
-        if (tableWidth <= termWidth) {
-            int termHeight = terminal.getHeight();
-            // Border trên + header + border giữa + border dưới = 4 dòng khung, cộng số dòng dữ liệu.
-            int contentLines = rows.size() + 4;
-            if (termHeight > 0 && contentLines > termHeight) {
-                paginate(terminal, render(columns, rows, widths));
-                return;
-            }
-            out.print(render(columns, rows, widths));
-            out.flush();
+        int termHeight = terminal.getHeight();
+        // Border trên + header + border giữa + border dưới = 4 dòng khung, cộng số dòng dữ liệu.
+        boolean fitsHeight = termHeight <= 0 || rows.size() + 4 <= termHeight;
+        if (calcTableWidth(widths) <= effectiveWidth(terminal) && fitsHeight) {
+            terminal.writer().print(render(columns, rows, widths));
+            terminal.writer().flush();
             return;
         }
-
-        showTruncated(out, columns, rows, truncateWidths(widths, termWidth), termWidth);
-
-        Attributes savedAttrs = terminal.enterRawMode();
-        try {
-            NonBlockingReader in = terminal.reader();
-            int width = termWidth;
-            int height = terminal.getHeight();
-            // Chờ phím kiểu thăm dò để vẽ lại bảng khi đổi cỡ cửa sổ (terminal xếp lại làm bảng cũ bị vỡ).
-            while (in.peek(150) == NonBlockingReader.READ_EXPIRED) {
-                if (terminal.getWidth() == width && terminal.getHeight() == height) {
-                    continue;
-                }
-                width = terminal.getWidth();
-                height = terminal.getHeight();
-                out.print("\u001b[H\u001b[2J");
-                afterScreenCleared.run();
-                if (calcTableWidth(widths) <= width) {
-                    out.print(render(columns, rows, widths));
-                    out.flush();
-                    return;
-                }
-                showTruncated(out, columns, rows, truncateWidths(widths, width), width);
-            }
-
-            int ch = in.read();
-            if (ch == 'f' || ch == 'F') {
-                out.print("\r\u001b[2K");
-                out.flush();
-                paginate(terminal, "\n\n" + render(columns, rows, widths));
-            } else if (ch == 27) {
-                discardEscapeSequence(terminal);
-            }
-        } finally {
-            terminal.setAttributes(savedAttrs);
-            out.print("\r\u001b[2K");
-            out.flush();
+        // Chỉ vẽ lại status bar khi màn hình chính thật sự phải xoá (đổi cỡ lúc đang xem): redraw() dành chỗ lại cho
+        // status bar từ đầu, gọi trên màn hình vừa được khôi phục nguyên vẹn sẽ đẩy lệch nội dung cũ và vẽ đôi thanh.
+        if (GridView.show(terminal, columns, rows)) {
+            terminal.writer().print("\u001b[H\u001b[2J");
+            afterScreenCleared.run();
         }
-    }
-
-    private static void showTruncated(PrintWriter out, List<String> columns, List<List<String>> rows,
-                                      int[] truncatedWidths, int termWidth) {
-        out.print(render(columns, rows, truncatedWidths));
-        out.print("\n");
-        // Gợi ý phải nằm gọn trên 1 dòng, nếu không lúc xoá dòng gợi ý sẽ để lại phần bị xuống dòng.
-        String hint = " [table truncated — press f to view full, any other key to skip]";
-        if (hint.length() >= termWidth) {
-            hint = " [truncated — f: full view, any key: skip]";
-        }
-        if (hint.length() >= termWidth) {
-            hint = " [f: full, key: skip]";
-        }
-        out.print("\u001b[33m" + hint + "\u001b[0m");
-        out.flush();
     }
 
     /**
@@ -146,14 +90,6 @@ public class DataViewTable {
         int w = terminal.getWidth();
         return w > 0 ? w : Integer.MAX_VALUE;
     }
-
-    /** Phím mũi tên / F-key gửi cả chuỗi ESC[...; bỏ phần đuôi để nó không lọt vào dòng lệnh kế tiếp. */
-    private static void discardEscapeSequence(Terminal terminal) throws Exception {
-        while (terminal.reader().peek(30) >= 0) {
-            terminal.reader().read();
-        }
-    }
-
 
     private static void paginate(Terminal terminal, String content) throws Exception {
         Less less =
@@ -200,9 +136,9 @@ public class DataViewTable {
 
     // Viền bảng (khung + dấu "│" ngăn cột) - xám mờ, đứng lùi phía sau để dữ liệu/header nổi bật hơn thay vì
     // cạnh tranh cùng 1 màu trắng phẳng như trước.
-    private static final String BORDER_COLOR = "\u001b[38;5;240m";
+    static final String BORDER_COLOR = "\u001b[38;5;240m";
 
-    private static String border(String glyph) {
+    static String border(String glyph) {
         return BORDER_COLOR + glyph + RESET;
     }
 
@@ -253,7 +189,7 @@ public class DataViewTable {
     private static final String BOOL_COLOR = "\u001b[38;5;140m";
     private static final String DATE_COLOR = "\u001b[38;5;108m";
 
-    private static String styleForValue(String cell) {
+    static String styleForValue(String cell) {
         if ("<null>".equals(cell)) {
             return NULL_COLOR;
         }
@@ -273,7 +209,7 @@ public class DataViewTable {
     }
 
     /** Cột toàn số (bỏ qua NULL/rỗng) -> căn phải, giống quy ước psql - dễ so sánh độ lớn giữa các dòng. */
-    private static boolean[] computeNumericColumns(List<List<String>> rows, int cols) {
+    static boolean[] computeNumericColumns(List<List<String>> rows, int cols) {
         boolean[] numeric = new boolean[cols];
         boolean[] sawAny = new boolean[cols];
         Arrays.fill(numeric, true);
@@ -321,8 +257,8 @@ public class DataViewTable {
         return sb.toString();
     }
 
-    private static final String HEADER_COLOR = "\u001b[1;36m";
-    private static final String RESET = "\u001b[0m";
+    static final String HEADER_COLOR = "\u001b[1;36m";
+    static final String RESET = "\u001b[0m";
 
     private static String formatHeader(List<String> cells, int[] widths) {
         StringBuilder sb = new StringBuilder().append(border(ASCII ? "|" : "│"));
@@ -349,7 +285,7 @@ public class DataViewTable {
     // Width helpers
     // -------------------------------------------------------------------------
 
-    private static int[] calcWidths(List<String> columns, List<List<String>> rows, int maxFieldWidth) {
+    static int[] calcWidths(List<String> columns, List<List<String>> rows, int maxFieldWidth) {
         int cols = columns.size();
         int[] widths = new int[cols];
 
@@ -409,7 +345,7 @@ public class DataViewTable {
     // -------------------------------------------------------------------------
 
     /** Xuống dòng / tab -> 1 khoảng trắng; bỏ mọi ký tự điều khiển khác (kể cả ESC) để không phá vỡ bảng. */
-    private static String clean(String s) {
+    static String clean(String s) {
         if (s == null) {
             return "";
         }
@@ -428,7 +364,7 @@ public class DataViewTable {
     // Truncate
     // -------------------------------------------------------------------------
 
-    private static String truncate(String s, int maxWidth) {
+    static String truncate(String s, int maxWidth) {
         if (displayWidth(s) <= maxWidth) {
             return s;
         }
@@ -458,7 +394,7 @@ public class DataViewTable {
     // Unicode display width
     // -------------------------------------------------------------------------
 
-    private static int displayWidth(String s) {
+    static int displayWidth(String s) {
         int width = 0;
         for (int i = 0; i < s.length(); ) {
             int cp = s.codePointAt(i);

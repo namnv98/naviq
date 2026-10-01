@@ -44,6 +44,29 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
         scopes.open(ctx).hidesParentFromItems = isNonLateralFromSubquery(ctx);
     }
 
+    /**
+     * ORDER BY thuộc select_no_parens, nằm ngoài scope nhánh SELECT (nơi đăng ký FROM), nên caret ở đó không thấy
+     * bảng nào. Câu 1 nhánh (không UNION/INTERSECT/EXCEPT) thì ORDER BY tham chiếu được cột của FROM: kéo scope nhánh
+     * phủ tới hết ORDER BY. Không tới LIMIT/OFFSET (Postgres cấm cột ở đó). Câu nhiều nhánh giữ nguyên: ORDER BY
+     * chỉ nhận tên cột đầu ra.
+     */
+    @Override
+    public void exitSelect_no_parens(PostgreSQLParser.Select_no_parensContext ctx) {
+        PostgreSQLParser.Select_clauseContext clause = ctx.select_clause();
+        if (clause == null || clause.simple_select_intersect().size() != 1
+                || clause.simple_select_intersect(0).simple_select_pramary().size() != 1) {
+            return;
+        }
+        Scope branch = firstBranchOf.get(scopes.current());
+        PostgreSQLParser.Opt_sort_clauseContext sort = ctx.opt_sort_clause();
+        if (branch == null || sort == null || sort.getStop() == null) {
+            return;
+        }
+        // Token thiếu được ANTLR chèn ảo (tokenIndex -1): coi như mở tới hết input, giống ScopeTree.closeIfOpenedBy.
+        int stop = sort.getStop().getTokenIndex();
+        branch.stopTokenIndex = stop >= branch.startTokenIndex ? Math.max(branch.stopTokenIndex, stop) : Integer.MAX_VALUE;
+    }
+
     /** "(select ...)" đứng trực tiếp làm table_ref trong FROM, không có LATERAL (bỏ qua các lớp ngoặc thừa). */
     private static boolean isNonLateralFromSubquery(PostgreSQLParser.Select_no_parensContext ctx) {
         ParserRuleContext p = ctx.getParent();

@@ -522,6 +522,28 @@ class PostgresSuggestionServiceTest {
     }
 
     @Test
+    @DisplayName("ORDER BY |: phải gợi ý cột của FROM (bug thật: ORDER BY nằm ngoài scope nhánh SELECT nên ra rỗng)")
+    void orderBySuggestsFromColumns() {
+        pg("select * from users order by |")
+                .columns("users.email", "users.id", "users.name")
+                .functions(PG_FUNCTIONS)
+                .datatypes(PG_DATATYPES)
+                .systemColumns("users");
+    }
+
+    @Test
+    @DisplayName("ORDER BY alias.|: phải ra cột của bảng theo alias")
+    void orderByAliasDotSuggestsColumns() {
+        pg("select * from users u order by u.|").columns("u.email", "u.id", "u.name").systemColumns("u");
+    }
+
+    @Test
+    @DisplayName("LIMIT |: KHÔNG gợi ý cột - Postgres từ chối \"argument of LIMIT must not contain variables\"")
+    void limitDoesNotSuggestColumns() {
+        pg("select * from users order by id limit |").functions(PG_FUNCTIONS).datatypes(PG_DATATYPES);
+    }
+
+    @Test
     @DisplayName("Subquery trong FROM (không LATERAL) KHÔNG được thấy mục FROM cùng cấp - Postgres từ chối \"select * from users a, (select a.id from orders) o\"")
     void fromSubqueryDoesNotSeeSiblingFromItems() {
         pg("select * from users a, (select a.| from orders) o");
