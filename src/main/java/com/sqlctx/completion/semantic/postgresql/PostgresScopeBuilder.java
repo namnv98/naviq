@@ -19,9 +19,12 @@ import static com.sqlctx.completion.semantic.ScopeTree.lastPart;
 public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
 
     private final ScopeTree scopes;
+    /** Token caret trong stream đã patch: target chứa nó là cột đang gõ dở, không phải cột chiếu ra. */
+    private final int caretTokenIndex;
 
-    public PostgresScopeBuilder(ScopeTree scopes) {
+    public PostgresScopeBuilder(ScopeTree scopes, int caretTokenIndex) {
         this.scopes = scopes;
+        this.caretTokenIndex = caretTokenIndex;
     }
 
     @Override
@@ -38,7 +41,16 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
 
     @Override
     public void enterSelect_no_parens(PostgreSQLParser.Select_no_parensContext ctx) {
-        scopes.open(ctx);
+        scopes.open(ctx).hidesParentFromItems = isNonLateralFromSubquery(ctx);
+    }
+
+    /** "(select ...)" đứng trực tiếp làm table_ref trong FROM, không có LATERAL (bỏ qua các lớp ngoặc thừa). */
+    private static boolean isNonLateralFromSubquery(PostgreSQLParser.Select_no_parensContext ctx) {
+        ParserRuleContext p = ctx.getParent();
+        while (p instanceof PostgreSQLParser.Select_with_parensContext) {
+            p = p.getParent();
+        }
+        return p instanceof PostgreSQLParser.Table_refContext ref && ref.LATERAL_P() == null;
     }
 
     // Mỗi nhánh UNION/INTERSECT/EXCEPT có scope riêng: FROM của nhánh này không được nhìn thấy ở nhánh
@@ -69,7 +81,7 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
     @Override
     public void exitTarget_columnref(PostgreSQLParser.Target_columnrefContext ctx) {
         PostgreSQLParser.ColumnrefContext col = ctx.columnref();
-        if (col == null || scopes.isUnreliable(ctx)) {
+        if (col == null || scopes.isUnreliable(ctx) || containsCaret(ctx)) {
             return;
         }
         if (endsWithStar(col.indirection())) {
@@ -81,7 +93,7 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
 
     @Override
     public void exitTarget_label(PostgreSQLParser.Target_labelContext ctx) {
-        if (ctx.a_expr() == null || scopes.isUnreliable(ctx)) {
+        if (ctx.a_expr() == null || scopes.isUnreliable(ctx) || containsCaret(ctx)) {
             return;
         }
         PostgreSQLParser.Target_aliasContext aliasCtx = ctx.target_alias();
@@ -94,6 +106,11 @@ public class PostgresScopeBuilder extends PostgreSQLParserBaseListener {
             String text = ctx.a_expr().getText();
             addProjectedColumn(text.matches("[a-zA-Z_][a-zA-Z0-9_.]*") ? lastPart(text) : null);
         }
+    }
+
+    private boolean containsCaret(ParserRuleContext ctx) {
+        return ctx.getStart() != null && ctx.getStop() != null
+                && ctx.getStart().getTokenIndex() <= caretTokenIndex && caretTokenIndex <= ctx.getStop().getTokenIndex();
     }
 
     /** Bỏ trùng: nhiều vế UNION có thể ra cùng tên cột. */

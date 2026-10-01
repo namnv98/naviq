@@ -23,7 +23,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 class CaretTokenTest {
 
-    private static final Map<String, String> PG_ALIASES = Map.of("x", "<subquery#4>", "u", "users");
+    // Không có "x": caret nằm TRONG subquery x, mà subquery trong FROM không thấy mục FROM cùng cấp (kể cả chính
+    // nó) - Postgres từ chối tham chiếu x ở đó. Oracle chưa áp quy tắc này nên vẫn còn x.
+    private static final Map<String, String> PG_ALIASES = Map.of("u", "users");
     private static final Map<String, String> ORA_ALIASES = Map.of("x", "<subquery#2>", "u", "users");
 
     @Test

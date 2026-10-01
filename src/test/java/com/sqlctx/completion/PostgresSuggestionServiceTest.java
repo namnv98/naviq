@@ -522,6 +522,32 @@ class PostgresSuggestionServiceTest {
     }
 
     @Test
+    @DisplayName("Subquery trong FROM (không LATERAL) KHÔNG được thấy mục FROM cùng cấp - Postgres từ chối \"select * from users a, (select a.id from orders) o\"")
+    void fromSubqueryDoesNotSeeSiblingFromItems() {
+        pg("select * from users a, (select a.| from orders) o");
+    }
+
+    @Test
+    @DisplayName("Subquery trong FROM vẫn thấy alias của câu NGOÀI hơn 1 cấp (correlated qua scalar subquery)")
+    void fromSubquerySeesOuterQueryLevel() {
+        pg("select (select 1 from (select a.| from orders) o) from users a")
+                .columns("a.email", "a.id", "a.name")
+                .systemColumns("a");
+    }
+
+    @Test
+    @DisplayName("Subquery trong FROM vẫn thấy CTE của câu ngoài")
+    void fromSubquerySeesOuterCte() {
+        pg("with c as (select id from users) select * from (select c.| from c) x").columns("c.id");
+    }
+
+    @Test
+    @DisplayName("Chữ đang gõ dở trong SELECT list của subquery KHÔNG thành cột của alias subquery (bug thật: gợi ý \"u1.na\")")
+    void typedWordInSubquerySelectIsNotProjected() {
+        pg("select u1.id from (select na| from users as u) as u1").columns("u.name");
+    }
+
+    @Test
     @DisplayName("UNION nhánh 2 KHÔNG được thấy bảng của nhánh 1 - bug thật đã sửa, verify bằng Postgres THẬT: \"select id from users union select users.name from orders\" bị Postgres từ chối \"missing FROM-clause entry for table users\" - chứng minh 2 nhánh KHÔNG share scope")
     void unionSecondBranchDoesNotLeakFirstBranchTable() {
         pg("select id from users union select | from orders")

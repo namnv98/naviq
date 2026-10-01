@@ -55,6 +55,13 @@ public class Scope implements DerivedScope {
     public boolean isolatedFromParentAliases = false;
 
     /**
+     * true cho scope của subquery trong FROM không có LATERAL ("from users a, (select ...) x"): SQL không cho
+     * nó tham chiếu các mục FROM cùng cấp, kể cả alias x của chính nó. visibilityChain() bỏ qua đúng scope cha
+     * (nơi chứa FROM đó) nhưng vẫn leo tiếp lên các cấp ngoài hơn (correlated) và WITH của câu ngoài.
+     */
+    public boolean hidesParentFromItems = false;
+
+    /**
      * Alias TARGET của scope này khi {@link #isDdlTargetScope} - tức alias được đăng ký ĐẦU TIÊN
      * trực tiếp vào scope (insertion-order của {@code aliases}, LinkedHashMap). Dùng cho các vị
      * trí chỉ nên gợi ý cột của bảng đích, không phải bảng khác cùng scope (vd MERGE có cả target
@@ -84,7 +91,12 @@ public class Scope implements DerivedScope {
 
     public List<Scope> visibilityChain() {
         Deque<Scope> chain = new ArrayDeque<>();
+        boolean skipParent = false;
         for (Scope s = this; s != null; s = s.parent) {
+            if (skipParent) {
+                skipParent = false;
+                continue;
+            }
             if (s != this && s.isDdlTargetScope) {
                 continue;
             }
@@ -92,6 +104,7 @@ public class Scope implements DerivedScope {
             if (s.isolatedFromParentAliases) {
                 break;
             }
+            skipParent = s.hidesParentFromItems;
         }
         return new ArrayList<>(chain);
     }

@@ -52,7 +52,7 @@ public class PostgresSemanticAnalyzer {
             ParseTree tree = parser.root();
 
             ScopeTree scopes = new ScopeTree(offendingTokens);
-            ParseTreeWalker.DEFAULT.walk(new PostgresScopeBuilder(scopes), tree);
+            ParseTreeWalker.DEFAULT.walk(new PostgresScopeBuilder(scopes, patch.caretTokenIndex()), tree);
             scopes.dropUnnamedEntries();
 
             // caretTokenIndex đã được PostgresCursorTokenPatcher tính SẴN, đúng cho cả 2 case

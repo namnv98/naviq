@@ -562,9 +562,12 @@ public class MenuCompleter {
 
         String m = SuggestFilter.matchPart(match, dot);
 
+        // SuggestFilter chỉ khớp phần SAU dấu chấm cuối của key ("public.users" -> "users"), nên chỉ tô từ đó;
+        // tô từ đầu sẽ bắt nhầm chữ "u" của "public".
+        int start = word.lastIndexOf('.') + 1;
         int j = 0;
         for (int i = 0; i < word.length(); i++) {
-            if (j < m.length() &&
+            if (i >= start && j < m.length() &&
                     Character.toLowerCase(word.charAt(i)) == Character.toLowerCase(m.charAt(j))) {
                 sb.style(STYLE_HIGHLIGHT).append(word.charAt(i));
                 j++;
