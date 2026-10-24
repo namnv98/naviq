@@ -1,0 +1,201 @@
+# Danh sách câu SQL (Postgres) để so completion của sqlctx với IntelliJ - xem README.md.
+# Mỗi dòng 1 câu, "|" đánh dấu vị trí con trỏ. Dòng trống và dòng bắt đầu bằng "#" bị bỏ qua.
+# Cả ij-completion-dump.groovy (IntelliJ) và IntellijCompareTest (tool) đều đọc file này.
+alter default privileges in schema public grant select on tables to |
+alter group grp1 add user |
+alter aggregate agg1(int4) owner to |
+create tablespace ts2 owner |
+create database db2 owner |
+drop owned by |
+drop role |
+grant select on public.users to |
+grant role1 to |
+revoke select on public.users from |
+revoke role1 from |
+reassign owned by role1 to |
+alter extension ext1 add table |
+alter publication pub1 add table |
+analyze |
+create publication pub1 for table |
+drop table |
+refresh materialized view |
+reindex table |
+vacuum |
+select | from public.users
+create table t2 as select | from public.users
+create materialized view mv1 as select | from public.users
+create view v1 as select | from public.users
+declare cur1 cursor for select | from public.users
+explain select | from public.users
+prepare p1 as select | from public.users
+delete from public.users where |
+update public.users set |
+create index idx1 on public.users (|
+alter policy pol1 on public.users using (|
+create policy pol1 on public.users using (|
+merge into public.orders o using public.users u on o.user_id = u.id when matched then update set |
+create function f1() returns |
+alter type mytype add attribute a |
+create domain d1 as |
+drop operator = (int4, |
+drop aggregate agg1(|
+create aggregate agg2(int4) (sfunc = |
+alter operator = (int4, int4) set (restrict = |
+drop function |
+create cast (int4 as text) with function |
+create trigger trg2 before insert on public.users execute function |
+create event trigger et2 on ddl_command_start execute function |
+call myproc(|
+create assertion a1 check (|
+create statistics st1 on |
+alter table public.users add column |
+create schema if not exists |
+alter table public.users rename to |
+create table t3 (|
+insert into public.users (|
+create conversion conv1 for 'UTF8' to 'LATIN1' from |
+alter event trigger trg1 |
+alter collation c1 |
+alter database db1 set tablespace |
+alter database db1 set search_path to |
+alter domain d1 validate constraint |
+alter type status_enum add value 'x' before |
+alter extension ext1 update to |
+alter foreign data wrapper fdw1 options (|
+alter server srv1 options (|
+alter function f1(int4) |
+alter function f1(int4) depends on extension |
+alter table public.users set schema |
+alter type mytype set (|
+alter sequence s1 restart with |
+alter system set |
+alter tablespace ts1 set (|
+alter role role1 set search_path to |
+alter role role1 with |
+alter subscription sub1 set publication |
+alter statistics stat1 set statistics |
+alter text search configuration tsc1 add mapping for |
+alter text search dictionary tsd1 (|
+alter user mapping for user1 server srv1 options (|
+checkpoint |
+close |
+cluster public.users using |
+comment on table public.users is |
+set constraints all |
+copy public.users to |
+create access method am1 type index handler |
+create extension ext1 schema |
+create foreign data wrapper fdw1 handler |
+create server srv1 foreign data wrapper |
+create foreign table ft1 (id int4) server |
+create group grp1 with |
+create operator class oc1 for type int4 using btree as |
+create operator family of1 using |
+alter operator family of1 using btree add |
+create language plpgsql2 |
+create sequence s2 increment by |
+create subscription sub2 connection 'host=x' publication |
+create transform for int4 language plpgsql2 (|
+create role role2 with |
+create user user2 with |
+create user mapping for user2 server srv1 options (|
+deallocate |
+discard |
+do $$ begin null; end; $$ language |
+drop cast (int4 as text) |
+drop operator class oc1 using |
+drop operator family of1 using |
+drop subscription |
+drop tablespace |
+drop transform for int4 language |
+drop user mapping for user2 server |
+drop database |
+execute |
+fetch next from |
+import foreign schema public from server srv1 into |
+listen |
+load |
+lock table public.users in |
+notify |
+unlisten |
+create rule r1 as on insert to public.users do |
+security label on table public.users is |
+start transaction |
+truncate table public.users |
+reset |
+set search_path to |
+show |
+\d |
+select * from us|
+select * from users where i|
+update users set na|
+select * from USE|
+select * from usrs|
+select * from zzqq|
+select * from users u join orders o on o.user_id = u.|
+select * from users u join orders o using (|
+select * from contracts as |
+select * from contracts c join contracts as |
+select * from contracts c join contracts c1 join contracts as |
+select * from public.us|
+insert into orders (|
+update users set name = 'x', |
+select * from users order by name |
+select * from users group by name |
+with recent as (select * from users) select * from recent r where r.|
+select * from users u join contracts c on u.id = c.id where na|
+select * from contracts where |
+select * from (select * from users u where u.|
+|
+select * from x.|
+select * from active|
+select cast(id as t|) from users
+create table x (a t|)
+select * from users u join orders o on o.user_id = u.id join contracts c on c.id = u.id where c.|
+update orders o set status = 'x' from users u where u.id = o.user_id and u.|
+delete from orders o using users u where u.id = o.user_id and u.|
+grant app_reader to |
+reassign owned by app_reader to |
+alter table users add column |
+alter table users add column newcol |
+select | from users
+select id, | from users
+select * from users where id = 1 and |
+select status, count(*) from orders group by status having |
+select * from users where id in (select | from orders)
+select * from users u where exists (select 1 from orders o where o.user_id = u.|)
+with recent as (select * from users) select * from re|
+with a as (select * from users), b as (select * from a) select * from b bb where bb.|
+insert into users (id, name) values (1, |)
+delete from users where |
+select id, sum(total) over (partition by | order by id) from orders
+select id, sum(total) over (partition by status order by |) from orders
+select * from users u, lateral (select * from orders o where o.user_id = u.|) sub
+select id from users union select | from orders
+with a as (select * from users) select * from a union select | from orders
+select * from (select id, name from users) x where x.|
+select * from (select * from users) x where x.|
+select * from (select id from users union select id from orders) x where x.|
+with a as (select id from users union select id from orders) select * from a t where t.|
+with recursive r as (select * from users union all select * from r) select * from r t where t.|
+with a(x, y) as (select id, name from users) select * from a t where t.|
+with a as (select * from users), b as (select * from a), c as (select * from b) select * from c cc where cc.|
+select * from (select * from users) x join |
+with r as (select * from users) select * from r rr join |
+with r as (select * from users) select * from orders where user_id in (select id from r|)
+select | from users union select id from orders
+select id from users u union select u.| from orders
+drop view |
+drop materialized view |
+truncate |
+lock table |
+comment on table |
+create index idx1 on |
+insert into |
+delete from |
+select * from |
+alter table users drop column |
+insert into orders select | from users
+select id from users intersect select | from orders
+select id from users except select | from orders
+select id from users union select id from contracts union select | from orders

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cách AntlrCompletionEngine thu thập candidate</title>
+    <style>
+        :root{
+            --text-primary:#2C2C2A;
+            --text-secondary:#5F5E5A;
+            --text-muted:#888780;
+            --border:#D3D1C7;
+            --border-strong:#B4B2A9;
+            --surface-1:#F1EFE8;
+            --surface-2:#ffffff;
+            --page-bg:#ffffff;
+            --c-purple:#7F77DD;
+            --c-coral:#D85A30;
+            --c-teal:#1D9E75;
+            --c-amber:#EF9F27;
+        }
+        @media (prefers-color-scheme: dark){
+            :root{
+                --text-primary:#F1EFE8;
+                --text-secondary:#B4B2A9;
+                --text-muted:#888780;
+                --border:#444441;
+                --border-strong:#5F5E5A;
+                --surface-1:#232320;
+                --surface-2:#1a1a18;
+                --page-bg:#141412;
+            }
+        }
+        *{box-sizing:border-box}
+        body{
+            background:var(--page-bg);
+            color:var(--text-primary);
+            font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+            line-height:1.7;
+            margin:0;
+            padding:0;
+        }
+        article{max-width:720px;margin:0 auto;padding:40px 24px 80px}
+        h1{font-size:22px;font-weight:500;margin:0 0 8px}
+        h2{font-size:18px;font-weight:500;margin:56px 0 12px}
+        p{font-size:15px;color:var(--text-secondary);margin:0 0 16px}
+        code{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:13px;background:var(--surface-1);padding:1px 5px;border-radius:4px;color:var(--text-primary)}
+        svg{display:block;width:100%;height:auto;margin:8px 0}
+        .box{fill:var(--surface-1);stroke:var(--border-strong);stroke-width:0.5}
+        .c-purple{fill:var(--surface-1);stroke:var(--c-purple);stroke-width:0.8}
+        .c-coral{fill:var(--surface-1);stroke:var(--c-coral);stroke-width:0.8}
+        .c-teal{fill:var(--surface-1);stroke:var(--c-teal);stroke-width:0.8}
+        .c-amber{fill:var(--surface-1);stroke:var(--c-amber);stroke-width:0.8}
+        text.t{font-size:14px;fill:var(--text-primary)}
+        text.ts{font-size:12px;fill:var(--text-secondary)}
+        text.th{font-size:14px;font-weight:500;fill:var(--text-primary)}
+        .arr{stroke:var(--text-secondary);stroke-width:1.5;fill:none}
+        .step-el{transition:opacity .3s}
+        .step-el.future{opacity:.25}
+        .step-el.done{opacity:.55}
+        .step-el.active{opacity:1}
+        #step-desc{min-height:44px;font-size:14px;color:var(--text-secondary);margin:12px 0 16px;padding:0 4px}
+        .controls{display:flex;align-items:center;justify-content:space-between;gap:12px}
+        button{
+            font-family:inherit;font-size:14px;color:var(--text-primary);
+            background:var(--surface-2);border:0.5px solid var(--border-strong);
+            border-radius:8px;padding:8px 14px;cursor:pointer;
+        }
+        button:disabled{opacity:.4;cursor:default}
+        button:hover:not(:disabled){background:var(--surface-1)}
+        #dots{display:flex;gap:6px}
+        .dot{width:7px;height:7px;border-radius:50%}
+    </style>
+</head>
+<body>
+<article>
+
+    <h1>Cách AntlrCompletionEngine thu thập candidate</h1>
+    <p>Xuất từ cuộc trao đổi giải thích luồng chạy của <code>collectCandidates</code> trong <code>AntlrCompletionEngine</code>, dựa trên duyệt ATN (Augmented Transition Network) của ANTLR4.</p>
+
+    <h2>1. Luồng tổng quan</h2>
+    <svg viewBox="0 0 680 660">
+        <defs><marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        <rect class="box" x="180" y="20" width="320" height="56" rx="8"/>
+        <text class="th" x="340" y="38" text-anchor="middle">collectCandidates</text>
+        <text class="ts" x="340" y="56" text-anchor="middle">nhận caretTokenIndex làm đầu vào</text>
+        <line x1="340" y1="76" x2="340" y2="126" class="arr" marker-end="url(#a1)"/>
+        <rect class="c-teal" x="180" y="126" width="320" height="56" rx="8"/>
+        <text class="th" x="340" y="144" text-anchor="middle">readTokens</text>
+        <text class="ts" x="340" y="162" text-anchor="middle">đọc token thật đến caret, kể cả EOF</text>
+        <line x1="340" y1="182" x2="340" y2="232" class="arr" marker-end="url(#a1)"/>
+        <rect class="c-purple" x="180" y="232" width="320" height="56" rx="8"/>
+        <text class="th" x="340" y="250" text-anchor="middle">traverseATN</text>
+        <text class="ts" x="340" y="268" text-anchor="middle">đệ quy theo rule, cache qua shortcutMap</text>
+        <line x1="340" y1="288" x2="340" y2="338" class="arr" marker-end="url(#a1)"/>
+        <rect class="box" x="180" y="338" width="320" height="56" rx="8"/>
+        <text class="th" x="340" y="356" text-anchor="middle">Đã tới caret?</text>
+        <text class="ts" x="340" y="374" text-anchor="middle">tokenIndex ở cuối danh sách tokens</text>
+        <line x1="330" y1="394" x2="175" y2="444" class="arr" marker-end="url(#a1)"/>
+        <text class="ts" x="195" y="410" text-anchor="middle">có</text>
+        <line x1="350" y1="394" x2="485" y2="444" class="arr" marker-end="url(#a1)"/>
+        <text class="ts" x="465" y="410" text-anchor="middle">không</text>
+        <rect class="c-coral" x="45" y="444" width="260" height="56" rx="8"/>
+        <text class="th" x="175" y="462" text-anchor="middle">collectAtCaret</text>
+        <text class="ts" x="175" y="480" text-anchor="middle">ghi token / rule vào candidates</text>
+        <rect class="c-purple" x="335" y="444" width="300" height="56" rx="8"/>
+        <text class="th" x="485" y="462" text-anchor="middle">runBFS</text>
+        <text class="ts" x="485" y="480" text-anchor="middle">tiêu thụ token, ↻ gọi lại traverseATN cho rule con</text>
+        <path d="M175 500 L175 530 L250 530 L250 560" class="arr" marker-end="url(#a1)"/>
+        <rect class="box" x="180" y="560" width="320" height="56" rx="8"/>
+        <text class="th" x="340" y="578" text-anchor="middle">CandidatesCollection</text>
+        <text class="ts" x="340" y="596" text-anchor="middle">tokens, rules, rulePositions</text>
+    </svg>
+
+    <p>Nhánh <strong style="font-weight:500">"có"</strong> (đã tới caret) là nơi phức tạp nhất: 1 rule ưu tiên có thể có nhiều occurrence cạnh tranh nhau, và engine phải chọn occurrence đáng tin nhất.</p>
+
+    <h2>2. Thứ tự ưu tiên khi 1 rule có nhiều occurrence</h2>
+    <svg viewBox="0 0 680 260">
+        <defs><marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        <rect class="c-amber" x="140" y="30" width="400" height="64" rx="8"/>
+        <text class="th" x="340" y="50" text-anchor="middle">Sentinel (NO_TOKEN)</text>
+        <text class="ts" x="340" y="70" text-anchor="middle">match qua followSets tĩnh - luôn thắng</text>
+        <line x1="340" y1="94" x2="340" y2="144" class="arr" marker-end="url(#a2)"/>
+        <text class="ts" x="430" y="122" text-anchor="middle">ưu tiên giảm dần</text>
+        <rect class="c-purple" x="140" y="144" width="400" height="64" rx="8"/>
+        <text class="th" x="340" y="164" text-anchor="middle">Occurrence thật (tokenIndex)</text>
+        <text class="ts" x="340" y="184" text-anchor="middle">gần caret hơn (tokenIndex lớn hơn) thắng</text>
+    </svg>
+
+    <h2>3. 5 loại Transition trong ATN</h2>
+    <p><code>ATN</code> là đồ thị ANTLR biên dịch từ grammar: mỗi rule là 1 tiểu đồ thị (điểm bắt đầu <code>RULE_START</code>, điểm kết <code>RULE_STOP</code>), nối nhau bằng các <code>Transition</code>. <code>processTransition</code> xử lý đúng 5 loại cạnh này.</p>
+    <svg viewBox="0 0 680 640">
+        <defs><marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        <circle cx="60" cy="90" r="7" fill="var(--text-secondary)"/>
+        <text class="th" x="340" y="72" text-anchor="middle">Epsilon (ε)</text>
+        <line x1="70" y1="90" x2="590" y2="90" stroke="var(--text-secondary)" stroke-width="1.5" marker-end="url(#a3)"/>
+        <circle cx="600" cy="90" r="7" fill="var(--text-secondary)"/>
+        <text class="ts" x="340" y="112" text-anchor="middle">không tốn token, luôn được đi qua tự do</text>
+        <circle cx="60" cy="200" r="7" fill="var(--text-secondary)"/>
+        <text class="th" x="340" y="182" text-anchor="middle">Labeled (Atom / Set / NotSet / Range)</text>
+        <line x1="70" y1="200" x2="590" y2="200" stroke="var(--c-teal)" stroke-width="1.5" marker-end="url(#a3)"/>
+        <circle cx="600" cy="200" r="7" fill="var(--text-secondary)"/>
+        <text class="ts" x="340" y="222" text-anchor="middle">khớp đúng 1 token cụ thể, vd SELECT, DOT, ID</text>
+        <circle cx="60" cy="300" r="7" fill="var(--text-secondary)"/>
+        <text class="th" x="340" y="282" text-anchor="middle">Wildcard ( . )</text>
+        <line x1="70" y1="300" x2="590" y2="300" stroke="var(--c-amber)" stroke-width="1.5" marker-end="url(#a3)"/>
+        <circle cx="600" cy="300" r="7" fill="var(--text-secondary)"/>
+        <text class="ts" x="340" y="322" text-anchor="middle">khớp BẤT KỲ token nào, không phân biệt loại</text>
+        <circle cx="60" cy="400" r="7" fill="var(--text-secondary)"/>
+        <text class="th" x="340" y="382" text-anchor="middle">Predicate</text>
+        <line x1="70" y1="400" x2="590" y2="400" stroke="var(--c-coral)" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#a3)"/>
+        <circle cx="600" cy="400" r="7" fill="var(--text-secondary)"/>
+        <text class="ts" x="340" y="422" text-anchor="middle">chỉ đi qua nếu semantic predicate trả về true</text>
+        <text class="th" x="340" y="482" text-anchor="middle">RuleTransition - gọi rule con</text>
+        <circle cx="60" cy="540" r="7" fill="var(--text-secondary)"/>
+        <line x1="67" y1="540" x2="220" y2="540" stroke="var(--c-purple)" stroke-width="1.5" marker-end="url(#a3)"/>
+        <text class="ts" x="143" y="522" text-anchor="middle">target</text>
+        <rect x="220" y="505" width="240" height="70" rx="8" fill="none" stroke="var(--border-strong)" stroke-width="0.5" stroke-dasharray="4 3"/>
+        <text class="th" x="340" y="535" text-anchor="middle">rule con (vd colid)</text>
+        <text class="ts" x="340" y="555" text-anchor="middle">RULE_START → … → RULE_STOP</text>
+        <line x1="460" y1="540" x2="593" y2="540" stroke="var(--c-purple)" stroke-width="1.5" marker-end="url(#a3)"/>
+        <text class="ts" x="526" y="522" text-anchor="middle">followState</text>
+        <circle cx="600" cy="540" r="7" fill="var(--text-secondary)"/>
+        <text class="ts" x="340" y="600" text-anchor="middle">khi rule con chạm RULE_STOP, tiếp tục đi từ followState</text>
+    </svg>
+
+    <h2>4. Đi từng bước qua ví dụ SELECT * FROM users</h2>
+    <svg viewBox="0 0 680 340">
+        <defs><marker id="a4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        <g id="pointer" style="transition:transform .4s ease"><path d="M-7 -14 L7 -14 L0 -1 Z" fill="var(--c-coral)"/></g>
+        <rect class="step-el c-teal" data-step="0" x="40" y="80" width="90" height="40" rx="6"/>
+        <text class="th step-el" data-step="0" x="85" y="100" text-anchor="middle" dominant-baseline="central">SELECT</text>
+        <line class="step-el arr" data-step="1" x1="130" y1="100" x2="185" y2="100" marker-end="url(#a4)"/>
+        <rect class="step-el c-teal" data-step="1" x="185" y="80" width="50" height="40" rx="6"/>
+        <text class="th step-el" data-step="1" x="210" y="100" text-anchor="middle" dominant-baseline="central">*</text>
+        <line class="step-el arr" data-step="2" x1="235" y1="100" x2="290" y2="100" marker-end="url(#a4)"/>
+        <rect class="step-el c-teal" data-step="2" x="290" y="80" width="80" height="40" rx="6"/>
+        <text class="th step-el" data-step="2" x="330" y="100" text-anchor="middle" dominant-baseline="central">FROM</text>
+        <path class="step-el arr" data-step="3" d="M330 120 C330 155 390 155 390 178" marker-end="url(#a4)"/>
+        <rect class="step-el c-purple" data-step="3" x="350" y="178" width="160" height="66" rx="8" stroke-dasharray="4 3"/>
+        <text class="th step-el" data-step="3" x="430" y="202" text-anchor="middle">table_name</text>
+        <text class="ts step-el" data-step="4" x="430" y="222" text-anchor="middle">khớp token: users</text>
+        <path class="step-el arr" data-step="5" d="M510 210 C560 210 560 140 560 100" marker-end="url(#a4)"/>
+        <line class="step-el" data-step="6" x1="600" y1="70" x2="600" y2="130" stroke="var(--text-secondary)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <path class="step-el c-coral" data-step="6" d="M592 62 L608 62 L600 74 Z"/>
+        <rect class="step-el c-coral" data-step="6" x="510" y="150" width="90" height="28" rx="14"/>
+        <text class="th step-el" data-step="6" x="555" y="164" text-anchor="middle" dominant-baseline="central">WHERE</text>
+        <rect class="step-el c-coral" data-step="6" x="510" y="186" width="90" height="28" rx="14"/>
+        <text class="th step-el" data-step="6" x="555" y="200" text-anchor="middle" dominant-baseline="central">JOIN</text>
+        <rect class="step-el c-coral" data-step="6" x="510" y="222" width="90" height="28" rx="14"/>
+        <text class="th step-el" data-step="6" x="555" y="236" text-anchor="middle" dominant-baseline="central">;</text>
+    </svg>
+    <div id="step-desc"></div>
+    <div class="controls">
+        <button id="btn-prev" onclick="stepMove(-1)">← Trước</button>
+        <div id="dots"></div>
+        <button id="btn-next" onclick="stepMove(1)">Tiếp →</button>
+    </div>
+
+</article>
+
+<script>
+    var steps=[
+        "SELECT là 1 token cụ thể - Labeled transition khớp đúng nó, tokenIndex tăng 1.",
+        "Dấu * cũng vậy - khớp xong, tiếp tục sang FROM.",
+        "FROM khớp xong. Grammar giờ cần 1 rule con: table_name.",
+        "Gặp RuleTransition: nhảy vào đồ thị con của rule table_name (target).",
+        "Bên trong table_name, token users được khớp bằng chính transition của rule con đó.",
+        "table_name chạm RULE_STOP, quay lại followState - đúng điểm ngay sau FROM trong rule cha.",
+        "Hết token thật, tokenIndex chạm caret - collectAtCaret ghi nhận các rule khả dĩ tiếp theo (WHERE, JOIN, ;)."
+    ];
+    var pointerPos=[
+        [85,78],[210,78],[330,78],[430,176],[430,176],[560,98],[600,64]
+    ];
+    var cur=0;
+    function render(){
+        document.querySelectorAll('.step-el').forEach(function(el){
+            var s=parseInt(el.getAttribute('data-step'),10);
+            el.classList.remove('future','done','active');
+            if(s>cur)el.classList.add('future');
+            else if(s<cur)el.classList.add('done');
+            else el.classList.add('active');
+        });
+        var p=pointerPos[cur];
+        document.getElementById('pointer').style.transform='translate('+p[0]+'px,'+p[1]+'px)';
+        document.getElementById('step-desc').textContent=steps[cur];
+        document.getElementById('btn-prev').disabled=cur===0;
+        document.getElementById('btn-next').disabled=cur===steps.length-1;
+        var dots=document.getElementById('dots');
+        dots.innerHTML='';
+        for(var i=0;i<steps.length;i++){
+            var d=document.createElement('div');
+            d.className='dot';
+            d.style.background=i===cur?'var(--text-primary)':'var(--border-strong)';
+            dots.appendChild(d);
+        }
+    }
+    function stepMove(delta){
+        cur=Math.max(0,Math.min(steps.length-1,cur+delta));
+        render();
+    }
+    render();
+</script>
+</body>
+</html>

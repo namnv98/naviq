@@ -1,0 +1,476 @@
+# Snapshot keyword gợi ý cho từng câu SQL test (keywords-postgres.txt).
+# KHÔNG sửa tay - ghi lại bằng: mvn test -Dsnapshot.update=true, rồi review diff.
+SELECT * FROM USERS u WHERE u.|
+  (none)
+\\d |
+  (none)
+alter aggregate agg1(int4) owner to |
+  current_user, session_user
+alter collation c1 |
+  owner to, refresh version, rename to, set schema
+alter database db1 set search_path to |
+  false, on, true
+alter database db1 set tablespace |
+  (none)
+alter default privileges in schema public grant select on tables to |
+  current_user, group, public, session_user
+alter domain d1 validate constraint |
+  (none)
+alter event trigger trg1 |
+  disable, enable, owner to, rename to
+alter extension ext1 add table |
+  (none)
+alter extension ext1 update to |
+  (none)
+alter foreign data wrapper fdw1 options (|
+  add, drop, set
+alter function f1(int4) depends on extension |
+  (none)
+alter function f1(int4) |
+  called on null input, cost, depends on extension, external, immutable, leakproof, no, not leakproof, owner to, parallel, rename to, reset, returns null on null input, rows, security, set, stable, strict, support, volatile
+alter group grp1 add user |
+  current_user, session_user
+alter operator = (int4, int4) set (restrict = |
+  all, analyse, analyze, and, any, array, as, asc, asymmetric, both, case, cast, check, collate, column, constraint, create, current_catalog, current_date, current_role, current_time, current_timestamp, current_user, default, deferrable, desc, distinct, do, else, end, except, false, fetch, for, foreign, from, grant, group, having, in, initially, intersect, into, lateral, leading, left, limit, localtime, localtimestamp, none, not, null, offset, on, only, operator, or, order, placing, primary, references, returning, right, select, session_user, setof, some, symmetric, system_user, table, then, to, trailing, true, union, unique, user, using, variadic, when, where, window, with
+alter operator family of1 using btree add |
+  function, operator, storage
+alter policy pol1 on public.users using (|
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+alter publication pub1 add table |
+  in schema, only, where
+alter role role1 set search_path to |
+  false, on, true
+alter role role1 with |
+  bypassrls, connection limit, createdb, createrole, encrypted, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, superuser, unencrypted, user, valid until
+alter sequence s1 restart with |
+  as, cache, cycle, increment, logged, maxvalue, minvalue, no, owned by, restart, sequence name, start, unlogged
+alter sequence |
+  if exists
+alter server srv1 options (|
+  add, drop, set
+alter statistics stat1 set statistics |
+  (none)
+alter subscription sub1 set publication |
+  (none)
+alter system set |
+  (none)
+alter table public.users add column |
+  if not exists
+alter table public.users rename to |
+  (none)
+alter table public.users set schema |
+  (none)
+alter table users add column newcol |
+  check, collate, constraint, default, deferrable, generated, initially, not, null, options, primary key, references, unique
+alter table users add column |
+  if not exists
+alter table users drop column |
+  cascade, if exists, restrict
+alter tablespace ts1 set (|
+  (none)
+alter text search configuration tsc1 add mapping for |
+  (none)
+alter text search dictionary tsd1 (|
+  (none)
+alter type mytype add attribute a |
+  (none)
+alter type mytype set (|
+  (none)
+alter type status_enum add value 'x' before |
+  (none)
+alter user mapping for user1 server srv1 options (|
+  add, drop, set
+analyze |
+  verbose
+call myproc(|
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, left, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, right, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, variadic, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+checkpoint |
+  (none)
+close |
+  all
+cluster public.users using |
+  (none)
+comment on table public.users is |
+  null
+comment on table |
+  (none)
+copy public.users to |
+  program, stdin, stdout
+create access method am1 type index handler |
+  (none)
+create aggregate agg2(int4) (sfunc = |
+  all, analyse, analyze, and, any, array, as, asc, asymmetric, both, case, cast, check, collate, column, constraint, create, current_catalog, current_date, current_role, current_time, current_timestamp, current_user, default, deferrable, desc, distinct, do, else, end, except, false, fetch, for, foreign, from, grant, group, having, in, initially, intersect, into, lateral, leading, left, limit, localtime, localtimestamp, none, not, null, offset, on, only, operator, or, order, placing, primary, references, returning, right, select, session_user, setof, some, symmetric, system_user, table, then, to, trailing, true, union, unique, user, using, variadic, when, where, window, with
+create assertion a1 check (|
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+create cast (int4 as text) with function |
+  authorization, binary, collation, concurrently, cross, current_schema, freeze, full, ilike, inner, is, isnull, join, left, like, natural, notnull, outer, overlaps, right, similar, tablesample, verbose
+create conversion conv1 for 'UTF8' to 'LATIN1' from |
+  (none)
+create database db2 owner |
+  default, false, on, true
+create domain d1 as |
+  (none)
+create event trigger et2 on ddl_command_start execute function |
+  (none)
+create extension ext1 schema |
+  (none)
+create foreign data wrapper fdw1 handler |
+  (none)
+create foreign table ft1 (id int4) server |
+  (none)
+create function f1() returns |
+  left, null on null input, right, setof, table
+create group grp1 with |
+  admin, bypassrls, connection limit, createdb, createrole, encrypted, in, in group, in role, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, role, superuser, sysid, unencrypted, user, valid until
+create index idx1 on public.users (|
+  cast, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, extract, greatest, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, normalize, nullif, overlay, position, session_user, substring, treat, trim, user, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+create index idx1 on |
+  only
+create index |
+  concurrently, if not exists, on
+create language plpgsql2 |
+  handler
+create materialized view mv1 as select | from public.users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, with, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+create operator class oc1 for type int4 using btree as |
+  function, operator, storage
+create operator family of1 using |
+  (none)
+create policy pol1 on public.users using (|
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+create publication pub1 for table |
+  in schema, only, where, with
+create role role2 with |
+  admin, bypassrls, connection limit, createdb, createrole, encrypted, in, in group, in role, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, role, superuser, sysid, unencrypted, user, valid until
+create rule r1 as on insert to public.users do |
+  also, delete from, insert into, instead, nothing, notify, select, table, update, values, with
+create schema if not exists |
+  authorization
+create sequence s2 increment by |
+  (none)
+create server srv1 foreign data wrapper |
+  (none)
+create statistics st1 on |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+create subscription sub2 connection 'host=x' publication |
+  (none)
+create table t2 as select | from public.users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, with, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+create table t3 (|
+  check, constraint, exclude, foreign key, like, primary key, unique
+create table x (a t|)
+  (none)
+create tablespace ts2 owner |
+  current_user, session_user
+create transform for int4 language plpgsql2 (|
+  from sql with function, to sql with function
+create trigger trg2 before insert on public.users execute function |
+  (none)
+create user mapping for user2 server srv1 options (|
+  (none)
+create user user2 with |
+  admin, bypassrls, connection limit, createdb, createrole, encrypted, in, in group, in role, inherit, login, nobypassrls, nocreatedb, nocreaterole, noinherit, nologin, noreplication, nosuperuser, password, replication, role, superuser, sysid, unencrypted, user, valid until
+create view v1 as select | from public.users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, with, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+deallocate |
+  all, prepare
+declare cur1 cursor for select | from public.users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+delete from orders o using users u where u.id = o.user_id and u.|
+  (none)
+delete from public.users where |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current of, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+delete from users where |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current of, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+delete from |
+  only
+discard |
+  all, plans, sequences, temp, temporary
+do $$ begin null; end; $$ language |
+  (none)
+drop aggregate agg1(|
+  in, inout, left, order by, out, right, setof, variadic
+drop cast (int4 as text) |
+  cascade, restrict
+drop database |
+  if exists
+drop function |
+  authorization, binary, collation, concurrently, cross, current_schema, freeze, full, if exists, ilike, inner, is, isnull, join, left, like, natural, notnull, outer, overlaps, right, similar, tablesample, verbose
+drop index |
+  concurrently, if exists
+drop materialized view |
+  if exists
+drop operator = (int4, |
+  none
+drop operator class oc1 using |
+  (none)
+drop operator family of1 using |
+  (none)
+drop owned by |
+  current_user, session_user
+drop role |
+  if exists
+drop subscription |
+  if exists
+drop table |
+  if exists
+drop tablespace |
+  if exists
+drop transform for int4 language |
+  (none)
+drop trigger |
+  if exists
+drop user mapping for user2 server |
+  (none)
+drop view |
+  if exists
+execute |
+  (none)
+explain select | from public.users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+fetch next from |
+  (none)
+grant app_reader to |
+  current_user, session_user
+grant role1 to |
+  current_user, session_user
+grant select on public.users to |
+  current_user, group, public, session_user
+import foreign schema public from server srv1 into |
+  (none)
+insert into orders (id) values (nextval('ord|
+  (none)
+insert into orders (|
+  select, table, values, with
+insert into orders select | from users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, on conflict, operator, order by, overlay, position, real, returning, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+insert into public.users (|
+  select, table, values, with
+insert into users (id, name) values (1, |)
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+insert into |
+  (none)
+listen |
+  (none)
+load |
+  (none)
+lock table public.users in |
+  access, exclusive, row, share
+lock table |
+  in, nowait, only
+merge into public.orders o using public.users u on o.user_id = u.id when matched then update set |
+  (none)
+notify |
+  (none)
+prepare p1 as select | from public.users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+reassign owned by app_reader to |
+  current_user, session_user
+reassign owned by role1 to |
+  current_user, session_user
+refresh materialized view |
+  concurrently
+reindex table |
+  concurrently
+reset |
+  all, session authorization, time zone, transaction isolation level
+revoke role1 from |
+  current_user, session_user
+revoke select on public.users from |
+  current_user, group, public, session_user
+security label on table public.users is |
+  null
+select (select 1 from (select a.| from orders) o) from users a
+  (none)
+select * from "OrderItems" oi where oi.|
+  (none)
+select * from (select * from users u where u.|
+  (none)
+select * from (select * from users) x join |
+  cast, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, extract, greatest, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, lateral, least, localtime, localtimestamp, merge_action, normalize, nullif, only, overlay, position, rows from, session_user, substring, treat, trim, user, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize, xmltable
+select * from (select * from users) x where x.|
+  (none)
+select * from (select id from users union select id from orders) x where x.|
+  (none)
+select * from (select id, name from users) x where x.|
+  (none)
+select * from Ord|
+  (none)
+select * from USE|
+  current_user, session_user, user
+select * from active_users where |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from active|
+  (none)
+select * from contracts as |
+  (none)
+select * from contracts c join contracts as |
+  (none)
+select * from contracts c join contracts c1 join contracts as |
+  (none)
+select * from contracts where |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from daily_totals where |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from faq_folders f join faq_articles a on a|
+  array, json_array, json_arrayagg, merge_action
+select * from invoices i join receipts r on r|
+  current_role, real, row
+select * from order_notes as |
+  (none)
+select * from orders o join users u on |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from orders where id|
+  (none)
+select * from public.us|
+  (none)
+select * from pu|
+  (none)
+select * from tickets t where t.state = |
+  all, any, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, some, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users a, (select a.| from orders) o
+  (none)
+select * from users group by name |
+  and, at time zone, between, collate, except, fetch, for, having, ilike, in, intersect, is, isnull, like, limit, not, notnull, offset, operator, or, order by, similar to, union, window
+select * from users order by id limit |
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users order by name |
+  and, asc, at time zone, between, collate, desc, fetch, for, ilike, in, is, isnull, like, limit, not, notnull, nulls, offset, operator, or, similar to, using
+select * from users order by |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users u join contracts c on u.id = c.id where na|
+  national, nchar
+select * from users u join contracts c on |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users u join orders o on o.user_id = u.id join contracts c on c.id = u.id where c.|
+  (none)
+select * from users u join orders o on o.user_id = u.|
+  (none)
+select * from users u join orders o on o|
+  json_object, json_objectagg, operator, overlay
+select * from users u join orders o on |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users u join orders o using (|
+  (none)
+select * from users u join or|
+  overlay
+select * from users u join |
+  cast, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, extract, greatest, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, lateral, least, localtime, localtimestamp, merge_action, normalize, nullif, only, overlay, position, rows from, session_user, substring, treat, trim, user, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize, xmltable
+select * from users u order by u.|
+  (none)
+select * from users u where exists (select 1 from orders o where o.user_id = u.|)
+  (none)
+select * from users u where exists (select 1 from orders o where |)
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users u, lateral (select * from orders o where o.user_id = u.|) sub
+  (none)
+select * from users where id = 1 and |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users where id in (select | from orders)
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select * from users where i|
+  int, integer, interval
+select * from usrs|
+  (none)
+select * from us|
+  current_user, session_user, user
+select * from x.|
+  (none)
+select * from zzqq|
+  (none)
+select * from |
+  cast, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, extract, greatest, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, lateral, least, localtime, localtimestamp, merge_action, normalize, nullif, only, overlay, position, rows from, session_user, substring, treat, trim, user, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize, xmltable
+select *| from users u
+  (none)
+select *| from users u join orders o on o.user_id = u.id
+  (none)
+select 2 *| from users u
+  all, any, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, null, nullif, numeric, overlay, position, real, row, session_user, smallint, some, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select cast(id as t|) from users
+  (none)
+select co| from users
+  coalesce, collation for
+select date_trunc(| from users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, left, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, right, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, variadic, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select e.| from events e
+  (none)
+select id from users except select | from orders
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select id from users intersect select | from orders
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select id from users u union select u.| from orders
+  (none)
+select id from users union select id from contracts union select | from orders
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select id from users union select | from orders
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select id, sum(total) over (partition by status order by |) from orders
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select id, sum(total) over (partition by | order by id) from orders
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select id, | from users
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select nextval('|
+  (none)
+select o.*| from users u join orders o on o.user_id = u.id
+  (none)
+select status, count(*) from orders group by status having |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select u.name, count(*) as n, o.status s from users u join orders o on o.user_id = u.id group by |
+  array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, cube, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, double precision, exists, extract, false, float, greatest, grouping, int, integer, interval, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, operator, overlay, position, real, rollup, row, session_user, smallint, substring, time, timestamp, treat, trim, true, unique, user, varchar, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select u1.id from (select na| from users as u) as u1
+  national, nchar
+select | from public.users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select | from users
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+select | from users union select id from orders
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+set constraints all |
+  deferred, immediate
+set search_path to |
+  false, on, true
+show |
+  all, session authorization, time zone, transaction isolation level
+start transaction |
+  deferrable, isolation level, not deferrable, read
+truncate table public.users |
+  cascade, continue identity, restart identity, restrict
+truncate |
+  only, table
+unlisten |
+  (none)
+update orders o set status = 'x' from users u where u.id = o.user_id and u.|
+  (none)
+update public.users set |
+  set
+update users set name = 'x', |
+  (none)
+update users set na|
+  (none)
+vacuum |
+  analyse, analyze, freeze, full, verbose
+with a as (select * from users) select * from a union select | from orders
+  all, array, bigint, bit, boolean, case, cast, char, character, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, dec, decimal, distinct, double precision, except, exists, extract, false, fetch, float, for, from, greatest, group by, grouping, having, int, integer, intersect, interval, into, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, least, limit, localtime, localtimestamp, merge_action, national, nchar, normalize, not, null, nullif, numeric, offset, operator, order by, overlay, position, real, row, session_user, smallint, substring, time, timestamp, treat, trim, true, union, unique, user, varchar, where, window, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize
+with a as (select * from users), b as (select * from a) select * from b bb where bb.|
+  (none)
+with a as (select * from users), b as (select * from a), c as (select * from b) select * from c cc where cc.|
+  (none)
+with a as (select id from users union select id from orders) select * from a t where t.|
+  (none)
+with a(x, y) as (select id, name from users) select * from a t where t.|
+  (none)
+with c as (select id from users) select * from (select c.| from c) x
+  (none)
+with r as (select * from users) select * from orders where user_id in (select id from r|)
+  current_role, rows from
+with r as (select * from users) select * from r rr join |
+  cast, coalesce, collation for, current_catalog, current_date, current_role, current_schema, current_time, current_timestamp, current_user, extract, greatest, json, json_array, json_arrayagg, json_exists, json_object, json_objectagg, json_query, json_scalar, json_serialize, json_value, lateral, least, localtime, localtimestamp, merge_action, normalize, nullif, only, overlay, position, rows from, session_user, substring, treat, trim, user, xmlconcat, xmlelement, xmlexists, xmlforest, xmlparse, xmlpi, xmlroot, xmlserialize, xmltable
+with recent as (select * from users) select * from recent r where r.|
+  (none)
+with recent as (select * from users) select * from re|
+  current_role
+with recursive r as (select * from users union all select * from r) select * from r t where t.|
+  (none)
+|
+  abort, alter, analyse, analyze, begin, call, checkpoint, close, cluster, comment, commit, copy, create, deallocate, declare, delete from, discard, do, drop, end, execute, explain, fetch, grant, import foreign schema, insert into, listen, load, lock, merge into, move, notify, prepare, reassign owned by, refresh materialized view, reindex, release, reset, revoke, rollback, savepoint, security label, select, set, show, start transaction, table, truncate, unlisten, update, vacuum, values, with

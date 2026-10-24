@@ -5,8 +5,8 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.naviq</groupId>
-    <artifactId>naviq</artifactId>
+    <groupId>com.sqlctx</groupId>
+    <artifactId>sqlctx</artifactId>
     <version>1.0.0</version>
 
     <properties>
@@ -20,16 +20,15 @@
         <dependency>
             <groupId>org.jline</groupId>
             <artifactId>jline</artifactId>
-            <version>3.30.12</version>
+            <version>4.3.1</version>
         </dependency>
-
-        <dependency>
-            <groupId>org.jline</groupId>
-            <artifactId>jline-terminal-jansi</artifactId>
-            <version>3.30.12</version>
-        </dependency>
-
         <!-- Các dep khác của bạn -->
+        <!-- Language Server (chạy bằng cờ lsp): JSON-RPC/LSP chuẩn của Eclipse, dùng bởi nhiều server Java -->
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j</artifactId>
+            <version>0.23.1</version>
+        </dependency>
         <dependency>
             <groupId>org.antlr</groupId>
             <artifactId>antlr4-runtime</artifactId>
@@ -41,24 +40,56 @@
             <version>42.7.3</version>
         </dependency>
         <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc11</artifactId>
+            <version>23.8.0.25.04</version>
+        </dependency>
+        <!-- Cần cho SSL/TLS qua Oracle wallet (oracle.net.wallet_location, xem OracleDataSource.applySsl) -
+             ojdbc11 KHÔNG tự kéo theo các jar này, thiếu thì driver ném "SSO KeyStore not available" dù
+             cwallet.sso tồn tại và đúng định dạng (đã kiểm chứng bằng thực nghiệm). -->
+        <dependency>
+            <groupId>com.oracle.database.security</groupId>
+            <artifactId>oraclepki</artifactId>
+            <version>23.8.0.25.04</version>
+        </dependency>
+        <dependency>
+            <groupId>com.oracle.database.security</groupId>
+            <artifactId>osdt_cert</artifactId>
+            <version>21.18.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.oracle.database.security</groupId>
+            <artifactId>osdt_core</artifactId>
+            <version>21.18.0.0</version>
+        </dependency>
+        <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
             <version>3.20.0</version>
         </dependency>
+        <!-- JUnit 5 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- ANTLR tool: test dựng grammar nhỏ lúc chạy (ParserInterpreter) để test CompletionEngine -->
+        <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4</artifactId>
+            <version>${antlr4.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.42</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
-
-
-            <!-- Run main -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>3.1.0</version>
-                <configuration>
-                    <mainClass>com.example.Main</mainClass>
-                </configuration>
-            </plugin>
 
             <plugin>
                 <groupId>org.antlr</groupId>
@@ -69,10 +100,29 @@
                         <goals>
                             <goal>antlr4</goal>
                         </goals>
+                        <id>postgresql</id>
                         <configuration>
                             <visitor>true</visitor>
                             <listener>true</listener>
-                            <sourceDirectory>src/main/antlr4</sourceDirectory>
+                            <sourceDirectory>src/main/antlr4/postgresql</sourceDirectory>
+                            <outputDirectory>
+                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/antlr4/postgresql
+                            </outputDirectory>
+                        </configuration>
+                    </execution>
+
+                    <execution>
+                        <goals>
+                            <goal>antlr4</goal>
+                        </goals>
+                        <id>oracle</id>
+                        <configuration>
+                            <visitor>true</visitor>
+                            <listener>true</listener>
+                            <sourceDirectory>src/main/antlr4/oracle</sourceDirectory>
+                            <outputDirectory>
+                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/antlr4/oracle
+                            </outputDirectory>
                         </configuration>
                     </execution>
                 </executions>
@@ -89,17 +139,61 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <!-- lsp4j là jar được ký: gộp nguyên file chữ ký vào uber-jar thì JVM từ chối chạy cả jar
+                                 ("Invalid signature file digest for Manifest main attributes") -->
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/*.EC</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                             <transformers>
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.naviq.cli.NaviQCli</mainClass>
+                                    <mainClass>com.sqlctx.cli.SqlctxCli</mainClass>
+                                    <manifestEntries>
+                                        <!-- JLine's FFM terminal provider dùng java.lang.foreign (restricted API) -
+                                             thiếu dòng này thì MỌI lần chạy đều in ra 3-4 dòng WARNING native access
+                                             ra stderr. Khai báo thẳng trong manifest (thay vì bắt người dùng luôn
+                                             phải nhớ gõ cờ enable native access) để chạy kiểu gì
+                                             (java -jar trực tiếp, script cài qua install.sh, run.sh...) cũng im lặng. -->
+                                        <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+                                    </manifestEntries>
                                 </transformer>
+                                <!-- postgresql VÀ ojdbc11 đều tự đăng ký qua META-INF/services/java.sql.Driver -
+                                     không gộp thì shade chỉ giữ lại 1 trong 2 file (đè lên nhau), driver còn lại
+                                     "biến mất" (DriverManager báo "No suitable driver found") dù jar vẫn có mặt. -->
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <phase>process-sources</phase>  <!-- đổi từ generate-sources -->
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/antlr4</source>
+                            </sources>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
     </build>
-
 </project>
