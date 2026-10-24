@@ -36,7 +36,7 @@ public final class SuggestFilter {
         // Lấy schema từ prefix: "public.d" → "public"
         String schemaPrefix = dot && prefix.contains(".") ? prefix.substring(0, prefix.lastIndexOf('.')).toLowerCase() : null;
 
-        record Scored(Suggestion suggest, int tier, int habitBucket, int quality, int order,
+        record Scored(Suggestion suggest, int tier, int habitBucket, int quality, int order, int demoted,
                       int scopeDistance, int historyWeight, int length) {
 
         }
@@ -72,8 +72,8 @@ public final class SuggestFilter {
             int habitBucket = hw >= STRONG_HABIT_THRESHOLD ? 0 : 1;
             // giá trị (field của date_trunc, giá trị enum) giữ đúng thứ tự khai báo - sort ổn định, không phá hoà theo độ dài
             int length = s.getType() == SuggestionType.VALUE ? 0 : word.length();
-            scored.add(new Scored(s, r.tier(), habitBucket, r.quality(), s.getOrder(), s.getScopeDistance(), hw,
-                    length));
+            scored.add(new Scored(s, r.tier(), habitBucket, r.quality(), s.getOrder(), s.isDemoted() ? 1 : 0,
+                    s.getScopeDistance(), hw, length));
         }
 
         // Chuỗi tiêu chí TUẦN TỰ (mirror cách fzf làm qua --tiebreak, KHÔNG cộng dồn 1
@@ -90,6 +90,7 @@ public final class SuggestFilter {
         //    không", length = "tên có ngắn gọn không" - gộp chung khiến tên dài nhưng
         //    match rất khít bị đánh giá sai ngang với tên dài match lỏng lẻo.
         // 4. order        - ưu tiên loại (alias < column < table < keyword < ...).
+        // 4a. demoted - cùng loại thì đối tượng hệ thống (pg_catalog...) sau đối tượng của người dùng.
         // 4b. scopeDistance - cùng loại thì cột của scope gần caret nhất (subquery đang gõ) trước cột
         //    của scope cha (correlated) - cột ngoài vẫn hợp lệ nhưng ít khi là thứ đang cần.
         // 5. -historyWeight - trong CÙNG loại, ai được dùng gần đây/nhiều hơn (dù chưa đạt
@@ -103,6 +104,7 @@ public final class SuggestFilter {
                 .thenComparingInt(Scored::habitBucket)
                 .thenComparingInt(Scored::quality)
                 .thenComparingInt(Scored::order)
+                .thenComparingInt(Scored::demoted)
                 .thenComparingInt(Scored::scopeDistance)
                 .thenComparingInt(sc -> -sc.historyWeight())
                 .thenComparingInt(Scored::length));

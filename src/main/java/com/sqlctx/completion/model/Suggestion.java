@@ -27,6 +27,18 @@ public class Suggestion {
         this.order = order;
     }
 
+    /** Ít liên quan hơn các mục cùng loại (vd bảng hệ thống pg_catalog) - xếp sau trong cùng loại. */
+    private boolean demoted;
+
+    public boolean isDemoted() {
+        return demoted;
+    }
+
+    public Suggestion demoted() {
+        this.demoted = true;
+        return this;
+    }
+
     public int getScopeDistance() {
         return scopeDistance;
     }

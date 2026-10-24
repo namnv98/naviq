@@ -77,6 +77,9 @@ public class MenuCompleter {
     }
 
     private static final int PAGE_SIZE = 10;
+    /** Trần độ rộng cột tên và cột mô tả của popup (phần dài hơn bị cắt "…"). */
+    private static final int MAX_VALUE_WIDTH = 48;
+    private static final int MAX_DETAIL_WIDTH = 28;
 
     static volatile boolean autosuggestionOpen = false;
 
@@ -443,9 +446,11 @@ public class MenuCompleter {
         List<AttributedString> out = new ArrayList<>();
 
         int[] w = calcWidth(items, dot);
-        int valueW = w[0];
+        // độ rộng tính trên cả danh sách (không nhảy khi cuộn) nhưng có trần: 1 mục rất dài ở cuối danh sách
+        // (chữ ký hàm, cụm JOIN) không được kéo cả popup rộng ra với khoảng trống
+        int valueW = Math.min(w[0], MAX_VALUE_WIDTH);
         int typeW = w[1];
-        int columnTypeW = w[2];
+        int columnTypeW = Math.min(w[2], MAX_DETAIL_WIDTH);
 
         // Menu không được rộng hơn terminal: dòng tràn sẽ xuống dòng và để rác ở hàng bên dưới.
         int termWidth = reader.getTerminal().getWidth();
@@ -620,8 +625,8 @@ public class MenuCompleter {
         if (s == null) {
             s = "";
         }
-        if (s.length() >= w) {
-            return s.substring(0, w);
+        if (s.length() > w) {
+            return w > 1 ? s.substring(0, w - 1) + "…" : s.substring(0, w);
         }
         return s + " ".repeat(w - s.length());
     }
@@ -658,25 +663,22 @@ public class MenuCompleter {
 
     /** Màu icon riêng theo loại gợi ý - giúp liếc mắt phân biệt bảng/view/hàm/từ khoá nhanh hơn 1 màu xám duy nhất. */
     private static AttributedStyle iconStyle(String type) {
+        // cùng bảng màu với SqlHighlighter: bảng cam, cột xanh ngọc, hàm xanh trời, từ khoá xanh dương...
         int fg = switch (type) {
-            case "table" -> 75;
-            case "view" -> 80;
-            case "materialized view" -> 111;
-            case "column" -> 114;
-            case "function" -> 176;
-            case "keyword" -> 214;
+            case "table", "join" -> 214;
+            case "view", "materialized view" -> 215;
+            case "column", "columns" -> 152;
+            case "function" -> 117;
+            case "keyword" -> 75;
             case "datatype" -> 183;
-            case "schema" -> 245;
-            case "command" -> 220;
-            case "database" -> 111;
-            case "join" -> 81;
-            case "alias" -> 150;
-            case "role" -> 216;
+            case "schema", "database" -> 109;
+            case "alias" -> 174;
+            case "value" -> 114;
+            case "sequence" -> 141;
             case "index" -> 110;
-            case "sequence" -> 179;
             case "trigger" -> 203;
-            case "value" -> 186;
-            case "columns" -> 114;
+            case "command" -> 220;
+            case "role" -> 216;
             case "tablespace" -> 144;
             case "other" -> 252;
             default -> 245;

@@ -341,17 +341,23 @@ public class PostgresSuggestionService implements SuggestionService {
             if (prev.getType() == PostgreSQLParser.Identifier) {
                 SchemaIndex.getTablesBySchema(prev.getText()).stream()
                         .filter(t -> kinds == null || kinds.contains(t.kind()))
-                        .forEach(t -> suggests.add(Suggestion.of(SchemaIndex.qualifiedName(t), SuggestionType.fromLabel(t.kind()))));
+                        .forEach(t -> suggests.add(tableSuggestion(SchemaIndex.qualifiedName(t), t)));
                 return;
             }
         }
         SchemaIndex.schemaTableIndex.values().stream()
                 .filter(t -> kinds == null || kinds.contains(t.kind()))
-                .forEach(t -> suggests.add(Suggestion.of(SchemaIndex.displayName(t), SuggestionType.fromLabel(t.kind()))));
+                .forEach(t -> suggests.add(tableSuggestion(SchemaIndex.displayName(t), t)));
         SchemaIndex.schemas.forEach(schema -> suggests.add(Suggestion.of(schema.name(), SuggestionType.SCHEMA)));
         if (kinds == null) { // CTE chỉ tham chiếu được trong câu truy vấn, không phải đích lệnh DDL/utility
             visibleCteNames.forEach(name -> suggests.add(Suggestion.of(name, SuggestionType.TABLE)));
         }
+    }
+
+    /** Bảng/view; của schema hệ thống (pg_catalog...) thì xếp sau bảng của người dùng. */
+    private static Suggestion tableSuggestion(String name, TableInfo t) {
+        Suggestion s = Suggestion.of(name, SuggestionType.fromLabel(t.kind()));
+        return SchemaIndex.isSystemSchema(t.schema()) ? s.demoted() : s;
     }
 
     private static final Set<String> TABLE = Set.of("table");

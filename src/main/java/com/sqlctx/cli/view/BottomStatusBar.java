@@ -7,6 +7,7 @@ import org.jline.utils.AttributedStyle;
 import org.jline.utils.Status;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Bottom status bar cố định ở dòng cuối terminal (pgcli style).
@@ -129,32 +130,53 @@ public class BottomStatusBar {
         render();
     }
 
+    /** Thứ tự ưu tiên giữ lại khi thanh hẹp (index trong MENU_ITEMS) - mục ít cần nhất bị bỏ trước. */
+    private static final List<String> MENU_PRIORITY = List.of("F1", "Ctrl F", "Esc", "Ctrl T", "F10");
+
+    /**
+     * Phần thông tin (DB, Ln/Col, trạng thái query) luôn hiện; gợi ý phím chỉ hiện khi còn chỗ, theo
+     * {@link #MENU_PRIORITY} nhưng vẫn đúng thứ tự trên thanh. Thông tin DB quá dài thì cắt "…".
+     */
     private AttributedString buildBar(int width) {
-        AttributedStringBuilder sb = new AttributedStringBuilder();
+        AttributedStringBuilder info = new AttributedStringBuilder();
+        String cursor = String.format("Ln %d, Col %d", cursorRow, cursorCol);
+        int fixed = 5 + 2 + 5 + cursor.length() + 5 + queryStatus.length() + 1; // 3 dấu "  │  ", icon, ...
+        String db = dbInfo;
+        int maxDb = width - fixed;
+        if (db.length() > maxDb) {
+            db = maxDb > 1 ? db.substring(0, maxDb - 1) + "…" : "";
+        }
+        info.style(SEP_STYLE).append("  │  ");
+        info.style(INFO_STYLE).append("\uD83D\uDDA5 ").append(db);
+        info.style(SEP_STYLE).append("  │  ");
+        info.style(CURSOR_STYLE).append(cursor);
+        info.style(SEP_STYLE).append("  │  ");
+        info.style(queryStatusStyle()).append(queryStatus);
+        AttributedString infoPart = info.toAttributedString();
 
-        for (String[] item : MENU_ITEMS) {
-
-            String label = item[1];
-
-            if (item[0].equals("Ctrl T")) {
-                label = "Multiline " + (multiLine ? "ON" : "OFF");
+        int room = width - infoPart.columnLength();
+        java.util.Set<String> shown = new java.util.HashSet<>();
+        for (String key : MENU_PRIORITY) {
+            for (String[] item : MENU_ITEMS) {
+                if (item[0].equals(key)) {
+                    int w = menuItemWidth(item);
+                    if (w <= room) {
+                        shown.add(key);
+                        room -= w;
+                    }
+                }
             }
-
-            sb.style(KEY_STYLE).append(" [").append(item[0]).append("] ");
-            sb.style(LABEL_STYLE).append(label).append(" ");
         }
 
-        sb.style(SEP_STYLE).append("  │  ");
-        sb.style(INFO_STYLE).append("\uD83D\uDDA5 ").append(dbInfo);
-
-
-        sb.style(SEP_STYLE).append("  │  ");
-        sb.style(CURSOR_STYLE).append(String.format("Ln %d, Col %d", cursorRow, cursorCol));
-
-
-        sb.style(SEP_STYLE).append("  │  ");
-        sb.style(queryStatusStyle()).append(queryStatus);
-
+        AttributedStringBuilder sb = new AttributedStringBuilder();
+        for (String[] item : MENU_ITEMS) {
+            if (!shown.contains(item[0])) {
+                continue;
+            }
+            sb.style(KEY_STYLE).append(" [").append(item[0]).append("] ");
+            sb.style(LABEL_STYLE).append(menuLabel(item)).append(" ");
+        }
+        sb.append(infoPart);
 
         AttributedString line = sb.toAttributedString();
         int len = line.columnLength();
@@ -166,6 +188,14 @@ public class BottomStatusBar {
             return padded.toAttributedString();
         }
         return line;
+    }
+
+    private String menuLabel(String[] item) {
+        return item[0].equals("Ctrl T") ? "Multiline " + (multiLine ? "ON" : "OFF") : item[1];
+    }
+
+    private int menuItemWidth(String[] item) {
+        return 2 + item[0].length() + 2 + menuLabel(item).length() + 1;
     }
 
     /** Màu theo NỘI DUNG trạng thái - trước đây luôn 1 màu trắng nên phải đọc chữ mới biết đang ERROR hay idle. */

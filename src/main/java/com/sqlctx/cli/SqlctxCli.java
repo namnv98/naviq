@@ -47,6 +47,9 @@ public class SqlctxCli {
             }
         }
         System.setProperty("org.jline.terminal.type", "xterm-256color");
+        // JLine đổi ký tự vẽ khung (│ ─ ·...) sang bộ ký tự ACS của terminal khi vẽ status bar - tmux và vài terminal
+        // hiện nó thành chữ "x"/"q"/"~". Font hiện đại đều có sẵn các ký tự Unicode này, không cần ACS.
+        System.setProperty("org.jline.utils.disableAlternateCharset", "true");
         com.sqlctx.util.LoggingConfig.init();
 
         if (java.util.Arrays.asList(args).contains("--lsp")) {

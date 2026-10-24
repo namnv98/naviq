@@ -184,9 +184,10 @@ public class DataViewTable {
             java.util.regex.Pattern.compile("-?\\d+(\\.\\d+)?");
     private static final java.util.regex.Pattern DATE_PATTERN =
             java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}([ T].*)?");
-    private static final String NUM_COLOR = "\u001b[38;5;215m";
+    // cùng bảng màu với SqlHighlighter: số tím, true/false xanh dương như từ khoá
+    private static final String NUM_COLOR = "\u001b[38;5;141m";
     private static final String NULL_COLOR = "\u001b[38;5;242m";
-    private static final String BOOL_COLOR = "\u001b[38;5;140m";
+    private static final String BOOL_COLOR = "\u001b[38;5;75m";
     private static final String DATE_COLOR = "\u001b[38;5;108m";
 
     static String styleForValue(String cell) {

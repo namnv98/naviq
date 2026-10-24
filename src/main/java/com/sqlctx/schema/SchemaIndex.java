@@ -158,6 +158,13 @@ public class SchemaIndex {
                 : qualifiedName(t);
     }
 
+    /** Schema hệ thống của Postgres - bảng trong đó hiếm khi là thứ người dùng định gõ. */
+    private static final java.util.Set<String> SYSTEM_SCHEMAS = java.util.Set.of("pg_catalog", "information_schema", "pg_toast");
+
+    public static boolean isSystemSchema(String schema) {
+        return SYSTEM_SCHEMAS.contains(schema);
+    }
+
     /** Tên chèn vào câu cho index/sequence: tên trần nếu schema nằm trong search_path, ngược lại "schema.tên". */
     public static String displayName(SchemaObject o) {
         return searchPath.contains(o.schema())

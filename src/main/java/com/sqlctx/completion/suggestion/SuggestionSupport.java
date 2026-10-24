@@ -179,6 +179,9 @@ public final class SuggestionSupport {
         }
         Set<String> added = new HashSet<>();
         for (TableInfo candidate : SchemaIndex.schemaTableIndex.values()) {
+            if (SchemaIndex.isSystemSchema(candidate.schema())) {
+                continue; // JOIN pg_catalog.* gần như không bao giờ là thứ cần gợi ý sẵn cả cụm
+            }
             String alias = suggestAlias(scope.visibleAliases().keySet(), candidate.name());
             inFrom.forEach((existingAlias, existing) -> {
                 int distance = scope.aliasDistances().getOrDefault(existingAlias, 0);

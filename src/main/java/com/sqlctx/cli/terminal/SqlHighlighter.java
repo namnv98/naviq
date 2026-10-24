@@ -15,6 +15,7 @@ import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -37,10 +38,11 @@ public class SqlHighlighter implements Highlighter {
     private static final Set<String> CLAUSE = Set.of("FROM", "WHERE", "GROUP", "BY", "ORDER", "HAVING",
             "LIMIT", "OFFSET", "AS", "WITH", "ON", "USING", "FETCH", "ROWNUM", "ROWID", "DUAL");
     private static final Set<String> JOIN = Set.of("JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OUTER", "CROSS", "NATURAL");
-    private static final Set<String> LOGIC = Set.of("AND", "OR", "NOT", "IN", "LIKE", "EXISTS", "IS", "NULL",
+    private static final Set<String> LOGIC = Set.of("AND", "OR", "NOT", "IN", "LIKE", "EXISTS", "IS", "NULL", "TRUE", "FALSE",
             "CASE", "WHEN", "THEN", "ELSE", "END");
     private static final Set<String> ORDERING = Set.of("ASC", "DESC");
-    private static final Set<String> OPERATORS = Set.of("=", "!=", "<>", "<", ">", "<=", ">=", "+", "-", "*", "/", ":=");
+    private static final Set<String> OPERATORS = Set.of("=", "!=", "<>", "<", ">", "<=", ">=", "+", "-", "*", "/", ":=",
+            "||", "%", "^", "::");
 
     @Override
     public AttributedString highlight(LineReader lineReader, String s) {
@@ -58,8 +60,11 @@ public class SqlHighlighter implements Highlighter {
         InputHints.SyntaxProblem problem = lineReader != null && s.equals(lineReader.getBuffer().toString())
                 ? InputHints.syntaxProblem(s, cursor, dialect) : null;
 
+        List<Token> all = tokens.getTokens();
         int pos = 0;
-        for (Token t : tokens.getTokens()) {
+        String prevReal = "";
+        for (int i = 0; i < all.size(); i++) {
+            Token t = all.get(i);
             if (t.getType() == Token.EOF) break;
 
             if (t.getStartIndex() > pos) {
@@ -67,7 +72,13 @@ public class SqlHighlighter implements Highlighter {
             }
 
             String text = t.getText();
-            AttributedStyle style = styleForText(text, isIdentifierToken(t));
+            boolean real = t.getChannel() == Token.DEFAULT_CHANNEL;
+            AttributedStyle style = real
+                    ? styleForText(text, isIdentifierToken(t), prevReal, nextRealText(all, i))
+                    : hiddenStyle(text);
+            if (real) {
+                prevReal = text;
+            }
             if (problem != null && t.getStartIndex() == problem.start()) {
                 style = style.underline().foreground(203);
             }
@@ -93,71 +104,135 @@ public class SqlHighlighter implements Highlighter {
         return DialectAdapters.of(dialect).isIdentifierToken(t.getType());
     }
 
-    private static AttributedStyle styleForText(String text, boolean isIdentifierToken) {
+    // Bảng màu (256 màu): mỗi loại 1 sắc riêng - từ khoá cùng 1 họ xanh dương, lệnh (SELECT/CREATE...) in đậm.
+    private static final int KEYWORD = 75;
+    private static final int TABLE = 214;
+    private static final int SCHEMA = 109;
+    private static final int COLUMN = 152;
+    private static final int ALIAS = 174;
+    private static final int FUNCTION = 117;
+    private static final int STRING = 114;
+    private static final int NUMBER = 141;
+    private static final int OPERATOR = 203;
+    private static final int MUTED = 244;
+
+    private static final Set<String> KEYWORDS = java.util.stream.Stream.of(CLAUSE, JOIN, LOGIC, ORDERING)
+            .flatMap(Set::stream).collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+    /** Token không phải code (comment, khoảng trắng). */
+    private static AttributedStyle hiddenStyle(String text) {
+        return text.startsWith("--") || text.startsWith("/*")
+                ? AttributedStyle.DEFAULT.foreground(MUTED).italic()
+                : AttributedStyle.DEFAULT;
+    }
+
+    private static String nextRealText(List<Token> tokens, int i) {
+        for (int k = i + 1; k < tokens.size(); k++) {
+            Token t = tokens.get(k);
+            if (t.getType() == Token.EOF) {
+                return "";
+            }
+            if (t.getChannel() == Token.DEFAULT_CHANNEL) {
+                return t.getText();
+            }
+        }
+        return "";
+    }
+
+    /**
+     * @param prev token thật đứng trước ("." trước 1 từ: đó là tên cột/bảng, kể cả khi trùng từ khoá như "u.name")
+     * @param next token thật đứng sau ("(" sau 1 từ không phải từ khoá: tên hàm)
+     */
+    private static AttributedStyle styleForText(String text, boolean isIdentifierToken, String prev, String next) {
         if (text.isEmpty()) {
             return AttributedStyle.DEFAULT;
         }
 
         char c0 = text.charAt(0);
 
-        if (c0 == '\'') {
-            return AttributedStyle.DEFAULT.foreground(114);
+        if (c0 == '\'' || c0 == '$' && text.length() > 1 && text.endsWith("$")) {
+            return AttributedStyle.DEFAULT.foreground(STRING);
         }
         if (Character.isDigit(c0)) {
-            return AttributedStyle.DEFAULT.foreground(220);
+            return AttributedStyle.DEFAULT.foreground(NUMBER);
         }
         if (OPERATORS.contains(text)) {
-            return AttributedStyle.DEFAULT.foreground(203);
+            return AttributedStyle.DEFAULT.foreground(OPERATOR);
         }
-        if (text.equals(".")) {
-            return AttributedStyle.DEFAULT.foreground(244);
+        if (text.equals(".") || text.equals(",") || text.equals(";")) {
+            return AttributedStyle.DEFAULT.foreground(MUTED);
         }
 
+        boolean word = Character.isLetter(c0) || c0 == '_' || c0 == '"';
+        if (!word) {
+            return AttributedStyle.DEFAULT;
+        }
         String upper = text.toUpperCase();
-        if (DML.contains(upper)) {
-            return AttributedStyle.BOLD.foreground(75);
-        }
-        if (DDL.contains(upper)) {
-            return AttributedStyle.BOLD.foreground(208);
-        }
-        if (CLAUSE.contains(upper)) {
-            return AttributedStyle.DEFAULT.foreground(75);
-        }
-        if (JOIN.contains(upper)) {
-            return AttributedStyle.DEFAULT.foreground(111);
-        }
-        if (LOGIC.contains(upper)) {
-            return AttributedStyle.DEFAULT.foreground(141);
-        }
-        if (ORDERING.contains(upper)) {
-            return AttributedStyle.DEFAULT.foreground(75);
+        boolean afterDot = prev.equals(".");
+        if (!afterDot) {
+            if (DML.contains(upper) || DDL.contains(upper)) {
+                return AttributedStyle.BOLD.foreground(KEYWORD);
+            }
+            if (KEYWORDS.contains(upper)) {
+                return AttributedStyle.DEFAULT.foreground(KEYWORD);
+            }
         }
 
-        if (isIdentifierToken) {
-            String key = text.toLowerCase();
-            if (SchemaIndex.tableIndex.containsKey(key)) {
-                return AttributedStyle.DEFAULT.foreground(214);
+        String key = text.startsWith("\"") ? text.substring(1, Math.max(1, text.length() - 1)) : text.toLowerCase();
+        Names names = names();
+        if (afterDot) {
+            // "u.cột", "schema.bảng": phía sau dấu chấm luôn là tên, kể cả trùng từ khoá không dành riêng
+            if (names.columns.contains(key)) {
+                return AttributedStyle.DEFAULT.foreground(COLUMN);
             }
-            if (isSchema(key)) {
-                return AttributedStyle.DEFAULT.foreground(109);
+            if (names.tables.contains(key)) {
+                return AttributedStyle.DEFAULT.foreground(TABLE);
             }
-            if (isColumn(key)) {
-                return AttributedStyle.DEFAULT.foreground(150);
-            }
-            return AttributedStyle.DEFAULT.foreground(183);
+            return AttributedStyle.DEFAULT.foreground(COLUMN);
         }
-
-        return AttributedStyle.DEFAULT;
+        if (next.equals("(") && !names.tables.contains(key)) {
+            return AttributedStyle.DEFAULT.foreground(FUNCTION);
+        }
+        if (names.tables.contains(key)) {
+            return AttributedStyle.DEFAULT.foreground(TABLE);
+        }
+        if (names.schemas.contains(key) && next.equals(".")) {
+            return AttributedStyle.DEFAULT.foreground(SCHEMA);
+        }
+        if (names.columns.contains(key)) {
+            return AttributedStyle.DEFAULT.foreground(COLUMN);
+        }
+        // định danh lạ (alias, tên chưa có trong schema); từ khoá không dành riêng khác ("type"...) giữ màu thường
+        return isIdentifierToken ? AttributedStyle.DEFAULT.foreground(ALIAS) : AttributedStyle.DEFAULT;
     }
 
-    private static boolean isSchema(String text) {
-        return SchemaIndex.schemas.stream()
-                .anyMatch(s -> s.name().equals(text));
+    /** Tên bảng/schema/cột dựng 1 lần cho mỗi phiên bản schema - highlight chạy ở mỗi phím, không duyệt lại cả schema. */
+    private record Names(Object source, Set<String> tables, Set<String> schemas, Set<String> columns) {
     }
 
-    private static boolean isColumn(String text) {
-        return SchemaIndex.tableIndex.values().stream()
-                .anyMatch(t -> t.columns().stream()
-                        .anyMatch(c -> c.name().equals(text)));
+    private static volatile Names cachedNames;
+
+    private static Names names() {
+        var tableIndex = SchemaIndex.tableIndex;
+        Names cached = cachedNames;
+        if (cached != null && cached.source() == tableIndex) {
+            return cached;
+        }
+        Set<String> tables = new java.util.HashSet<>();
+        Set<String> columns = new java.util.HashSet<>();
+        tableIndex.values().forEach(t -> {
+            tables.add(t.name().toLowerCase());
+            tables.add(t.name());
+            t.columns().forEach(c -> {
+                columns.add(c.name().toLowerCase());
+                columns.add(c.name());
+            });
+        });
+        Set<String> schemas = new java.util.HashSet<>();
+        SchemaIndex.schemas.forEach(sc -> schemas.add(sc.name().toLowerCase()));
+        Names fresh = new Names(tableIndex, tables, schemas, columns);
+        cachedNames = fresh;
+        return fresh;
     }
+
 }
