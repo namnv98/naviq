@@ -27,6 +27,8 @@ public final class KafkaCompletion {
 
         List<String> groups();
 
+        List<String> transactionalIds();
+
         List<String> brokers();
 
         List<String> partitions(String topic);
@@ -120,6 +122,7 @@ public final class KafkaCompletion {
         switch (kind) {
             case "topic" -> add(items, source.topics(), word, "topic");
             case "group" -> add(items, source.groups(), word, "group");
+            case "transactionalId" -> add(items, source.transactionalIds(), word, "value");
             case "broker" -> add(items, source.brokers(), word, "broker");
             case "subject" -> add(items, source.subjects(), word, "subject");
             case "partition" -> {

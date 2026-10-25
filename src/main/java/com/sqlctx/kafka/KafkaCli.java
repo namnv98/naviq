@@ -333,12 +333,18 @@ public final class KafkaCli {
         if (p.tool().name().equals("kafka-consumer-groups") && "--reset-offsets".equals(p.mode())) {
             return p.has("--execute");
         }
+        if (p.tool().name().equals("kafka-streams-application-reset") && p.has("--dry-run")) {
+            return false;
+        }
         return p.tool().writes().contains("*") || p.mode() != null && p.tool().writes().contains(p.mode());
     }
 
     private static boolean dangerous(KafkaArgs.Parsed p) {
         if (p.tool().name().equals("kafka-consumer-groups") && "--reset-offsets".equals(p.mode())) {
             return p.has("--execute");
+        }
+        if (p.tool().name().equals("kafka-streams-application-reset") && p.has("--dry-run")) {
+            return false;
         }
         if (p.tool().name().equals("kafka-acls") && p.has("--force")) {
             return false;

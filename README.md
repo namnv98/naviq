@@ -144,10 +144,11 @@ Gõ lệnh như các tool `kafka-*.sh` của Kafka 3.9; `--bootstrap-server`/`--
 | `kafka-configs` | topic, broker, broker-logger, quota user/client, SCRAM credential |
 | `kafka-acls` | `--list --add --remove`, `--producer`/`--consumer` |
 | `kafka-get-offsets`, `kafka-delete-records`, `kafka-log-dirs`, `kafka-cluster`, `kafka-metadata-quorum` | như tool gốc |
-| `kafka-reassign-partitions` | `--generate --execute --verify --cancel --list` (không đặt throttle, đề xuất không xét rack) |
+| `kafka-reassign-partitions` | `--generate --execute --verify --cancel --list`, `--throttle` (gỡ ở `--verify` khi xong), `--additional`; đề xuất không xét rack |
 | `kafka-leader-election` | `--election-type PREFERRED/UNCLEAN`, theo `--topic [--partition]`, `--path-to-json-file` hoặc `--all-topic-partitions` |
 | `kafka-transactions` | `list`, `describe`, `describe-producers`, `find-hanging`, `abort` (theo `--start-offset` hoặc producer id/epoch) |
-| `kafka-avro-*`, `kafka-json-schema-*`, `kafka-protobuf-*` | message qua Schema Registry. Protobuf đọc file `.proto` lúc chạy: ghi từ JSON, đọc ra JSON có tên field (như tool của Confluent); `--property value.message=Tên` chọn message (mặc định message đầu tiên). Schema dùng `import` sang file khác thì đọc dạng thô `1: 7 2: "click"` |
+| `kafka-streams-application-reset` | offset topic input về đầu (hoặc `--to-*`, `--from-file`), topic trung gian tới cuối, xoá topic nội bộ (`-changelog`, `-repartition`); `--dry-run`, `--force` |
+| `kafka-avro-*`, `kafka-json-schema-*`, `kafka-protobuf-*` | message qua Schema Registry. Protobuf đọc file `.proto` lúc chạy: ghi từ JSON, đọc ra JSON có tên field và giá trị mặc định, giống hệt console consumer của Confluent; `import` lấy từ reference của schema (ghi: `--property value.refs='[{"name":"x.proto","subject":"s","version":1}]'`), `google/protobuf/*.proto` (Timestamp, Duration, wrapper, Struct...) có sẵn; `--property value.message=Tên` chọn message (mặc định message đầu tiên) |
 | `schema-registry` | `--list --versions --describe --register --delete --compatibility --id` (không phải tool có thật: Schema Registry chỉ có REST) |
 
 Khác tool gốc có chủ đích: consumer không `--group` đọc bằng `assign()` (không tạo group rác); consumer có `--group` chỉ commit tới message đã in (`--max-messages` không làm mất message đã lấy về mà chưa in); byte không phải UTF-8 in dạng `\xNN`; `kafka-consumer-groups --describe` hiện cả partition group chưa từng commit (CURRENT-OFFSET `-`, LAG tính từ offset đầu) - tool gốc bỏ qua chúng nên tổng lag trông nhỏ hơn thật. `--delete`, `--reset-offsets --execute`, `kafka-acls --remove`, `kafka-delete-records`... hỏi `[y/N]` (batch cần `--yes`). `\h TOOL` xem tuỳ chọn, `\brokers` xem broker. Dữ liệu mẫu: `seed/kafka.sh`.
@@ -208,7 +209,7 @@ Test cần server thật (`KafkaIntegrationTest`, phần Cluster/Sentinel của 
 
 ## Giới hạn
 
-- SQL chỉ có PostgreSQL và Oracle. Kafka: chưa có `kafka-streams-application-reset`; Protobuf chưa hỗ trợ `import`/references, extension, group của proto2. Redis Cluster: pipeline (`\dt` lấy TYPE/TTL) chạy lần lượt từng lệnh thay vì gom theo node. Server không có `COMMAND DOCS` (Redis < 7.0, hoặc ACL chặn lệnh `COMMAND`) dùng bản mô tả đóng gói sẵn từ Valkey (`tools/redis-fallback/update.sh`), lọc theo lệnh và phiên bản của server. Lệnh module không khai báo docs vẫn chạy được nhưng không có gợi ý tham số.
+- SQL chỉ có PostgreSQL và Oracle. Kafka: Protobuf chưa hỗ trợ extension, group của proto2, `google.protobuf.Any` khi ghi. Server không có `COMMAND DOCS` (Redis < 7.0, hoặc ACL chặn lệnh `COMMAND`) dùng bản mô tả đóng gói sẵn từ Valkey (`tools/redis-fallback/update.sh`), lọc theo lệnh và phiên bản của server. Lệnh module không khai báo docs vẫn chạy được nhưng không có gợi ý tham số.
 - Đi trên grammar không có error recovery: token trước con trỏ không parse được thì không có gợi ý keyword.
 - Báo lỗi cú pháp dựa trên grammar ANTLR: cú pháp mới mà grammar chưa có sẽ bị báo nhầm là lỗi.
 - Mỗi tầng phân tích có giới hạn 300ms (`-Dsqlctx.completion.budgetMs=`); câu cực dài có thể không có gợi ý keyword.

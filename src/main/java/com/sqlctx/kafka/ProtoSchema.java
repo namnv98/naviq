@@ -21,14 +21,17 @@ import java.util.Set;
 
 /**
  * Đọc file .proto (proto3, proto2 cơ bản) đủ để chuyển JSON <-> protobuf binary mà không cần protoc: message lồng
- * nhau, enum, oneof, map, repeated (packed/không packed). Không hỗ trợ import/references sang file khác, extension,
- * group của proto2 - gặp kiểu không tìm thấy thì báo lỗi rõ ràng. JSON theo cách ánh xạ chuẩn của proto3
- * (JsonFormat): tên field dạng lowerCamelCase (nhận cả tên gốc), số 64 bit là chuỗi, enum là tên, bytes là base64.
+ * nhau, enum, oneof, map, repeated (packed/không packed), import sang file khác ({@link Imports}: reference của
+ * Schema Registry; google/protobuf/*.proto có sẵn trong {@link ProtoWellKnown}). Không hỗ trợ extension, group của
+ * proto2 - gặp kiểu không tìm thấy thì báo lỗi rõ ràng. JSON theo cách ánh xạ chuẩn của proto3 (JsonFormat): tên
+ * field dạng lowerCamelCase (nhận cả tên gốc), số 64 bit là chuỗi, enum là tên, bytes là base64; khi đọc ra in cả
+ * field mang giá trị mặc định như console consumer của Confluent (trừ field có presence: oneof, optional, message).
  */
 final class ProtoSchema {
 
+    /** {@code presence}: không giá trị thì không in mặc định (oneof, {@code optional}, proto2, kiểu message). */
     record Field(String name, String jsonName, int number, String type, boolean repeated, boolean packed,
-                 String keyType, String valueType) {
+                 String keyType, String valueType, boolean presence) {
 
         boolean isMap() {
             return keyType != null;
@@ -39,9 +42,11 @@ final class ProtoSchema {
         final String fullName;
         final List<Field> fields = new ArrayList<>();
         final List<Message> nested = new ArrayList<>();
+        final boolean proto3;
 
-        Message(String fullName) {
+        Message(String fullName, boolean proto3) {
             this.fullName = fullName;
+            this.proto3 = proto3;
         }
 
         Field byNumber(int n) {
@@ -86,6 +91,7 @@ final class ProtoSchema {
     final Map<String, EnumType> enums = new LinkedHashMap<>();
     private String pkg = "";
     private boolean proto3;
+    private final List<String> imports = new ArrayList<>();
 
     private ProtoSchema() {
     }
@@ -95,13 +101,38 @@ final class ProtoSchema {
     private List<String> toks;
     private int at;
 
+    /** Nội dung file được import theo đường dẫn trong {@code import "..."}; null nếu không có. */
+    interface Imports {
+        String read(String path) throws IOException;
+    }
+
     static ProtoSchema parse(String text) throws IOException {
+        return parse(text, path -> null);
+    }
+
+    /** {@code text}: file chính (chỉ số message kiểu Confluent tính trong file này); file import đọc qua {@code imports}. */
+    static ProtoSchema parse(String text, Imports imports) throws IOException {
         ProtoSchema s = new ProtoSchema();
-        s.toks = tokenize(text);
-        s.at = 0;
+        List<String> missing = new ArrayList<>();
         try {
-            s.file();
-            s.resolve();
+            s.parseFile(text, true);
+            java.util.Set<String> done = new java.util.HashSet<>();
+            for (int i = 0; i < s.imports.size(); i++) { // danh sách dài thêm khi file import lại import tiếp
+                String path = s.imports.get(i);
+                if (!done.add(path)) {
+                    continue;
+                }
+                String content = imports.read(path);
+                if (content == null) {
+                    content = ProtoWellKnown.SOURCES.get(path);
+                }
+                if (content == null) {
+                    missing.add(path);
+                } else {
+                    s.parseFile(content, false);
+                }
+            }
+            s.resolve(missing);
         } catch (IndexOutOfBoundsException e) {
             throw new IOException(I18n.t("proto.unexpectedEnd"));
         }
@@ -110,6 +141,17 @@ final class ProtoSchema {
         }
         s.toks = null;
         return s;
+    }
+
+    private boolean main;
+
+    private void parseFile(String text, boolean mainFile) throws IOException {
+        toks = tokenize(text);
+        at = 0;
+        pkg = "";
+        proto3 = false; // không có dòng syntax thì protoc coi là proto2
+        main = mainFile;
+        file();
     }
 
     private static List<String> tokenize(String s) {
@@ -193,11 +235,24 @@ final class ProtoSchema {
                     pkg = next();
                     expect(";");
                 }
-                case "message" -> topLevel.add(parseMessage(pkg));
+                case "message" -> {
+                    Message m = parseMessage(pkg);
+                    if (main) {
+                        topLevel.add(m);
+                    }
+                }
+                case "import" -> {
+                    String path = next();
+                    if (path.equals("public") || path.equals("weak")) {
+                        path = next();
+                    }
+                    imports.add(path.substring(1, path.length() - 1));
+                    expect(";");
+                }
                 case "enum" -> enumType(pkg);
                 case ";" -> {
                 }
-                default -> skipStatement(); // import, option, service, extend
+                default -> skipStatement(); // option, service, extend
             }
         }
     }
@@ -207,7 +262,7 @@ final class ProtoSchema {
     }
 
     private Message parseMessage(String scope) throws IOException {
-        Message m = new Message(join(scope, next()));
+        Message m = new Message(join(scope, next()), proto3);
         messages.put(m.fullName, m);
         expect("{");
         body(m);
@@ -234,7 +289,7 @@ final class ProtoSchema {
                         if (peek().equals("option")) {
                             skipStatement();
                         } else {
-                            field(m, false);
+                            field(m, false, true);
                         }
                     }
                     next();
@@ -244,20 +299,24 @@ final class ProtoSchema {
                 case "group" -> throw new IOException(I18n.t("proto.unsupported", "group"));
                 default -> {
                     boolean repeated = false;
+                    boolean optional = false;
                     if (t.equals("repeated") || t.equals("optional") || t.equals("required")) {
-                        repeated = next().equals("repeated");
+                        String label = next();
+                        repeated = label.equals("repeated");
+                        optional = label.equals("optional");
                     }
                     if (peek().equals("group")) {
                         throw new IOException(I18n.t("proto.unsupported", "group"));
                     }
-                    field(m, repeated);
+                    field(m, repeated, optional || !proto3);
                 }
             }
         }
         next();
     }
 
-    private void field(Message m, boolean repeated) throws IOException {
+    /** {@code presence}: oneof, {@code optional} hoặc proto2 - xem {@link Field}. */
+    private void field(Message m, boolean repeated, boolean presence) throws IOException {
         String type = next();
         String keyType = null;
         String valueType = null;
@@ -287,7 +346,7 @@ final class ProtoSchema {
         expect(";");
         boolean packed = repeated && keyType == null && PACKABLE.contains(type)
                 && (packedOption != null ? packedOption : proto3);
-        m.fields.add(new Field(name, jsonName(name), number, type, repeated, packed, keyType, valueType));
+        m.fields.add(new Field(name, jsonName(name), number, type, repeated, packed, keyType, valueType, presence && !repeated));
     }
 
     private void enumType(String scope) throws IOException {
@@ -333,20 +392,20 @@ final class ProtoSchema {
     }
 
     /** Đổi tên kiểu trong field thành tên đầy đủ, theo luật tìm kiếm của protoc (từ trong ra ngoài). */
-    private void resolve() throws IOException {
+    private void resolve(List<String> missingImports) throws IOException {
         for (Message m : messages.values()) {
             for (int i = 0; i < m.fields.size(); i++) {
                 Field f = m.fields.get(i);
-                String type = f.isMap() ? f.type() : resolveType(f.type(), m.fullName);
-                String valueType = f.isMap() ? resolveType(f.valueType(), m.fullName) : null;
+                String type = f.isMap() ? f.type() : resolveType(f.type(), m.fullName, missingImports);
+                String valueType = f.isMap() ? resolveType(f.valueType(), m.fullName, missingImports) : null;
                 m.fields.set(i, new Field(f.name(), f.jsonName(), f.number(), type, f.repeated(),
-                        f.packed() || f.repeated() && !f.isMap() && proto3 && enums.containsKey(type),
-                        f.keyType(), valueType));
+                        f.packed() || f.repeated() && !f.isMap() && m.proto3 && enums.containsKey(type),
+                        f.keyType(), valueType, f.presence() || !f.repeated() && messages.containsKey(type)));
             }
         }
     }
 
-    private String resolveType(String type, String scope) throws IOException {
+    private String resolveType(String type, String scope, List<String> missingImports) throws IOException {
         if (SCALARS.contains(type)) {
             return type;
         }
@@ -369,7 +428,8 @@ final class ProtoSchema {
                 s = dot < 0 ? "" : s.substring(0, dot);
             }
         }
-        throw new IOException(I18n.t("proto.unknownType", type));
+        throw new IOException(missingImports.isEmpty() ? I18n.t("proto.unknownType", type)
+                : I18n.t("proto.missingImport", type, String.join(", ", missingImports)));
     }
 
     // ================================================================== chọn message, chỉ số kiểu Confluent
@@ -424,6 +484,13 @@ final class ProtoSchema {
     // ================================================================== JSON -> binary
 
     byte[] encode(Message m, JsonElement json) throws IOException {
+        if (ProtoWellKnown.special(m.fullName)) {
+            json = ProtoWellKnown.toCanonical(m.fullName, json);
+        }
+        return encodePlain(m, json);
+    }
+
+    private byte[] encodePlain(Message m, JsonElement json) throws IOException {
         if (!json.isJsonObject()) {
             throw new IOException(I18n.t("proto.needObject", m.fullName));
         }
@@ -439,7 +506,7 @@ final class ProtoSchema {
             }
             try {
                 writeField(out, f, v);
-            } catch (NumberFormatException | IllegalStateException | UnsupportedOperationException e2) {
+            } catch (NumberFormatException | IllegalStateException | UnsupportedOperationException | ArithmeticException e2) {
                 throw new IOException(I18n.t("proto.badValue", m.fullName + "." + f.name(), v));
             }
         }
@@ -572,7 +639,21 @@ final class ProtoSchema {
 
     // ================================================================== binary -> JSON
 
-    JsonObject decode(Message m, byte[] b, int from, int to) throws IOException {
+    /** Như JsonFormat của protobuf: field theo thứ tự khai báo, kiểu chuẩn (Timestamp...) theo cách viết riêng của chúng. */
+    JsonElement decode(Message m, byte[] b, int from, int to) throws IOException {
+        JsonObject o = decodePlain(m, b, from, to);
+        JsonObject ordered = new JsonObject();
+        for (Field f : m.fields) {
+            if (o.has(f.jsonName())) {
+                ordered.add(f.jsonName(), o.get(f.jsonName()));
+            } else if (!f.presence()) {
+                ordered.add(f.jsonName(), f.isMap() ? new JsonObject() : f.repeated() ? new JsonArray() : defaultValue(f.type()));
+            }
+        }
+        return ProtoWellKnown.special(m.fullName) ? ProtoWellKnown.fromCanonical(m.fullName, ordered) : ordered;
+    }
+
+    private JsonObject decodePlain(Message m, byte[] b, int from, int to) throws IOException {
         JsonObject o = new JsonObject();
         int[] pos = {from};
         while (pos[0] < to) {
@@ -586,10 +667,10 @@ final class ProtoSchema {
             }
             if (f.isMap()) {
                 int len = length(b, pos, to, number);
-                Message entry = new Message(f.name());
-                entry.fields.add(new Field("key", "key", 1, f.keyType(), false, false, null, null));
-                entry.fields.add(new Field("value", "value", 2, f.valueType(), false, false, null, null));
-                JsonObject e = decode(entry, b, pos[0], pos[0] + len);
+                Message entry = new Message(f.name(), true);
+                entry.fields.add(new Field("key", "key", 1, f.keyType(), false, false, null, null, true));
+                entry.fields.add(new Field("value", "value", 2, f.valueType(), false, false, null, null, true));
+                JsonObject e = decodePlain(entry, b, pos[0], pos[0] + len);
                 pos[0] += len;
                 if (!o.has(f.jsonName())) {
                     o.add(f.jsonName(), new JsonObject());
@@ -694,7 +775,7 @@ final class ProtoSchema {
                     return n == null ? new JsonPrimitive(v) : new JsonPrimitive(n);
                 }
                 int len = length(b, pos, to, number);
-                JsonObject nested = decode(messages.get(type), b, pos[0], pos[0] + len);
+                JsonElement nested = decode(messages.get(type), b, pos[0], pos[0] + len);
                 pos[0] += len;
                 return nested;
             }

@@ -62,7 +62,9 @@ class ProtoSchemaTest {
                 + "\"firstItem\":{\"sku\":\"A1\",\"n\":7},\"tags\":{\"vip\":1},\"cash\":true,\"delta\":-3,"
                 + "\"price\":9.5,\"blob\":\"AQI=\",\"items\":[{\"sku\":\"B\"},{\"sku\":\"C\"}]}";
         byte[] b = s.encode(s.message(null), JsonParser.parseString(json));
-        assertEquals(JsonParser.parseString(json), s.decode(s.message(null), b, 0, b.length));
+        // Item lồng trong items in thêm n = 0 (giá trị mặc định), card (oneof) để trống thì không in
+        String expected = json.replace("{\"sku\":\"B\"}", "{\"sku\":\"B\",\"n\":0}").replace("{\"sku\":\"C\"}", "{\"sku\":\"C\",\"n\":0}");
+        assertEquals(JsonParser.parseString(expected), s.decode(s.message(null), b, 0, b.length));
     }
 
     @Test
@@ -100,5 +102,63 @@ class ProtoSchemaTest {
         // [0] viết gọn thành 1 byte 0; [1, 0] -> số phần tử 2, rồi 1, 0 (đều zigzag)
         assertEquals(List.of(0), KafkaSerde.readIndexes(new byte[]{0}, new int[]{0}));
         assertEquals(List.of(1, 0), KafkaSerde.readIndexes(new byte[]{4, 2, 0}, new int[]{0}));
+    }
+
+    @Test
+    void inGiáTrịMặcĐịnhNhưConfluent() throws IOException {
+        // field thường để trống: in mặc định; oneof, optional và kiểu message để trống: không in
+        ProtoSchema s = ProtoSchema.parse("""
+                syntax = "proto3";
+                message M { string a = 1; int64 b = 2; E e = 3; repeated int32 r = 4; map<string, int32> m = 5;
+                  optional int32 o = 6; N n = 7; oneof x { string c = 8; } bool f = 9; }
+                message N { int32 v = 1; }
+                enum E { E_ZERO = 0; E_ONE = 1; }
+                """);
+        byte[] b = s.encode(s.message(null), JsonParser.parseString("{\"f\":true,\"a\":\"x\"}"));
+        assertEquals("{\"a\":\"x\",\"b\":\"0\",\"e\":\"E_ZERO\",\"r\":[],\"m\":{},\"f\":true}",
+                s.decode(s.message(null), b, 0, b.length).toString());
+    }
+
+    @Test
+    void kiểuChuẩnCủaGoogle() throws IOException {
+        ProtoSchema s = ProtoSchema.parse("""
+                syntax = "proto3";
+                import "google/protobuf/timestamp.proto";
+                import "google/protobuf/duration.proto";
+                import "google/protobuf/wrappers.proto";
+                import "google/protobuf/struct.proto";
+                import "google/protobuf/field_mask.proto";
+                import "google/protobuf/empty.proto";
+                message Ev { google.protobuf.Timestamp at = 1; google.protobuf.Duration took = 2;
+                  google.protobuf.StringValue note = 3; google.protobuf.Int64Value big = 4; google.protobuf.Struct meta = 5;
+                  google.protobuf.FieldMask mask = 6; google.protobuf.Empty nothing = 7; repeated google.protobuf.Value vs = 8; }
+                """);
+        String json = "{\"at\":\"2024-01-31T10:00:00.123Z\",\"took\":\"-1.500s\",\"note\":\"hi\",\"big\":\"9007199254740993\","
+                + "\"meta\":{\"k\":[1,\"two\",true,null,{\"x\":1.5}]},\"mask\":\"userId,name\",\"nothing\":{},"
+                + "\"vs\":[null,3,\"s\"]}";
+        byte[] b = s.encode(s.message(null), JsonParser.parseString(json));
+        assertEquals(JsonParser.parseString(json), s.decode(s.message(null), b, 0, b.length));
+        // múi giờ khác Z đổi về UTC; giây không có phần lẻ
+        byte[] t = s.encode(s.message(null), JsonParser.parseString("{\"at\":\"2024-01-31T17:00:00+07:00\",\"took\":\"3s\"}"));
+        String back = s.decode(s.message(null), t, 0, t.length).toString();
+        assertTrue(back.contains("\"at\":\"2024-01-31T10:00:00Z\"") && back.contains("\"took\":\"3s\""), back);
+        assertThrows(IOException.class, () -> s.encode(s.message(null), JsonParser.parseString("{\"took\":\"3 phút\"}")));
+        assertThrows(IOException.class, () -> s.encode(s.message(null), JsonParser.parseString("{\"at\":\"hôm qua\"}")));
+    }
+
+    @Test
+    void importFileKhácQuaReference() throws IOException {
+        java.util.Map<String, String> files = java.util.Map.of(
+                "common/money.proto", "syntax = \"proto3\"; package common; import \"common/currency.proto\"; message Money { int64 units = 1; Currency cur = 2; }",
+                "common/currency.proto", "syntax = \"proto3\"; package common; enum Currency { VND = 0; USD = 1; }");
+        ProtoSchema s = ProtoSchema.parse("syntax = \"proto3\"; package shop; import \"common/money.proto\"; "
+                + "message Order { string id = 1; common.Money total = 2; }", files::get);
+        assertEquals(List.of(0), s.indexes(s.message(null)), "message của file import không tính vào chỉ số");
+        assertEquals("shop.Order", s.message(null).fullName);
+        byte[] b = s.encode(s.message(null), JsonParser.parseString("{\"id\":\"o1\",\"total\":{\"units\":\"5\",\"cur\":\"USD\"}}"));
+        assertEquals("{\"id\":\"o1\",\"total\":{\"units\":\"5\",\"cur\":\"USD\"}}", s.decode(s.message(null), b, 0, b.length).toString());
+        IOException e = assertThrows(IOException.class, () -> ProtoSchema.parse(
+                "syntax = \"proto3\"; import \"x/y.proto\"; message A { x.Y y = 1; }"));
+        assertTrue(e.getMessage().contains("x/y.proto"), e.getMessage());
     }
 }

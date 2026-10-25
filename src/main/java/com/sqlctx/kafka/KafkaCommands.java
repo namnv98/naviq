@@ -120,6 +120,7 @@ final class KafkaCommands {
             case "kafka-log-dirs" -> logDirs(p);
             case "kafka-reassign-partitions" -> reassign(p);
             case "kafka-leader-election" -> leaderElection(p);
+            case "kafka-streams-application-reset" -> streamsReset(p);
             case "kafka-transactions" -> transactions(p);
             case "kafka-cluster" -> out.info("Cluster ID: " + admin().describeCluster().clusterId().get());
             case "kafka-metadata-quorum" -> quorum(p);
@@ -479,33 +480,7 @@ final class KafkaCommands {
                     tps.addAll(topicPartitions(spec));
                 }
             }
-            tps.sort(java.util.Comparator.comparing(TopicPartition::topic).thenComparingInt(TopicPartition::partition));
-            Map<TopicPartition, Long> earliest = offsets(tps, OffsetSpec.earliest());
-            Map<TopicPartition, Long> latest = offsets(tps, OffsetSpec.latest());
-            Map<TopicPartition, Long> target = new LinkedHashMap<>();
-            for (TopicPartition tp : tps) {
-                long lo = earliest.get(tp);
-                long hi = latest.get(tp);
-                Long current = committed.containsKey(tp) ? committed.get(tp).offset() : null;
-                long t;
-                if (p.has("--to-earliest")) {
-                    t = lo;
-                } else if (p.has("--to-latest")) {
-                    t = hi;
-                } else if (p.has("--to-current")) {
-                    t = current != null ? current : lo;
-                } else if (p.has("--to-offset")) {
-                    t = Long.parseLong(p.get("--to-offset"));
-                } else if (p.has("--shift-by")) {
-                    t = (current != null ? current : lo) + Long.parseLong(p.get("--shift-by"));
-                } else {
-                    long ts = p.has("--to-datetime") ? parseDatetime(p.get("--to-datetime"))
-                            : System.currentTimeMillis() - Duration.parse(p.get("--by-duration")).toMillis();
-                    Long byTime = offsets(List.of(tp), OffsetSpec.forTimestamp(ts)).get(tp);
-                    t = byTime == null || byTime < 0 ? hi : byTime;
-                }
-                target.put(tp, Math.max(lo, Math.min(hi, t))); // như tool gốc: ép vào khoảng [đầu, cuối]
-            }
+            Map<TopicPartition, Long> target = targetOffsets(p, tps, committed);
             if (execute) {
                 ConsumerGroupDescription d = admin().describeConsumerGroups(List.of(group)).all().get().get(group);
                 if (d.state() != ConsumerGroupState.EMPTY && d.state() != ConsumerGroupState.DEAD) {
@@ -522,6 +497,113 @@ final class KafkaCommands {
         if (!execute) {
             out.info(I18n.t("kafka.dryRun"));
         }
+    }
+
+    /**
+     * Offset mới theo --to-earliest/--to-latest/--to-current/--to-offset/--shift-by/--to-datetime/--by-duration
+     * (không có cái nào: về đầu - mặc định của kafka-streams-application-reset), ép vào khoảng [đầu, cuối] như tool gốc.
+     */
+    private Map<TopicPartition, Long> targetOffsets(KafkaArgs.Parsed p, List<TopicPartition> tps,
+                                                    Map<TopicPartition, OffsetAndMetadata> committed) throws Exception {
+        tps.sort(java.util.Comparator.comparing(TopicPartition::topic).thenComparingInt(TopicPartition::partition));
+        Map<TopicPartition, Long> earliest = offsets(tps, OffsetSpec.earliest());
+        Map<TopicPartition, Long> latest = offsets(tps, OffsetSpec.latest());
+        Map<TopicPartition, Long> target = new LinkedHashMap<>();
+        for (TopicPartition tp : tps) {
+            long lo = earliest.get(tp);
+            long hi = latest.get(tp);
+            Long current = committed.containsKey(tp) ? committed.get(tp).offset() : null;
+            long t;
+            if (p.has("--to-latest")) {
+                t = hi;
+            } else if (p.has("--to-current")) {
+                t = current != null ? current : lo;
+            } else if (p.has("--to-offset")) {
+                t = Long.parseLong(p.get("--to-offset"));
+            } else if (p.has("--shift-by")) {
+                t = (current != null ? current : lo) + Long.parseLong(p.get("--shift-by"));
+            } else if (p.has("--to-datetime") || p.has("--by-duration")) {
+                long ts = p.has("--to-datetime") ? parseDatetime(p.get("--to-datetime"))
+                        : System.currentTimeMillis() - Duration.parse(p.get("--by-duration")).toMillis();
+                Long byTime = offsets(List.of(tp), OffsetSpec.forTimestamp(ts)).get(tp);
+                t = byTime == null || byTime < 0 ? hi : byTime;
+            } else {
+                t = lo; // --to-earliest
+            }
+            target.put(tp, Math.max(lo, Math.min(hi, t)));
+        }
+        return target;
+    }
+
+    // ================================================================== kafka-streams-application-reset
+
+    /**
+     * Như tool gốc: group (= application.id) phải không còn member (--force thì đá ra), offset topic input đặt lại,
+     * topic trung gian nhảy tới cuối, topic nội bộ (changelog, repartition) bị xoá - ứng dụng chạy lại sẽ tính từ đầu.
+     * Không xoá state store trên máy chạy ứng dụng (tool gốc cũng không: phải gọi KafkaStreams#cleanUp()).
+     */
+    private void streamsReset(KafkaArgs.Parsed p) throws Exception {
+        String app = p.get("--application-id");
+        boolean dry = p.has("--dry-run");
+        ConsumerGroupDescription d = admin().describeConsumerGroups(List.of(app)).all().get().get(app);
+        if (!d.members().isEmpty()) {
+            if (!p.has("--force")) {
+                throw new UsageException(I18n.t("kafka.streams.active", app, d.members().size()));
+            }
+            if (!dry) {
+                admin().removeMembersFromConsumerGroup(app, new org.apache.kafka.clients.admin.RemoveMembersFromConsumerGroupOptions())
+                        .all().get();
+            }
+            out.info(I18n.t("kafka.streams.removedMembers", d.members().size()));
+        }
+        Map<TopicPartition, OffsetAndMetadata> committed = admin().listConsumerGroupOffsets(app).partitionsToOffsetAndMetadata().get();
+        Map<TopicPartition, Long> target = new LinkedHashMap<>();
+        if (p.has("--from-file")) {
+            for (String line : Files.readAllLines(Path.of(p.get("--from-file")))) {
+                String[] f = line.strip().split(",");
+                if (f.length == 3) {
+                    target.put(new TopicPartition(f[0].strip(), Integer.parseInt(f[1].strip())), Long.parseLong(f[2].strip()));
+                }
+            }
+        } else if (p.has("--input-topics")) {
+            List<TopicPartition> tps = new ArrayList<>();
+            for (String t : p.get("--input-topics").split(",")) {
+                tps.addAll(topicPartitions(t.strip()));
+            }
+            target.putAll(targetOffsets(p, tps, committed));
+        }
+        if (p.has("--intermediate-topics")) {
+            List<TopicPartition> tps = new ArrayList<>();
+            for (String t : p.get("--intermediate-topics").split(",")) {
+                tps.addAll(topicPartitions(t.strip()));
+            }
+            target.putAll(offsets(tps, OffsetSpec.latest()));
+        }
+        if (!target.isEmpty() && !dry) {
+            Map<TopicPartition, OffsetAndMetadata> req = new LinkedHashMap<>();
+            target.forEach((tp, o) -> req.put(tp, new OffsetAndMetadata(o)));
+            admin().alterConsumerGroupOffsets(app, req).all().get();
+        }
+        List<List<String>> rows = new ArrayList<>();
+        target.forEach((tp, o) -> rows.add(List.of(tp.topic(), String.valueOf(tp.partition()), String.valueOf(o))));
+        if (!rows.isEmpty()) {
+            out.table(List.of("TOPIC", "PARTITION", "NEW-OFFSET"), rows);
+        }
+        List<String> internal = p.has("--internal-topics")
+                ? java.util.Arrays.stream(p.get("--internal-topics").split(",")).map(String::strip).toList()
+                : matchTopics(null, false).stream().filter(t -> internalTopic(app, t)).toList();
+        if (!internal.isEmpty() && !dry) {
+            admin().deleteTopics(internal).all().get();
+        }
+        out.info(internal.isEmpty() ? I18n.t("kafka.streams.noInternal")
+                : I18n.t(dry ? "kafka.streams.internalDry" : "kafka.streams.internal", String.join(", ", internal)));
+        out.info(dry ? I18n.t("kafka.streams.dryRun") : I18n.t("kafka.streams.done", app));
+    }
+
+    /** Topic Kafka Streams tự tạo cho ứng dụng: {@code <application.id>-<tên>-changelog|-repartition|...}. */
+    static boolean internalTopic(String app, String topic) {
+        return topic.startsWith(app + "-") && (topic.endsWith("-changelog") || topic.endsWith("-repartition")
+                || topic.endsWith("-subscription-registration-topic") || topic.endsWith("-subscription-response-topic"));
     }
 
     /** "2026-10-25T10:00:00", "2026-10-25T10:00:00.000", kèm múi giờ hay không (không có = giờ máy). */
@@ -1105,8 +1187,14 @@ final class KafkaCommands {
                     }
                     rollback.put(tp, current.get(tp));
                 });
+                if (!p.has("--additional") && !admin().listPartitionReassignments().reassignments().get().isEmpty()) {
+                    throw new UsageException(I18n.t("kafka.reassign.busy"));
+                }
                 out.info(I18n.t("kafka.reassign.rollback"));
                 out.lines(List.of(reassignmentJson(rollback), ""));
+                if (p.has("--throttle") || p.has("--replica-alter-log-dirs-throttle")) {
+                    setThrottles(target, current, p.get("--throttle"), p.get("--replica-alter-log-dirs-throttle"));
+                }
                 Map<TopicPartition, Optional<org.apache.kafka.clients.admin.NewPartitionReassignment>> req = new LinkedHashMap<>();
                 target.forEach((tp, r) -> req.put(tp, Optional.of(new org.apache.kafka.clients.admin.NewPartitionReassignment(r))));
                 List<List<String>> rows = new ArrayList<>();
@@ -1115,6 +1203,7 @@ final class KafkaCommands {
                             String.valueOf(target.get(e.getKey())), outcome(e.getValue(), I18n.t("kafka.reassign.started"))));
                 }
                 out.table(List.of("topic", "partition", "replicas", I18n.t("common.result")), rows);
+                failIfAny(rows);
             }
             case "--verify" -> {
                 Map<TopicPartition, List<Integer>> target = reassignmentFile(p.get("--reassignment-json-file"));
@@ -1129,6 +1218,10 @@ final class KafkaCommands {
                     rows.add(List.of(tp.topic(), String.valueOf(tp.partition()), String.valueOf(r), status));
                 });
                 out.table(List.of("topic", "partition", "replicas", I18n.t("common.status")), rows);
+                boolean allDone = target.keySet().stream().noneMatch(running::containsKey);
+                if (allDone && !p.has("--preserve-throttles")) {
+                    removeThrottles(target.keySet());
+                }
             }
             case "--cancel" -> {
                 Map<TopicPartition, List<Integer>> target = reassignmentFile(p.get("--reassignment-json-file"));
@@ -1139,12 +1232,16 @@ final class KafkaCommands {
                     out.info(I18n.t("kafka.reassign.nothingToCancel"));
                     return;
                 }
+                if (!p.has("--preserve-throttles")) {
+                    removeThrottles(target.keySet());
+                }
                 List<List<String>> rows = new ArrayList<>();
                 for (var e : admin().alterPartitionReassignments(req).values().entrySet()) {
                     rows.add(List.of(e.getKey().topic(), String.valueOf(e.getKey().partition()),
                             outcome(e.getValue(), I18n.t("kafka.reassign.cancelled"))));
                 }
                 out.table(List.of("topic", "partition", I18n.t("common.result")), rows);
+                failIfAny(rows);
             }
             case "--list" -> {
                 List<List<String>> rows = new ArrayList<>();
@@ -1184,9 +1281,91 @@ final class KafkaCommands {
         return out;
     }
 
+    private static final List<String> BROKER_THROTTLES = List.of("leader.replication.throttled.rate",
+            "follower.replication.throttled.rate", "replica.alter.log.dirs.io.max.bytes.per.second");
+
+    /**
+     * Như tool gốc: topic ghi các replica bị giới hạn (leader: replica hiện có của partition đang chuyển; follower:
+     * replica mới), broker liên quan ghi tốc độ. Gỡ ở --verify khi đã xong hết, hoặc ở --cancel.
+     */
+    private void setThrottles(Map<TopicPartition, List<Integer>> target, Map<TopicPartition, List<Integer>> current,
+                              String rate, String logDirsRate) throws Exception {
+        Map<String, List<String>> leader = new TreeMap<>();
+        Map<String, List<String>> follower = new TreeMap<>();
+        Set<Integer> brokers = new java.util.TreeSet<>();
+        target.forEach((tp, replicas) -> {
+            List<Integer> now = current.get(tp);
+            if (replicas.equals(now)) {
+                return;
+            }
+            for (int b : now) {
+                leader.computeIfAbsent(tp.topic(), t -> new ArrayList<>()).add(tp.partition() + ":" + b);
+            }
+            for (int b : replicas) {
+                if (!now.contains(b)) {
+                    follower.computeIfAbsent(tp.topic(), t -> new ArrayList<>()).add(tp.partition() + ":" + b);
+                }
+            }
+            brokers.addAll(now);
+            brokers.addAll(replicas);
+        });
+        Map<ConfigResource, Collection<AlterConfigOp>> ops = new LinkedHashMap<>();
+        if (rate != null) {
+            Set<String> topics = new java.util.TreeSet<>(leader.keySet());
+            topics.addAll(follower.keySet());
+            for (String t : topics) {
+                List<AlterConfigOp> list = new ArrayList<>();
+                list.add(new AlterConfigOp(new ConfigEntry("leader.replication.throttled.replicas",
+                        String.join(",", leader.getOrDefault(t, List.of()))), AlterConfigOp.OpType.SET));
+                list.add(new AlterConfigOp(new ConfigEntry("follower.replication.throttled.replicas",
+                        String.join(",", follower.getOrDefault(t, List.of()))), AlterConfigOp.OpType.SET));
+                ops.put(new ConfigResource(ConfigResource.Type.TOPIC, t), list);
+            }
+        }
+        for (int b : brokers) {
+            List<AlterConfigOp> list = new ArrayList<>();
+            if (rate != null) {
+                list.add(new AlterConfigOp(new ConfigEntry("leader.replication.throttled.rate", rate), AlterConfigOp.OpType.SET));
+                list.add(new AlterConfigOp(new ConfigEntry("follower.replication.throttled.rate", rate), AlterConfigOp.OpType.SET));
+            }
+            if (logDirsRate != null) {
+                list.add(new AlterConfigOp(new ConfigEntry("replica.alter.log.dirs.io.max.bytes.per.second", logDirsRate),
+                        AlterConfigOp.OpType.SET));
+            }
+            ops.put(new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(b)), list);
+        }
+        if (!ops.isEmpty()) {
+            admin().incrementalAlterConfigs(ops).all().get();
+            out.info(I18n.t("kafka.reassign.throttled", rate != null ? rate : "-", logDirsRate != null ? logDirsRate : "-", brokers));
+        }
+    }
+
+    private void removeThrottles(Collection<TopicPartition> partitions) throws Exception {
+        Map<ConfigResource, Collection<AlterConfigOp>> ops = new LinkedHashMap<>();
+        for (String t : partitions.stream().map(TopicPartition::topic).collect(Collectors.toCollection(java.util.TreeSet::new))) {
+            ops.put(new ConfigResource(ConfigResource.Type.TOPIC, t), List.of(
+                    new AlterConfigOp(new ConfigEntry("leader.replication.throttled.replicas", ""), AlterConfigOp.OpType.DELETE),
+                    new AlterConfigOp(new ConfigEntry("follower.replication.throttled.replicas", ""), AlterConfigOp.OpType.DELETE)));
+        }
+        for (Node n : admin().describeCluster().nodes().get()) {
+            ops.put(new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(n.id())), BROKER_THROTTLES.stream()
+                    .map(k -> new AlterConfigOp(new ConfigEntry(k, ""), AlterConfigOp.OpType.DELETE)).toList());
+        }
+        admin().incrementalAlterConfigs(ops).all().get();
+        out.info(I18n.t("kafka.reassign.unthrottled"));
+    }
+
     private static <V> List<Map.Entry<TopicPartition, V>> byPartition(Map<TopicPartition, V> m) {
         return m.entrySet().stream().sorted(Map.Entry.comparingByKey(
                 java.util.Comparator.comparing(TopicPartition::topic).thenComparingInt(TopicPartition::partition))).toList();
+    }
+
+    /** Bảng kết quả từng partition đã in; có dòng lỗi thì cả lệnh là lỗi (exit khác 0, batch dừng) như tool gốc. */
+    private static void failIfAny(List<List<String>> rows) {
+        long failed = rows.stream().filter(r -> r.get(r.size() - 1).startsWith("ERROR: ")).count();
+        if (failed > 0) {
+            throw new UsageException(I18n.t("kafka.err.someFailed", failed, rows.size()));
+        }
     }
 
     private static String outcome(org.apache.kafka.common.KafkaFuture<Void> f, String ok) {
@@ -1232,6 +1411,7 @@ final class KafkaCommands {
             out.info(I18n.t("kafka.election.nothing"));
         } else {
             out.table(List.of("topic", "partition", I18n.t("common.result")), rows);
+            failIfAny(rows);
         }
     }
 

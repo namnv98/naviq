@@ -349,10 +349,12 @@ public final class KafkaTools {
                         "{\"partitions\":[{\"topic\":\"t\",\"partition\":0,\"replicas\":[1,2]}],\"version\":1}",
                         "--execute", "--verify", "--cancel")
                 .flag("--disable-rack-aware", "bỏ qua - đề xuất không xét rack", "--generate")
-                .value("--throttle", "long", "bytes/s", "bỏ qua - sqlctx không đặt throttle", "--execute")
-                .value("--replica-alter-log-dirs-throttle", "long", "bytes/s", "bỏ qua - sqlctx không đặt throttle", "--execute")
-                .flag("--additional", "bỏ qua - luôn cho chạy thêm khi đang có lần chuyển khác", "--execute")
-                .flag("--preserve-throttles", "bỏ qua - sqlctx không đặt throttle", "--verify", "--cancel")
+                .value("--throttle", "long", "bytes/s", "giới hạn tốc độ sao chép replica giữa các broker trong lúc chuyển",
+                        "--execute")
+                .value("--replica-alter-log-dirs-throttle", "long", "bytes/s",
+                        "giới hạn tốc độ chuyển replica giữa các log dir trên cùng broker", "--execute")
+                .flag("--additional", "chạy thêm dù đang có lần chuyển khác", "--execute")
+                .flag("--preserve-throttles", "giữ throttle (mặc định gỡ khi đã chuyển xong/huỷ)", "--verify", "--cancel")
                 .value("--timeout", "int", "ms", "thời gian chờ broker")
                 .requires("--generate", one("--topics-to-move-json-file"), one("--broker-list"))
                 .requires("--execute", one("--reassignment-json-file"))
@@ -361,6 +363,28 @@ public final class KafkaTools {
                 .writes("--execute", "--cancel")
                 .dangerous("--execute", "--cancel");
         t.put(reassign.name, reassign.build());
+
+        B streams = new B("kafka-streams-application-reset",
+                "Đặt lại ứng dụng Kafka Streams: offset topic input về đầu, xoá topic nội bộ")
+                .connection()
+                .value("--application-id", "group", "id", "application.id của ứng dụng (cũng là tên consumer group)")
+                .value("--input-topics", "topicList", "t1,t2", "topic input: đặt lại offset (mặc định về đầu)")
+                .value("--intermediate-topics", "topicList", "t1,t2", "topic trung gian: nhảy tới cuối")
+                .value("--internal-topics", "topicList", "t1,t2",
+                        "topic nội bộ cần xoá (mặc định: <application-id>-...-changelog, -repartition)")
+                .flag("--to-earliest", "về offset đầu (mặc định)")
+                .flag("--to-latest", "tới offset cuối")
+                .value("--to-offset", "long", "n", "tới offset n")
+                .value("--shift-by", "long", "n", "dịch n offset (âm = lùi)")
+                .value("--to-datetime", "datetime", "YYYY-MM-DDTHH:mm:SS.sss", "tới message đầu tiên từ thời điểm này")
+                .value("--by-duration", "duration", "PnDTnHnMnS", "lùi về trước 1 khoảng thời gian")
+                .value("--from-file", "file", "file", "CSV topic,partition,offset")
+                .flag("--dry-run", "chỉ xem trước, không đổi gì")
+                .flag("--force", "đá các member đang chạy ra khỏi group trước khi đặt lại")
+                .requires("", one("--application-id"))
+                .writes("*")
+                .dangerous("*");
+        t.put(streams.name, streams.build());
 
         B election = new B("kafka-leader-election", "Bầu lại leader cho partition (preferred hoặc unclean)")
                 .connection()
@@ -380,7 +404,7 @@ public final class KafkaTools {
                 .mode("find-hanging", "transaction mở quá lâu trên partition (treo, chặn read_committed)")
                 .mode("abort", "huỷ transaction đang mở trên 1 partition")
                 .connection()
-                .value("--transactional-id", "string", "id", "transactional id", "describe")
+                .value("--transactional-id", "transactionalId", "id", "transactional id", "describe")
                 .value("--duration-filter", "long", "ms", "chỉ transaction chạy lâu hơn (ms)", "list")
                 .value("--topic", "topic", "topic", "topic", "describe-producers", "find-hanging", "abort")
                 .value("--partition", "partition", "n", "partition", "describe-producers", "find-hanging", "abort")
@@ -497,6 +521,7 @@ public final class KafkaTools {
                     "key.schema=", "schema của key", "parse.key=true", "dòng có key: key<tab>value",
                     "key.separator=", "giữa key và value (mặc định tab)", "schema.registry.url=", "mặc định lấy từ context",
                     "value.message=", "protobuf: message dùng cho value (mặc định message đầu tiên)",
+                    "value.refs=", "schema được tham chiếu: [{\"name\":\"x.proto\",\"subject\":\"s\",\"version\":1}]",
                     "key.message=", "protobuf: message dùng cho key")));
 
     /** Cho test (I18nTest): mọi mô tả giá trị cố định đều phải có bản tiếng Anh. */

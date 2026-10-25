@@ -20,6 +20,10 @@ class KafkaCompletionTest {
             return List.of("billing", "mailer");
         }
 
+        public List<String> transactionalIds() {
+            return List.of("orders-tx-1", "payments-tx");
+        }
+
         public List<String> brokers() {
             return List.of("1", "2");
         }
@@ -108,6 +112,8 @@ class KafkaCompletionTest {
         assertFalse(abort.contains("--transactional-id"), "tuỳ chọn của describe không hiện ở abort");
         assertEquals(List.of("0", "1", "2"), values("kafka-transactions describe-producers --topic orders --partition "));
         assertEquals(List.of("PREFERRED", "UNCLEAN"), values("kafka-leader-election --election-type "));
+        assertEquals(List.of("orders-tx-1"), values("kafka-transactions describe --transactional-id or"));
+        assertEquals(List.of("billing"), values("kafka-streams-application-reset --application-id b"));
         assertEquals(List.of("--generate", "--execute", "--verify", "--cancel", "--list"),
                 values("kafka-reassign-partitions ").subList(0, 5));
         assertFalse(values("kafka-reassign-partitions --list ").contains("--reassignment-json-file"));

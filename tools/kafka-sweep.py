@@ -98,6 +98,9 @@ STEPS = [
     (f'kafka-leader-election --election-type preferred --path-to-json-file {ELECT}', None),
     ('kafka-leader-election --election-type preferred --all-topic-partitions', None),
     ('kafka-transactions list', None),
+    (f'kafka-streams-application-reset --application-id {G} --input-topics {T} --dry-run', None),
+    (f'kafka-streams-application-reset --application-id {G} --input-topics {T} --to-latest', None),
+    (f'kafka-streams-application-reset --application-id {G} --input-topics {T} --by-duration PT1H --dry-run', None),
     (f'kafka-transactions describe-producers --topic {T} --partition 0', None),
     (f'kafka-transactions find-hanging --topic {T}', None),
     (f'kafka-transactions find-hanging --broker-id {ARGS.broker} --max-transaction-timeout 1', None),
@@ -134,6 +137,8 @@ MUST_FAIL = [
     'kafka-leader-election --election-type sideways --all-topic-partitions',
     f'kafka-transactions abort --topic {T} --partition 0 --start-offset 999',
     f'kafka-reassign-partitions --verify --reassignment-json-file {os.path.join(TMP, "không-có.json")}',
+    f'kafka-reassign-partitions --execute --reassignment-json-file {file("bad.json", {"partitions": [{"topic": T, "partition": 0, "replicas": [987654]}], "version": 1})}',
+    'kafka-streams-application-reset --input-topics x',
 ]
 
 

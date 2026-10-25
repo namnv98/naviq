@@ -385,7 +385,7 @@ final class KafkaConsole {
         }
         String schema = fmt.containsKey(prefix + ".schema.file") ? Files.readString(Path.of(fmt.get(prefix + ".schema.file")))
                 : fmt.get(prefix + ".schema");
-        return schema == null ? -1 : sr.register(subject, schema, type);
+        return schema == null ? -1 : sr.register(subject, schema, type, fmt.get(prefix + ".refs"));
     }
 
     private static ProducerRecord<byte[], byte[]> record(String topic, String line, boolean parseKey, String keySep,

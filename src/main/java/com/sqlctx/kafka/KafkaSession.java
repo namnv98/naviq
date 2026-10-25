@@ -138,6 +138,21 @@ final class KafkaSession implements AutoCloseable, KafkaCompletion.Source {
     }
 
     @Override
+    public List<String> transactionalIds() {
+        return cached("transactionalIds", () -> {
+            try {
+                TreeSet<String> out = new TreeSet<>();
+                for (var t : admin().listTransactions().all().get(1500, TimeUnit.MILLISECONDS)) {
+                    out.add(t.transactionalId());
+                }
+                return List.copyOf(out);
+            } catch (Exception e) {
+                return List.of();
+            }
+        });
+    }
+
+    @Override
     public List<String> brokers() {
         return cached("brokers", () -> {
             try {

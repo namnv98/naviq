@@ -209,3 +209,17 @@ broker (describe-producers: hỏi replica này thay vì leader; find-hanging: m�
 mở lâu hơn chừng này phút là treo (mặc định 15)	open longer than this many minutes counts as hanging (default 15)
 offset bắt đầu của transaction cần huỷ	start offset of the transaction to abort
 producer id (thay cho --start-offset)	producer id (instead of --start-offset)
+schema được tham chiếu: [{"name":"x.proto","subject":"s","version":1}]	referenced schemas: [{"name":"x.proto","subject":"s","version":1}]
+giới hạn tốc độ sao chép replica giữa các broker trong lúc chuyển	limit the replication rate between brokers during the move
+giới hạn tốc độ chuyển replica giữa các log dir trên cùng broker	limit the rate of moving replicas between log dirs on a broker
+chạy thêm dù đang có lần chuyển khác	run even while another reassignment is in progress
+giữ throttle (mặc định gỡ khi đã chuyển xong/huỷ)	keep the throttles (removed by default once done/cancelled)
+Đặt lại ứng dụng Kafka Streams: offset topic input về đầu, xoá topic nội bộ	Reset a Kafka Streams application: input topic offsets to the start, delete internal topics
+application.id của ứng dụng (cũng là tên consumer group)	the application's application.id (also its consumer group)
+topic input: đặt lại offset (mặc định về đầu)	input topics: reset offsets (to the start by default)
+topic trung gian: nhảy tới cuối	intermediate topics: seek to the end
+topic nội bộ cần xoá (mặc định: <application-id>-...-changelog, -repartition)	internal topics to delete (default: <application-id>-...-changelog, -repartition)
+về offset đầu (mặc định)	to the earliest offset (default)
+CSV topic,partition,offset	CSV topic,partition,offset
+chỉ xem trước, không đổi gì	preview only, change nothing
+đá các member đang chạy ra khỏi group trước khi đặt lại	remove running members from the group before resetting

@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,6 +108,15 @@ class KafkaArgsTest {
     void thờiĐiểmCóVàKhôngCóMúiGiờ() {
         assertEquals(0L, KafkaCommands.parseDatetime("1970-01-01T00:00:00Z"));
         assertEquals(1000L, KafkaCommands.parseDatetime("1970-01-01T07:00:01+07:00"));
+    }
+
+    @Test
+    void topicNộiBộCủaKafkaStreams() {
+        assertTrue(KafkaCommands.internalTopic("app", "app-store-changelog"));
+        assertTrue(KafkaCommands.internalTopic("app", "app-KSTREAM-AGGREGATE-0000000003-repartition"));
+        assertTrue(KafkaCommands.internalTopic("app", "app-KTABLE-FK-JOIN-SUBSCRIPTION-REGISTRATION-0000000006-subscription-registration-topic"));
+        assertFalse(KafkaCommands.internalTopic("app", "app-input"), "topic input của chính ứng dụng không bị xoá");
+        assertFalse(KafkaCommands.internalTopic("app", "app2-store-changelog"), "ứng dụng khác có tên bắt đầu giống");
     }
 
     @Test

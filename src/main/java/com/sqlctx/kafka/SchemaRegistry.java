@@ -32,8 +32,23 @@ public final class SchemaRegistry {
         }
     }
 
+    /** Schema khác mà schema này dùng (Protobuf: {@code name} là đường dẫn trong {@code import "..."}). */
+    public record Reference(String name, String subject, int version) {
+    }
+
     /** {@code type}: AVRO, JSON, PROTOBUF (REST bỏ trống nghĩa là AVRO). */
-    public record Schema(int id, String subject, Integer version, String type, String schema) {
+    public record Schema(int id, String subject, Integer version, String type, String schema, List<Reference> references) {
+    }
+
+    private static List<Reference> references(JsonObject o) {
+        List<Reference> out = new ArrayList<>();
+        if (o.has("references") && o.get("references").isJsonArray()) {
+            for (JsonElement e : o.getAsJsonArray("references")) {
+                JsonObject r = e.getAsJsonObject();
+                out.add(new Reference(r.get("name").getAsString(), r.get("subject").getAsString(), r.get("version").getAsInt()));
+            }
+        }
+        return out;
     }
 
     private final String baseUrl;
@@ -118,7 +133,7 @@ public final class SchemaRegistry {
         JsonObject o = call("GET", "/subjects/" + enc(subject) + "/versions/" + enc(version == null ? "latest" : version),
                 null).getAsJsonObject();
         Schema s = new Schema(o.get("id").getAsInt(), subject, o.get("version").getAsInt(),
-                o.has("schemaType") ? o.get("schemaType").getAsString() : "AVRO", o.get("schema").getAsString());
+                o.has("schemaType") ? o.get("schemaType").getAsString() : "AVRO", o.get("schema").getAsString(), references(o));
         byId.putIfAbsent(s.id(), s);
         return s;
     }
@@ -130,20 +145,32 @@ public final class SchemaRegistry {
         }
         JsonObject o = call("GET", "/schemas/ids/" + id, null).getAsJsonObject();
         Schema s = new Schema(id, null, null, o.has("schemaType") ? o.get("schemaType").getAsString() : "AVRO",
-                o.get("schema").getAsString());
+                o.get("schema").getAsString(), references(o));
         byId.put(id, s);
         return s;
     }
 
     /** Đăng ký (hoặc lấy id nếu schema đã có ở subject) - như auto.register.schemas của serializer Confluent. */
     public int register(String subject, String schema, String type) throws IOException {
+        return register(subject, schema, type, null);
+    }
+
+    /** {@code references}: mảng JSON [{"name","subject","version"}] như value.refs của tool Confluent; null = không có. */
+    public int register(String subject, String schema, String type, String references) throws IOException {
         JsonObject body = new JsonObject();
         body.addProperty("schema", schema);
         if (type != null && !type.equalsIgnoreCase("AVRO")) {
             body.addProperty("schemaType", type.toUpperCase());
         }
+        if (references != null && !references.isBlank()) {
+            try {
+                body.add("references", JsonParser.parseString(references).getAsJsonArray());
+            } catch (RuntimeException e) {
+                throw new SchemaRegistryException(I18n.t("sr.badRefs", references));
+            }
+        }
         int id = call("POST", "/subjects/" + enc(subject) + "/versions", body).getAsJsonObject().get("id").getAsInt();
-        byId.putIfAbsent(id, new Schema(id, subject, null, type == null ? "AVRO" : type.toUpperCase(), schema));
+        byId.putIfAbsent(id, new Schema(id, subject, null, type == null ? "AVRO" : type.toUpperCase(), schema, references(body)));
         return id;
     }
 

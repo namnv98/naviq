@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Hiển thị và tạo nội dung message. Định dạng trên dây của Schema Registry (Confluent): byte 0, 4 byte schema id
  * (big-endian), rồi dữ liệu - Avro binary; JSON Schema: chữ JSON; Protobuf: dãy chỉ số message (varint zigzag) rồi
- * protobuf binary. Protobuf đọc schema .proto bằng {@link ProtoSchema}; schema dùng thứ nó không hiểu (import...) thì
- * giải mã thô (số field: giá trị, như protoc --decode_raw).
+ * protobuf binary. Protobuf đọc schema .proto bằng {@link ProtoSchema} (file import lấy từ reference của schema);
+ * schema dùng thứ nó không hiểu (extension, group...) thì giải mã thô (số field: giá trị, như protoc --decode_raw).
  */
 public final class KafkaSerde {
 
@@ -144,9 +144,23 @@ public final class KafkaSerde {
         if (!"PROTOBUF".equalsIgnoreCase(s.type())) {
             throw new IOException(I18n.t("serde.notProtobuf", id, s.type()));
         }
-        ProtoSchema parsed = ProtoSchema.parse(s.schema());
+        Map<String, String> files = new java.util.HashMap<>();
+        collectReferences(s.references(), sr, files);
+        ProtoSchema parsed = ProtoSchema.parse(s.schema(), files::get);
         PROTO.put(id, parsed);
         return parsed;
+    }
+
+    /** Nội dung các schema được tham chiếu (và tham chiếu của chúng), theo tên dùng trong {@code import}. */
+    private static void collectReferences(List<SchemaRegistry.Reference> refs, SchemaRegistry sr, Map<String, String> files)
+            throws IOException {
+        for (SchemaRegistry.Reference r : refs) {
+            if (!files.containsKey(r.name())) {
+                SchemaRegistry.Schema s = sr.schema(r.subject(), String.valueOf(r.version()));
+                files.put(r.name(), s.schema());
+                collectReferences(s.references(), sr, files);
+            }
+        }
     }
 
     /** Chỉ số message kiểu Confluent: 1 byte 0 = [0] (message đầu tiên), không thì số phần tử rồi từng chỉ số. */

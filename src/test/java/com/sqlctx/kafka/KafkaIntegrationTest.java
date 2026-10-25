@@ -180,6 +180,24 @@ class KafkaIntegrationTest {
     }
 
     @Test
+    void đặtLạiỨngDụngKafkaStreams() throws Exception {
+        String app = TOPIC + "-app";
+        run("kafka-topics --create --topic " + app + "-in --partitions 1 --replication-factor 1");
+        run("kafka-topics --create --topic " + app + "-store-changelog --partitions 1 --replication-factor 1");
+        produce("kafka-console-producer --topic " + app + "-in", "a", "b");
+        consume("kafka-console-consumer --topic " + app + "-in --group " + app + " --from-beginning --max-messages 2 --timeout-ms 10000");
+        Captured dry = run("kafka-streams-application-reset --application-id " + app + " --input-topics " + app + "-in --dry-run");
+        assertTrue(run("kafka-topics --list").text.contains(app + "-store-changelog"), "dry-run không xoá gì");
+        assertEquals(List.of(List.of(app + "-in", "0", "0")), dry.rows);
+        run("kafka-streams-application-reset --application-id " + app + " --input-topics " + app + "-in");
+        assertTrue(!run("kafka-topics --list").text.contains(app + "-store-changelog"), "topic nội bộ đã bị xoá");
+        Captured lag = run("kafka-consumer-groups --describe --group " + app);
+        assertEquals("0", lag.rows.get(0).get(3), lag.all()); // CURRENT-OFFSET về đầu
+        run("kafka-consumer-groups --delete --group " + app);
+        run("kafka-topics --delete --topic " + app + "-in");
+    }
+
+    @Test
     void protobufQuaSchemaRegistry() throws Exception {
         assumeTrue(session.schemaRegistry(null) != null, "không có Schema Registry ở " + REGISTRY);
         String topic = TOPIC + "-proto";
@@ -188,7 +206,8 @@ class KafkaIntegrationTest {
         assertEquals(2, produce("kafka-protobuf-console-producer --topic " + topic + " --property \"value.schema=" + schema + "\"",
                 "{\"page\":\"/home\",\"n\":3}", "{\"page\":\"/cart\",\"kind\":\"BUY\"}"));
         List<String> got = consume("kafka-protobuf-console-consumer --topic " + topic + " --from-beginning --max-messages 2 --timeout-ms 10000");
-        assertEquals(List.of("{\"page\":\"/home\",\"n\":3}", "{\"page\":\"/cart\",\"kind\":\"BUY\"}"), got);
+        // như consumer của Confluent: in cả field để trống (giá trị mặc định), theo thứ tự khai báo
+        assertEquals(List.of("{\"page\":\"/home\",\"n\":3,\"kind\":\"VIEW\"}", "{\"page\":\"/cart\",\"n\":0,\"kind\":\"BUY\"}"), got);
         run("schema-registry --delete --subject " + topic + "-value");
         run("schema-registry --delete --subject " + topic + "-value --permanent");
     }
