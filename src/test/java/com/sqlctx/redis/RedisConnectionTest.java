@@ -37,6 +37,16 @@ class RedisConnectionTest {
     }
 
     @Test
+    void slotNhưRedis() {
+        // giá trị lấy từ CLUSTER KEYSLOT của Redis 7.4
+        assertEquals(12182, RedisConnection.slot("foo"));
+        assertEquals(1649, RedisConnection.slot("user:1000"));
+        assertEquals(RedisConnection.slot("bar"), RedisConnection.slot("{bar}x"));
+        assertEquals(10595, RedisConnection.slot("{}x")); // {} rỗng: tính cả key
+        assertEquals(15495, RedisConnection.slot("a"));
+    }
+
+    @Test
     void xuấtRaFileLấyGiáTrịThô() {
         var table = new RedisReplyRenderer.Table(List.of("field", "value"), List.of(List.of("a", "1")));
         assertEquals(table, RedisCli.exportTable(table, null));

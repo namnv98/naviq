@@ -121,6 +121,7 @@ final class RedisConnection implements Closeable {
             String moved = redirect(reply, "MOVED");
             String ask = moved == null ? redirect(reply, "ASK") : null;
             if (moved != null) {
+                slots = null; // slot đã chuyển node: bản đồ cũ không còn đúng
                 String address = normalize(moved);
                 current = node(address);
                 currentAddress = address;
@@ -136,16 +137,97 @@ final class RedisConnection implements Closeable {
         return reply;
     }
 
-    /** Cluster: các lệnh có thể thuộc slot ở node khác nhau nên chạy lần lượt (mỗi lệnh tự theo MOVED). */
+    /**
+     * Cluster: gom lệnh theo node giữ slot của key (tham số thứ 2 của mỗi lệnh - đúng với các lệnh 1 key mà \\dt, \\d
+     * dùng), mỗi node 1 lượt pipeline. Bản đồ slot lấy từ CLUSTER SLOTS; reply nào vẫn là MOVED/ASK (slot vừa chuyển)
+     * thì chạy lại riêng lệnh đó qua {@link #call} rồi nạp lại bản đồ.
+     */
     List<Object> pipeline(List<List<String>> commands) throws IOException {
         if (!cluster) {
             return current.pipeline(commands);
         }
-        List<Object> replies = new ArrayList<>(commands.size());
-        for (List<String> c : commands) {
-            replies.add(call(c.toArray(String[]::new)));
+        String[] owners = slotOwners();
+        Map<String, List<Integer>> byNode = new LinkedHashMap<>();
+        for (int i = 0; i < commands.size(); i++) {
+            List<String> c = commands.get(i);
+            String node = c.size() > 1 && owners != null ? owners[slot(c.get(1))] : null;
+            byNode.computeIfAbsent(node == null ? currentAddress : node, k -> new ArrayList<>()).add(i);
         }
-        return replies;
+        Object[] replies = new Object[commands.size()];
+        boolean stale = false;
+        for (var e : byNode.entrySet()) {
+            List<List<String>> batch = e.getValue().stream().map(commands::get).toList();
+            List<Object> r = node(e.getKey()).pipeline(batch);
+            for (int j = 0; j < r.size(); j++) {
+                int i = e.getValue().get(j);
+                Object reply = r.get(j);
+                if (redirect(reply, "MOVED") != null || redirect(reply, "ASK") != null) {
+                    stale = true;
+                    reply = call(commands.get(i).toArray(String[]::new));
+                }
+                replies[i] = reply;
+            }
+        }
+        if (stale) {
+            slots = null;
+        }
+        return java.util.Arrays.asList(replies);
+    }
+
+    /** Node giữ từng slot (16384 phần tử), null nếu không lấy được. */
+    private String[] slots;
+
+    private String[] slotOwners() throws IOException {
+        if (slots != null) {
+            return slots;
+        }
+        if (!(call("CLUSTER", "SLOTS") instanceof List<?> ranges)) {
+            return null;
+        }
+        String[] owners = new String[16384];
+        for (Object range : ranges) {
+            if (!(range instanceof List<?> r) || r.size() < 3 || !(r.get(2) instanceof List<?> master) || master.size() < 2) {
+                continue;
+            }
+            String address = normalize(RedisSession.text(master.get(0)) + ":" + RedisSession.text(master.get(1)));
+            for (long s = (Long) r.get(0); s <= (Long) r.get(1); s++) {
+                owners[(int) s] = address;
+            }
+        }
+        slots = owners;
+        return owners;
+    }
+
+    /** Slot của key như Redis: CRC16 (XMODEM) mod 16384, chỉ tính phần trong {...} đầu tiên nếu khác rỗng. */
+    static int slot(String key) {
+        byte[] b = key.getBytes(StandardCharsets.UTF_8);
+        int from = 0;
+        int to = b.length;
+        int open = indexOf(b, (byte) '{', 0);
+        if (open >= 0) {
+            int close = indexOf(b, (byte) '}', open + 1);
+            if (close > open + 1) {
+                from = open + 1;
+                to = close;
+            }
+        }
+        int crc = 0;
+        for (int i = from; i < to; i++) {
+            crc ^= (b[i] & 0xff) << 8;
+            for (int k = 0; k < 8; k++) {
+                crc = (crc & 0x8000) != 0 ? (crc << 1) ^ 0x1021 : crc << 1;
+            }
+        }
+        return (crc & 0xffff) % 16384;
+    }
+
+    private static int indexOf(byte[] b, byte x, int from) {
+        for (int i = from; i < b.length; i++) {
+            if (b[i] == x) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     void send(List<byte[]> args) throws IOException {
