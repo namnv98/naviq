@@ -42,11 +42,10 @@ import static com.sqlctx.cli.session.SqlctxSession.*;
 public class SqlctxCli {
 
     public static void main(String[] args) throws Exception {
-        for (String arg : args) {
-            if (arg.startsWith("--") && arg.contains("=")) {
-                String[] parts = arg.substring(2).split("=", 2);
-                System.setProperty("DB_" + parts[0].toUpperCase(), parts[1]);
-            }
+        List<String> argErrors = CliArgs.apply(args);
+        if (!argErrors.isEmpty()) {
+            argErrors.forEach(e -> System.err.println(RED + "ERROR: " + e + RESET));
+            System.exit(2);
         }
         System.setProperty("org.jline.terminal.type", "xterm-256color");
         // JLine đổi ký tự vẽ khung (│ ─ ·...) sang bộ ký tự ACS của terminal khi vẽ status bar - tmux và vài terminal

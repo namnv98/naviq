@@ -47,6 +47,8 @@ sqlctx                      # mở lại context lần trước
 
 Oracle: thêm `--dialect=oracle`; `--dbname` là service name.
 
+Tuỳ chọn viết `--tên=giá-trị` hay `--tên giá-trị` đều được; tuỳ chọn lạ, thiếu giá trị hay chữ thừa đều báo lỗi (có gợi ý tên gần đúng, vd `--contxt` -> `--context`).
+
 Chạy không cần vào REPL:
 
 ```sh
