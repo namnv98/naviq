@@ -87,4 +87,49 @@ class StatementExecutorTest {
         org.junit.jupiter.api.Assertions.assertEquals(java.util.List.of("drop table t"),
                 StatementExecutor.destructiveStatements(java.util.List.of("select 1", " drop table t ", "")));
     }
+
+    // ------------------------------------------------------------------ chữ trong ô (cellText)
+
+    /** ResultSet giả 1 cột: getObject trả {@code value}, getString trả {@code text}, kiểu cột {@code typeName}. */
+    private static java.sql.ResultSet rs(Object value, String text) {
+        return (java.sql.ResultSet) java.lang.reflect.Proxy.newProxyInstance(StatementExecutorTest.class.getClassLoader(),
+                new Class<?>[]{java.sql.ResultSet.class}, (proxy, m, args) -> switch (m.getName()) {
+                    case "getObject" -> value;
+                    case "getString" -> text;
+                    default -> throw new UnsupportedOperationException(m.getName());
+                });
+    }
+
+    private static java.sql.ResultSetMetaData meta(String typeName) {
+        return (java.sql.ResultSetMetaData) java.lang.reflect.Proxy.newProxyInstance(StatementExecutorTest.class.getClassLoader(),
+                new Class<?>[]{java.sql.ResultSetMetaData.class}, (proxy, m, args) -> typeName);
+    }
+
+    private static String cell(Object value, String text, String typeName, com.sqlctx.schema.Dialect d) throws Exception {
+        return StatementExecutor.cellText(rs(value, text), meta(typeName), 1, d);
+    }
+
+    @Test
+    void byteHiệnDạngHexTheoDialect() throws Exception {
+        byte[] b = {(byte) 0xde, (byte) 0xad};
+        assertEquals("\\xdead", cell(b, null, "bytea", com.sqlctx.schema.Dialect.POSTGRES));
+        assertEquals("DEAD", cell(b, null, "RAW", com.sqlctx.schema.Dialect.ORACLE));
+    }
+
+    @Test
+    void lobHiệnNộiDung() throws Exception {
+        assertEquals("xin chào", cell(new javax.sql.rowset.serial.SerialClob("xin chào".toCharArray()), null, "CLOB",
+                com.sqlctx.schema.Dialect.ORACLE));
+        assertEquals("CAFE", cell(new javax.sql.rowset.serial.SerialBlob(new byte[]{(byte) 0xca, (byte) 0xfe}), null, "BLOB",
+                com.sqlctx.schema.Dialect.ORACLE));
+    }
+
+    @Test
+    void kiểuCóMúiGiờVàIntervalLấyChữCủaDriver() throws Exception {
+        assertEquals("2026-10-25 16:21:33+07", cell(new java.sql.Timestamp(0), "2026-10-25 16:21:33+07", "timestamptz",
+                com.sqlctx.schema.Dialect.POSTGRES));
+        assertEquals("2 days 03:00:00", cell(new Object(), "2 days 03:00:00", "interval", com.sqlctx.schema.Dialect.POSTGRES));
+        assertEquals("<null>", cell(null, null, "int4", com.sqlctx.schema.Dialect.POSTGRES));
+        assertEquals("true", cell(Boolean.TRUE, "t", "bool", com.sqlctx.schema.Dialect.POSTGRES), "boolean giữ true/false");
+    }
 }

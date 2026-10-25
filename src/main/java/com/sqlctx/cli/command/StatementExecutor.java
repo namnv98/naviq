@@ -175,6 +175,54 @@ public final class StatementExecutor {
         }
     }
 
+    /** LOB dài hơn thì cắt (vẫn ghi rõ độ dài thật) - in cả LOB vài trăm MB ra terminal chỉ làm treo. */
+    static final int MAX_LOB_CHARS = 1_000_000;
+
+    /**
+     * Chữ hiện trong ô. {@code String.valueOf(getObject())} sai với nhiều kiểu: kiểu riêng của Oracle
+     * (TIMESTAMPTZ, TIMESTAMPLTZ, CLOB, BLOB...) không có toString() nên ra "oracle.sql.TIMESTAMPTZ@3aee3976"; byte[]
+     * (bytea, RAW) ra "[B@6ca18a14"; interval của Postgres ra "0 years 0 mons 2 days..."; timestamptz mất múi giờ.
+     * Boolean giữ true/false (DataViewTable dựa vào đó để tô màu).
+     */
+    static String cellText(ResultSet rs, ResultSetMetaData meta, int i, Dialect dialect) throws java.sql.SQLException {
+        Object val = rs.getObject(i);
+        if (val == null) {
+            return "<null>";
+        }
+        if (val instanceof byte[] bytes) {
+            return hex(bytes, dialect);
+        }
+        if (val instanceof java.sql.Blob blob) {
+            long len = blob.length();
+            byte[] head = blob.getBytes(1, (int) Math.min(len, MAX_LOB_CHARS / 2));
+            return hex(head, dialect) + (len > head.length ? "… (" + len + " bytes)" : "");
+        }
+        if (val instanceof java.sql.Clob clob) {
+            long len = clob.length();
+            String head = clob.getSubString(1, (int) Math.min(len, MAX_LOB_CHARS));
+            return len > head.length() ? head + "… (" + len + " chars)" : head;
+        }
+        String type = meta.getColumnTypeName(i) == null ? "" : meta.getColumnTypeName(i).toLowerCase(java.util.Locale.ROOT);
+        if (val.getClass().getName().startsWith("oracle.") || type.equals("timestamptz") || type.equals("timetz")
+                || type.equals("interval")) {
+            String s = rs.getString(i); // chữ do driver định dạng, giống sqlplus/psql: "2026-10-25 16:19:56.8 +07:00"
+            return s == null ? "<null>" : s;
+        }
+        return String.valueOf(val);
+    }
+
+    /** Postgres: \xdeadbeef như psql; Oracle: DEADBEEF như sqlplus (và như hextoraw() nhận vào). */
+    static String hex(byte[] bytes, Dialect dialect) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2 + 2);
+        if (dialect == Dialect.POSTGRES) {
+            sb.append("\\x");
+        }
+        for (byte b : bytes) {
+            sb.append(String.format(dialect == Dialect.POSTGRES ? "%02x" : "%02X", b & 0xff));
+        }
+        return sb.toString();
+    }
+
     public static boolean executeStatement(String sql, Dialect dialect, LineReader impl, Terminal terminal,
                                             BottomStatusBar statusBar, boolean interactive) {
         lastStatement = sql;
@@ -228,8 +276,7 @@ public final class StatementExecutor {
                         while (rs.next()) {
                             List<String> row = new ArrayList<>();
                             for (int i = 1; i <= columnCount; i++) {
-                                Object val = rs.getObject(i);
-                                row.add(val == null ? "<null>" : String.valueOf(val));
+                                row.add(cellText(rs, meta, i, dialect));
                             }
                             rows.add(row);
                         }
