@@ -20,29 +20,30 @@ class CompletionBudgetTest {
     }
 
     /** Câu dài ~150 dòng: trước khi có budget, Oracle mất ~800ms mỗi phím gõ. */
-    private static String longQuery() {
+    private static String longQuery(String tail) {
         StringBuilder sb = new StringBuilder("select u.id from users u\n");
         for (int i = 0; i < 150; i++) {
             sb.append("join orders o").append(i).append(" on o").append(i).append(".user_id = u.id and o").append(i)
                     .append(".status in (select status from contracts c where c.amount > ").append(i).append(")\n");
         }
-        return sb.append("where u.id > 1 and ").toString();
+        return sb.append("where u.id > 1 and ").append(tail).toString();
     }
 
     @Test
     void exhaustedBudgetReturnsQuicklyWithoutKeywords() {
-        CompletionBudget.millis = 0;
-        String sql = longQuery();
-        var input = CompletionInputPreparer.buildInput(sql, sql.length());
-
-        // Làm nóng với budget bình thường: lần đầu trong JVM nạp ATN/DFA của grammar Oracle mất ~2s - test đo budget,
-        // không đo thời gian khởi động.
-        CompletionBudget.millis = savedBudget;
+        // Làm nóng bằng câu cùng dạng với budget bình thường: lần đầu trong JVM, lexer/chuẩn bị input của câu dài thế này
+        // chậm cả trăm ms dù budget 0 - test đo budget, không đo khởi động. Phải khác chữ trước caret: kết quả đủ
+        // budget nằm lại trong CandidatesCache và lần đo dưới đây sẽ trúng cache, ra đủ keyword.
+        String warm = longQuery("u.id < 9 and ");
+        var warmInput = CompletionInputPreparer.buildInput(warm, warm.length());
         CompletionFixtures.installOracle();
-        OracleSuggestionService.suggests(input);
+        OracleSuggestionService.suggests(warmInput);
         CompletionFixtures.installPostgres();
-        PostgresSuggestionService.suggests(input);
+        PostgresSuggestionService.suggests(warmInput);
+
         CompletionBudget.millis = 0;
+        String sql = longQuery("");
+        var input = CompletionInputPreparer.buildInput(sql, sql.length());
 
         CompletionFixtures.installOracle();
         long start = System.nanoTime();

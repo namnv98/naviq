@@ -154,6 +154,7 @@ public class SqlctxCli {
         statusBar.setDbInfo(ContextManager.dbLabel(dialect));
         statusBar.setQueryStatus("loading schema…");
         statusBar.render();
+        com.sqlctx.completion.GrammarWarmup.warmInBackground(dialect);
         SchemaIndex.reloadInBackground(dialect, error -> {
             statusBar.setQueryStatus(error == null
                     ? "idle · " + SchemaIndex.schemaTableIndex.size() + " tables"
@@ -270,6 +271,7 @@ public class SqlctxCli {
         } catch (Exception e) {
             startupError = rootCauseMessage(e);
         }
+        com.sqlctx.completion.GrammarWarmup.warmInBackground(dialect);
         com.sqlctx.lsp.SqlLanguageServerLauncher.run(dialect, startupError);
     }
 
