@@ -23,7 +23,10 @@ public final class Screen {
     public static final String GREEN = "\u001b[32m";
     public static final String YELLOW = "\u001b[33m";
     public static final String RED = "\u001b[31m";
-    public static final String SELECTED = "\u001b[7m";
+    /** Dòng đang chọn của bảng đang được chọn: chữ trắng đậm trên nền xanh. */
+    public static final String SELECTED = "\u001b[1;38;5;231;48;5;31m";
+    /** Dòng đang chọn của bảng khác: nền xám nhạt, vẫn thấy con trỏ đang ở đâu. */
+    public static final String SELECTED_DIM = "\u001b[48;5;237m";
 
     /** Tách chuỗi nhiều dòng (bảng của DataViewTable.renderFit) thành từng dòng, bỏ dòng trống cuối. */
     public static List<String> lines(String block) {
@@ -85,6 +88,19 @@ public final class Screen {
             i += Character.charCount(cp);
         }
         return sb + "…" + RESET + " ".repeat(Math.max(0, w - used - 1));
+    }
+
+    /** Bỏ mọi mã ANSI. */
+    public static String plain(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); ) {
+            if (s.charAt(i) == '\u001b') {
+                i = skipEscape(s, i);
+            } else {
+                sb.append(s.charAt(i++));
+            }
+        }
+        return sb.toString();
     }
 
     /** Căn phải trong {@code w} ô (số). */
@@ -188,7 +204,8 @@ public final class Screen {
 
     /**
      * Bảng không viền cho bên trong {@link #box}: dòng tiêu đề + các dòng, cột co cho vừa {@code width}; dòng
-     * {@code selected} đảo màu khi {@code focused}, cuộn sao cho dòng đó luôn hiện. Đúng tối đa {@code height} dòng.
+     * {@code selected} (-1 = không có) được tô cả dòng - đậm khi {@code focused}, nhạt khi không - và luôn được cuộn
+     * cho hiện ra. Đúng tối đa {@code height} dòng.
      */
     public static List<String> table(List<Column> cols, List<List<String>> rows, int width, int height, int selected,
                                      boolean focused) {
@@ -229,20 +246,30 @@ public final class Screen {
         out.add(head.toString());
         int visible = Math.max(0, height - 1);
         int first = selected < visible ? 0 : selected - visible + 1;
+        int tableWidth = n - 1;
+        for (int x : w) {
+            tableWidth += x;
+        }
         for (int i = first; i < rows.size() && out.size() <= visible; i++) {
-            boolean sel = focused && i == selected;
             StringBuilder line = new StringBuilder();
+            if (i == selected) {
+                // tô 1 lần cho cả dòng: chữ thuần (bỏ màu riêng của từng ô) căn đúng cột, đệm tới hết bề ngang bảng -
+                // không có RESET giữa dòng nên vệt tô liền, không đứt ở khoảng trắng giữa các cột
+                for (int c = 0; c < n; c++) {
+                    String cell = plain(rows.get(i).get(c));
+                    line.append(c == 0 ? "" : " ").append(plain(cols.get(c).align() == 'r' ? right(cell, w[c]) : fit(cell, w[c])));
+                }
+                int pad = Math.max(0, width - width(line.toString()));
+                out.add((focused ? SELECTED : SELECTED_DIM) + line + " ".repeat(pad) + RESET);
+                continue;
+            }
             for (int c = 0; c < n; c++) {
                 String cell = rows.get(i).get(c);
                 boolean num = cols.get(c).align() == 'r';
-                String colored = sel ? cell : num && cell.matches("[-+]?[0-9.,]+[kMG%]?") ? NUMBER + cell : cell;
-                line.append(c == 0 ? "" : " ").append(sel ? SELECTED : "")
-                        .append(num ? right(colored, w[c]) : fit(colored, w[c]));
-                if (sel) {
-                    line.append(SELECTED);
-                }
+                String colored = num && cell.matches("[-+]?[0-9.,]+[kMG%]?") ? NUMBER + cell : cell;
+                line.append(c == 0 ? "" : " ").append(num ? right(colored, w[c]) : fit(colored, w[c]));
             }
-            out.add(line + RESET);
+            out.add(line + " ".repeat(Math.max(0, width - tableWidth)) + RESET);
         }
         return out;
     }
