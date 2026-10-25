@@ -216,18 +216,16 @@ public final class Dashboard {
         km.bind(op, keys);
     }
 
-    private static final String BAR = "\u001b[38;5;252;48;5;236m";
+
 
     /**
      * Dòng tiêu đề trải hết bề ngang: nhãn màu {@code badge} (Kafka/Redis), {@code left} (context, cluster...) và
      * {@code right} (giờ, chu kỳ) trên nền xám đậm.
      */
     public static String titleBar(String badge, String badgeColor, String left, String right, int width) {
-        String head = "\u001b[1;38;5;16;48;5;" + badgeColor + "m " + badge + " " + Screen.RESET;
+        String head = "\u001b[1;38;5;" + badgeColor + "m" + badge + Screen.RESET;
         int space = Math.max(1, width - Screen.width(head) - Screen.width(left) - Screen.width(right) - 3);
-        String body = " " + left + " ".repeat(space) + right + " ";
-        // RESET trong left/right tắt cả nền: bật lại nền sau mỗi RESET để thanh liền
-        return Screen.fit(head + BAR + body.replace(Screen.RESET, Screen.RESET + BAR) + Screen.RESET, width);
+        return Screen.fit(" " + head + "  " + left + " ".repeat(space) + right, width);
     }
 
     /** "q thoát · Tab đổi bảng · ↑↓ chọn" -> các nút phím. Mỗi mục: phím, khoảng trắng, mô tả. */
@@ -245,8 +243,8 @@ public final class Dashboard {
     public static String status(State s, String every, String paused) {
         String clock = s.sampledAt == 0 ? "--:--:--" : java.time.LocalTime.ofInstant(java.time.Instant.ofEpochMilli(s.sampledAt),
                 java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
-        String chips = (s.error != null ? "\u001b[1;38;5;231;48;5;160m ✖ " + s.error + " " + Screen.RESET + " " : "")
-                + (s.paused ? "\u001b[1;38;5;16;48;5;220m ‖ " + paused + " " + Screen.RESET + " " : "");
+        String chips = (s.error != null ? Screen.RED + "✖ " + s.error + Screen.RESET + "  " : "")
+                + (s.paused ? Screen.YELLOW + "‖ " + paused + Screen.RESET + "  " : "");
         return chips + "\u001b[1m" + clock + Screen.RESET + Screen.DIM + " · " + every + Screen.RESET;
     }
 

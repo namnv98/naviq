@@ -25,10 +25,8 @@ public final class Screen {
     public static final String RED = "\u001b[31m";
     /** Dòng đang chọn của bảng đang được chọn: chữ trắng đậm trên nền xanh. */
     public static final String SELECTED = "\u001b[1;38;5;231;48;5;31m";
-    /** Nền dòng xen kẽ. */
-    public static final String STRIPE = "\u001b[48;5;234m";
-    /** Dòng đang chọn của bảng khác: nền xám nhạt, vẫn thấy con trỏ đang ở đâu. */
-    public static final String SELECTED_DIM = "\u001b[48;5;237m";
+    /** Dòng đang chọn của bảng khác: chữ màu chọn, không tô nền - vẫn thấy con trỏ đang ở đâu. */
+    public static final String SELECTED_DIM = "\u001b[1;38;5;75m";
 
     /** Tách chuỗi nhiều dòng (bảng của DataViewTable.renderFit) thành từng dòng, bỏ dòng trống cuối. */
     public static List<String> lines(String block) {
@@ -218,8 +216,8 @@ public final class Screen {
     public static String keys(int width, String... pairs) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i + 1 < pairs.length; i += 2) {
-            sb.append("\u001b[1;30;48;5;250m ").append(pairs[i]).append(" ").append(RESET).append(" ").append(DIM)
-                    .append(pairs[i + 1]).append(RESET).append("  ");
+            sb.append(HEADER).append(pairs[i]).append(RESET).append(" ").append(DIM)
+                    .append(pairs[i + 1]).append(RESET).append("   ");
         }
         return fit(sb.toString(), width);
     }
@@ -264,10 +262,10 @@ public final class Screen {
         int eighths = (int) Math.round(f * width * 8);
         int full = eighths / 8;
         String color = level(f, warn, bad);
-        StringBuilder sb = new StringBuilder(color).append("\u001b[48;5;236m").append("█".repeat(full));
+        StringBuilder sb = new StringBuilder(color).append("█".repeat(full));
         if (full < width) {
-            sb.append(eighths % 8 == 0 ? " " : String.valueOf(PARTIAL[eighths % 8]));
-            sb.append(" ".repeat(width - full - 1));
+            sb.append(eighths % 8 == 0 ? BORDER + "·" : PARTIAL[eighths % 8] + BORDER);
+            sb.append("·".repeat(width - full - 1));
         }
         return sb.append(RESET).toString();
     }
@@ -345,7 +343,7 @@ public final class Screen {
         List<String> out = new ArrayList<>();
         StringBuilder head = new StringBuilder();
         for (int c = 0; c < n; c++) {
-            head.append(c == 0 ? "" : " ").append(HEADER).append("\u001b[4m")
+            head.append(c == 0 ? "" : " ").append(HEADER)
                     .append(cols.get(c).align() == 'r' ? right(cols.get(c).header(), w[c]) : fit(cols.get(c).header(), w[c]));
         }
         out.add(head.toString());
@@ -374,9 +372,7 @@ public final class Screen {
                 String colored = num && cell.matches("[-+]?[0-9.,]+[kMG%]?") ? NUMBER + cell : cell;
                 line.append(c == 0 ? "" : " ").append(num ? right(colored, w[c]) : fit(colored, w[c]));
             }
-            String row = line + " ".repeat(Math.max(0, width - tableWidth));
-            // dòng lẻ nền hơi đậm (dễ dóng hàng ngang); RESET trong ô tắt cả nền nên bật lại nền sau mỗi RESET
-            out.add(i % 2 == 1 ? STRIPE + row.replace(RESET, RESET + STRIPE) + RESET : row + RESET);
+            out.add(line + " ".repeat(Math.max(0, width - tableWidth)) + RESET);
         }
         return out;
     }
