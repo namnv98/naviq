@@ -35,6 +35,15 @@ class CompletionBudgetTest {
         String sql = longQuery();
         var input = CompletionInputPreparer.buildInput(sql, sql.length());
 
+        // Làm nóng với budget bình thường: lần đầu trong JVM nạp ATN/DFA của grammar Oracle mất ~2s - test đo budget,
+        // không đo thời gian khởi động.
+        CompletionBudget.millis = savedBudget;
+        CompletionFixtures.installOracle();
+        OracleSuggestionService.suggests(input);
+        CompletionFixtures.installPostgres();
+        PostgresSuggestionService.suggests(input);
+        CompletionBudget.millis = 0;
+
         CompletionFixtures.installOracle();
         long start = System.nanoTime();
         var oracle = OracleSuggestionService.suggests(input);
