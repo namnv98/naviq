@@ -216,24 +216,53 @@ public final class Dashboard {
         km.bind(op, keys);
     }
 
-    /** Dòng tiêu đề đảo màu trải hết bề ngang: bên trái {@code left}, bên phải {@code right}. */
-    public static String titleBar(String left, String right, int width) {
-        int space = Math.max(1, width - Screen.width(left) - Screen.width(right) - 2);
-        return "\u001b[1;7;36m " + left + " ".repeat(space) + right + " " + Screen.RESET;
+    private static final String BAR = "\u001b[38;5;252;48;5;236m";
+
+    /**
+     * Dòng tiêu đề trải hết bề ngang: nhãn màu {@code badge} (Kafka/Redis), {@code left} (context, cluster...) và
+     * {@code right} (giờ, chu kỳ) trên nền xám đậm.
+     */
+    public static String titleBar(String badge, String badgeColor, String left, String right, int width) {
+        String head = "\u001b[1;38;5;16;48;5;" + badgeColor + "m " + badge + " " + Screen.RESET;
+        int space = Math.max(1, width - Screen.width(head) - Screen.width(left) - Screen.width(right) - 3);
+        String body = " " + left + " ".repeat(space) + right + " ";
+        // RESET trong left/right tắt cả nền: bật lại nền sau mỗi RESET để thanh liền
+        return Screen.fit(head + BAR + body.replace(Screen.RESET, Screen.RESET + BAR) + Screen.RESET, width);
     }
 
-    /** Chuỗi phím ở dòng cuối. */
+    /** "q thoát · Tab đổi bảng · ↑↓ chọn" -> các nút phím. Mỗi mục: phím, khoảng trắng, mô tả. */
     public static String footer(String keys, int width) {
-        return Screen.fit(Screen.DIM + keys, width);
+        List<String> pairs = new java.util.ArrayList<>();
+        for (String item : keys.split(" · ")) {
+            int space = item.indexOf(' ');
+            pairs.add(space < 0 ? item : item.substring(0, space));
+            pairs.add(space < 0 ? "" : item.substring(space + 1));
+        }
+        return Screen.keys(width, pairs.toArray(String[]::new));
     }
 
-    /** Dòng tiêu đề bên phải: tạm dừng / lỗi lấy mẫu / chu kỳ. */
+    /** Bên phải dòng tiêu đề: lỗi lấy mẫu (nhãn đỏ) / tạm dừng (nhãn vàng), giờ lấy mẫu, chu kỳ. */
     public static String status(State s, String every, String paused) {
-        if (s.error != null) {
-            return "\u001b[1;7;31m " + s.error + " \u001b[1;7;36m";
-        }
         String clock = s.sampledAt == 0 ? "--:--:--" : java.time.LocalTime.ofInstant(java.time.Instant.ofEpochMilli(s.sampledAt),
                 java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
-        return (s.paused ? paused + " · " : "") + clock + " · " + every;
+        String chips = (s.error != null ? "\u001b[1;38;5;231;48;5;160m ✖ " + s.error + " " + Screen.RESET + " " : "")
+                + (s.paused ? "\u001b[1;38;5;16;48;5;220m ‖ " + paused + " " + Screen.RESET + " " : "");
+        return chips + "\u001b[1m" + clock + Screen.RESET + Screen.DIM + " · " + every + Screen.RESET;
+    }
+
+    /** Ô cảnh báo: viền đỏ nếu có lỗi đỏ, vàng nếu chỉ có cảnh báo, xanh nếu ổn. */
+    public static List<String> warningsBox(List<String> warnings, int lines, String ok, int width) {
+        List<String> body = new java.util.ArrayList<>();
+        if (warnings.isEmpty()) {
+            body.add(Screen.GREEN + "✓ " + ok + Screen.RESET);
+        } else {
+            body.addAll(warnings.subList(0, Math.min(lines, warnings.size())));
+            if (warnings.size() > lines) {
+                body.set(lines - 1, Screen.DIM + com.sqlctx.util.I18n.t("stats.moreWarnings", warnings.size() - lines + 1) + Screen.RESET);
+            }
+        }
+        String color = warnings.stream().anyMatch(w -> w.contains("✖")) ? Screen.RED : warnings.isEmpty() ? Screen.GREEN : Screen.YELLOW;
+        String title = color + "● " + Screen.RESET + com.sqlctx.util.I18n.t("stats.warnings") + Screen.DIM + " " + warnings.size();
+        return Screen.box(title, body, width, lines + 2, false);
     }
 }

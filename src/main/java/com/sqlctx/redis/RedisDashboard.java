@@ -115,50 +115,57 @@ final class RedisDashboard implements Dashboard.View {
         List<String> out = new ArrayList<>();
         String right = Dashboard.status(state, I18n.t("stats.every", state.intervalMs / 1000), I18n.t("stats.paused"));
         RedisStats.Sample cur = h.isEmpty() ? null : h.get(h.size() - 1);
-        String mode = cur == null ? "" : cur.clusterState() != null ? I18n.t("redis.stats.modeCluster", cur.nodes().size() + cur.failed().size())
-                : profile.sentinelMaster() != null ? "sentinel " + profile.sentinelMaster() : "standalone";
-        out.add(Dashboard.titleBar("Redis · " + profile.name() + (mode.isEmpty() ? "" : " · " + mode), right, width));
+        String left = profile.name();
+        if (cur != null) {
+            String mode = cur.clusterState() != null ? I18n.t("redis.stats.modeCluster", cur.nodes().size() + cur.failed().size())
+                    : profile.sentinelMaster() != null ? "sentinel " + profile.sentinelMaster() : "standalone";
+            left += Screen.DIM + " · " + Screen.RESET + mode
+                    + (cur.clusterState() == null ? "" : " " + ("ok".equals(cur.clusterState()) ? Screen.GREEN : Screen.RED) + "● "
+                    + cur.clusterState() + Screen.RESET)
+                    + cur.nodes().stream().filter(n -> n.error() == null).findFirst()
+                    .map(n -> Screen.DIM + " · Redis " + n.info().getOrDefault("redis_version", "?") + Screen.RESET).orElse("");
+        }
+        out.add(Dashboard.titleBar("REDIS", "203", left, right, width));
         if (cur == null) {
             out.add(Screen.DIM + " " + I18n.t("stats.loading") + Screen.RESET);
             return out;
         }
 
-        List<String> summary = new ArrayList<>();
-        long masters = cur.nodes().stream().filter(RedisStats.Node::master).count();
-        long keys = cur.nodes().stream().filter(RedisStats.Node::master).mapToLong(n -> RedisStats.keys(n.info())).sum();
-        long clients = cur.nodes().stream().mapToLong(n -> (long) num(n.info(), "connected_clients")).sum();
-        List<String> parts = new ArrayList<>();
-        parts.add(I18n.t("stats.redis.nodes", cur.nodes().size(), masters, cur.nodes().size() - masters)
-                + (cur.failed().isEmpty() ? "" : "  " + Screen.RED + I18n.t("stats.redis.failedCount", cur.failed().size()) + Screen.RESET));
-        if (cur.clusterState() != null) {
-            parts.add("cluster_state " + ("ok".equals(cur.clusterState()) ? Screen.GREEN : Screen.RED) + cur.clusterState() + Screen.RESET);
-        }
-        parts.add(I18n.t("stats.redis.keys") + " " + keys);
-        parts.add("clients " + clients);
-        cur.nodes().stream().filter(n -> n.error() == null).findFirst()
-                .ifPresent(n -> parts.add("Redis " + n.info().getOrDefault("redis_version", "?")));
-        summary.addAll(Screen.flow(parts, "  · ", width - 4));
+        List<RedisStats.Node> live = cur.nodes().stream().filter(n -> n.error() == null).toList();
         List<Double> ops = opsSeries(h, null);
-        int sparkWidth = Math.max(8, Math.min(60, width - 30));
-        summary.add(String.format("%-11s", "ops/s") + " " + Screen.spark(ops, sparkWidth) + " " + Screen.NUMBER
-                + Screen.compact(ops.isEmpty() ? 0 : ops.get(ops.size() - 1)) + Screen.RESET);
-        int barWidth = Math.max(10, Math.min(30, width / 4));
-        List<RedisStats.Node> byMemory = new ArrayList<>(cur.nodes().stream().filter(n -> n.error() == null).toList());
-        byMemory.sort(Comparator.comparingDouble(n -> -num(n.info(), "used_memory")));
-        for (RedisStats.Node n : byMemory.subList(0, Math.min(3, byMemory.size()))) {
-            Map<String, String> i = n.info();
-            double max = num(i, "maxmemory");
-            double limit = max > 0 ? max : num(i, "total_system_memory");
-            String of = max > 0 ? "maxmemory " + i.getOrDefault("maxmemory_human", "?")
-                    : I18n.t("stats.redis.ofSystem", i.getOrDefault("total_system_memory_human", "?"));
-            summary.addAll(Screen.flow(List.of(String.format("%-11s", I18n.t("stats.redis.memory")) + " "
-                    + (limit > 0 ? Screen.bar(num(i, "used_memory") / limit, barWidth, max > 0 ? 0.8 : 0.6, max > 0 ? 0.9 : 0.8) + " " : "")
-                    + i.getOrDefault("used_memory_human", "?") + " / " + of, Screen.DIM + n.address() + Screen.RESET), "   ", width - 4));
+        double used = live.stream().mapToDouble(n -> num(n.info(), "used_memory")).sum();
+        double max = live.stream().mapToDouble(n -> num(n.info(), "maxmemory")).sum();
+        boolean allLimited = !live.isEmpty() && live.stream().allMatch(n -> num(n.info(), "maxmemory") > 0);
+        double hits = live.stream().mapToDouble(n -> num(n.info(), "keyspace_hits")).sum();
+        double misses = live.stream().mapToDouble(n -> num(n.info(), "keyspace_misses")).sum();
+        double hit = hits + misses == 0 ? -1 : 100 * hits / (hits + misses);
+        long keys = cur.nodes().stream().filter(RedisStats.Node::master).mapToLong(n -> RedisStats.keys(n.info())).sum();
+        long clients = live.stream().mapToLong(n -> (long) num(n.info(), "connected_clients")).sum();
+        long blocked = live.stream().mapToLong(n -> (long) num(n.info(), "blocked_clients")).sum();
+        long evicted = live.stream().mapToLong(n -> (long) num(n.info(), "evicted_keys")).sum();
+        long masters = cur.nodes().stream().filter(RedisStats.Node::master).count();
+        List<Screen.Tile> tiles = new ArrayList<>(List.of(
+                new Screen.Tile("ops/s", Screen.GREEN + Screen.compact(ops.isEmpty() ? 0 : ops.get(ops.size() - 1)),
+                        I18n.t("stats.peak", Screen.compact(ops.stream().mapToDouble(Double::doubleValue).max().orElse(0)))),
+                new Screen.Tile(I18n.t("stats.redis.memory"), (allLimited ? Screen.level(used / max, 0.8, 0.9) : "\u001b[38;5;252m")
+                        + bytes(used), allLimited ? Math.round(100 * used / max) + "% maxmemory" : Screen.YELLOW + I18n.t("stats.redis.noLimit")),
+                new Screen.Tile("Clients", "\u001b[38;5;252m" + clients, (blocked > 0 ? Screen.YELLOW : "") + "blocked " + blocked),
+                new Screen.Tile("Hit", hit < 0 ? Screen.DIM + "-" : Screen.level(100 - hit, 20, 50) + String.format("%.1f%%", hit),
+                        Screen.compact(hits) + " hit · " + Screen.compact(misses) + " miss"),
+                new Screen.Tile(I18n.t("stats.redis.keys"), "\u001b[38;5;252m" + Screen.compact(keys),
+                        (evicted > 0 ? Screen.YELLOW : "") + "evicted " + Screen.compact(evicted))));
+        if (width < 90) {
+            tiles.remove(4);
         }
-        out.addAll(Screen.box(I18n.t("stats.overview"), summary, width, summary.size() + 2, false));
+        out.addAll(Screen.tiles(tiles, width));
 
         List<String> warnings = RedisStats.warnings(cur);
         int warnLines = Math.min(4, Math.max(1, warnings.size()));
+        int fixed = out.size() + (warnLines + 2) + 1;
+        if (height - fixed >= 6 + 6) {
+            out.addAll(Screen.box("ops/s · " + I18n.t("stats.redis.nodes", cur.nodes().size(), masters, cur.nodes().size() - masters),
+                    Screen.area(ops, width - 4, 4, Screen.GREEN), width, 6, false));
+        }
         int panelHeight = Math.max(4, height - out.size() - (warnLines + 2) - 1);
         if (state.detail) {
             out.addAll(detail(cur, state, width, panelHeight));
@@ -166,37 +173,54 @@ final class RedisDashboard implements Dashboard.View {
             List<List<String>> rows = new ArrayList<>();
             for (RedisStats.Node n : cur.nodes()) {
                 Map<String, String> i = n.info();
+                String role = n.master() ? Screen.FOCUS + "master" + Screen.RESET + (n.replicas() >= 0 ? Screen.DIM + " +" + n.replicas() : "")
+                        : Screen.DIM + "replica";
                 if (n.error() != null) {
-                    rows.add(List.of(n.address(), n.master() ? "master" : "replica", "", Screen.RED + "✖", "-", "-", "-", "-", "-", "-"));
+                    rows.add(List.of(n.address(), role, "", Screen.RED + "✖ down", "-", "-", "-", "-", "-", "-"));
                     continue;
                 }
-                double max = num(i, "maxmemory");
-                rows.add(List.of(n.address(), n.master() ? "master" + (n.replicas() >= 0 ? " (" + n.replicas() + ")" : "") : "replica",
-                        Screen.spark(opsSeries(h, n.address()), 10), Screen.compact(num(i, "instantaneous_ops_per_sec")),
-                        i.getOrDefault("used_memory_human", "-") + (max > 0 ? " / " + i.getOrDefault("maxmemory_human", "") : ""),
-                        i.getOrDefault("mem_fragmentation_ratio", "-"),
+                double nodeMax = num(i, "maxmemory");
+                // thanh chỉ có nghĩa khi có maxmemory; không đặt thì so với RAM máy gần như luôn rỗng
+                String mem = (nodeMax > 0 ? Screen.bar(num(i, "used_memory") / nodeMax, 6, 0.8, 0.9) + " " : "")
+                        + i.getOrDefault("used_memory_human", "-");
+                rows.add(List.of(n.address(), role, Screen.spark(opsSeries(h, n.address()), 10),
+                        Screen.compact(num(i, "instantaneous_ops_per_sec")), mem,
+                        (num(i, "mem_fragmentation_ratio") > 1.5 && num(i, "used_memory") > 100L * 1024 * 1024 ? Screen.YELLOW : "")
+                                + i.getOrDefault("mem_fragmentation_ratio", "-"),
                         i.getOrDefault("connected_clients", "-"), RedisStats.hitRate(i), Screen.compact(RedisStats.keys(i)),
-                        Screen.compact(num(i, "evicted_keys"))));
+                        (num(i, "evicted_keys") > 0 ? Screen.YELLOW : "") + Screen.compact(num(i, "evicted_keys"))));
             }
-            out.addAll(Screen.box("Node (" + rows.size() + ")", Screen.table(List.of(new Column("node", 'l', 10),
+            List<Column> cols = new ArrayList<>(List.of(new Column("node", 'l', 10),
                     new Column(I18n.t("redis.stats.role"), 'l', 7), new Column(I18n.t("stats.trend"), 'l', 10),
-                    new Column("ops/s", 'r', 5), new Column(I18n.t("stats.redis.memory"), 'l', 6), new Column("frag", 'r', 4),
+                    new Column("ops/s", 'r', 5), new Column(I18n.t("stats.redis.memory"), 'l', 12), new Column("frag", 'r', 4),
                     new Column("clients", 'r', 7), new Column("hit %", 'r', 5), new Column("keys", 'r', 4),
-                    new Column("evicted", 'r', 7)), rows, width - 4, panelHeight - 2, state.selected[0], true),
-                    width, panelHeight, true));
-        }
-        List<String> warnBody = new ArrayList<>();
-        if (warnings.isEmpty()) {
-            warnBody.add(Screen.GREEN + "✓ " + I18n.t("redis.stats.ok") + Screen.RESET);
-        } else {
-            warnBody.addAll(warnings.subList(0, Math.min(warnLines, warnings.size())));
-            if (warnings.size() > warnLines) {
-                warnBody.set(warnLines - 1, Screen.DIM + I18n.t("stats.moreWarnings", warnings.size() - warnLines + 1) + Screen.RESET);
+                    new Column("evicted", 'r', 7)));
+            if (width < 110) { // màn hẹp: bỏ cột ít cần (xu hướng, frag, evicted) để địa chỉ node không bị co mất chữ
+                for (int c : new int[]{9, 5, 2}) {
+                    cols.remove(c);
+                    for (int r = 0; r < rows.size(); r++) {
+                        List<String> row = new ArrayList<>(rows.get(r));
+                        row.remove(c);
+                        rows.set(r, row);
+                    }
+                }
             }
+            out.addAll(Screen.box("Node " + Screen.DIM + rows.size(), Screen.table(cols, rows, width - 4, panelHeight - 2,
+                    state.selected[0], true), width, panelHeight, true));
         }
-        out.addAll(Screen.box(I18n.t("stats.warnings") + " (" + warnings.size() + ")", warnBody, width, warnLines + 2, false));
+        out.addAll(Dashboard.warningsBox(warnings, warnLines, I18n.t("redis.stats.ok"), width));
         out.add(Dashboard.footer(I18n.t(state.detail ? "stats.keysDetail" : "stats.keysOnePanel"), width));
         return out.subList(0, Math.min(out.size(), height));
+    }
+
+    private static String bytes(double b) {
+        String[] units = {"B", "KB", "MB", "GB", "TB"};
+        int u = 0;
+        while (b >= 1024 && u < units.length - 1) {
+            b /= 1024;
+            u++;
+        }
+        return u == 0 ? String.format("%.0f B", b) : String.format("%.1f %s", b, units[u]);
     }
 
     private List<String> detail(RedisStats.Sample cur, Dashboard.State state, int width, int height) {

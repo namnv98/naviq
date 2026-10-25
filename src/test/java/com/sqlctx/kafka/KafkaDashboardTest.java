@@ -51,8 +51,8 @@ class KafkaDashboardTest {
             assertTrue(screen.size() <= 30, "tối đa chiều cao");
             screen.forEach(l -> assertTrue(Screen.width(l) <= width, width + ": " + Screen.width(l) + " " + l));
             String all = String.join("\n", screen).replaceAll("\u001b\\[[0-9;]*m", "");
-            for (String expected : List.of("Overview", "Brokers 2", "under-replicated", "Topic (1)", "Group (1)", "orders",
-                    "billing", "500 msg/s", "400 msg/s", "Warnings", "q quit")) {
+            for (String expected : List.of("KAFKA", "Brokers 2", "controller 1", "Write msg/s", "Read msg/s", "Total lag",
+                    "1 under", "Topic 1", "Consumer group 1", "orders", "billing", "500", "400", "Warnings", "q", "quit")) {
                 assertTrue(all.contains(expected), width + " thiếu " + expected + "\n" + all);
             }
         }
@@ -68,7 +68,7 @@ class KafkaDashboardTest {
         st.panel = 1;
         String group = String.join("\n", dashboard().render(140, 30, st)).replaceAll("\u001b\\[[0-9;]*m", "");
         assertTrue(group.contains("Group billing · Stable") && group.contains("c-1 /10.0.0.1") && group.contains("committed"), group);
-        assertTrue(group.contains("Esc back"), group);
+        assertTrue(group.contains("Esc") && group.contains("back"), group);
     }
 
     @Test

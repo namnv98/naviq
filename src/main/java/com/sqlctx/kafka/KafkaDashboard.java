@@ -176,59 +176,67 @@ final class KafkaDashboard implements Dashboard.View {
         String right = Dashboard.status(state, I18n.t("stats.every", state.intervalMs / 1000), I18n.t("stats.paused"));
         KafkaStats.Sample cur = h.isEmpty() ? null : h.get(h.size() - 1);
         KafkaStats.Sample prev = h.size() < 2 ? null : h.get(h.size() - 2);
-        out.add(Dashboard.titleBar("Kafka · " + context + (cur == null ? "" : " · cluster " + cur.clusterId()), right, width));
+        String left = context;
+        if (cur != null) {
+            String controller = cur.brokers().stream().filter(KafkaStats.Broker::controller).map(b -> String.valueOf(b.id()))
+                    .findFirst().orElse(cur.quorum() != null ? String.valueOf(cur.quorum().leader()) : Screen.RED + "?" + Screen.RESET);
+            left += Screen.DIM + " · " + Screen.RESET + I18n.t("stats.kafka.brokers", cur.brokers().size()) + " " + Screen.GREEN + "●"
+                    + Screen.RESET + Screen.DIM + " · controller " + Screen.RESET + controller
+                    + (cur.quorum() == null ? "" : Screen.DIM + " · quorum " + Screen.RESET + Screen.GREEN + "ok" + Screen.RESET
+                    + Screen.DIM + " (epoch " + cur.quorum().epoch() + ", lag " + cur.quorum().maxLag() + ")" + Screen.RESET)
+                    + Screen.DIM + " · " + cur.clusterId() + Screen.RESET;
+        }
+        out.add(Dashboard.titleBar("KAFKA", "214", left, right, width));
         if (cur == null) {
             out.add(Screen.DIM + " " + I18n.t("stats.loading") + Screen.RESET);
             return out;
         }
 
-        // tổng quan
-        List<String> summary = new ArrayList<>();
+        // hàng ô số liệu
+        List<Double> produce = produceSeries(h);
+        List<Double> consume = consumeSeries(h);
+        long lag = cur.groups().stream().mapToLong(KafkaStats.Group::lag).sum();
+        Long lagBefore = prev == null ? null : prev.groups().stream().mapToLong(KafkaStats.Group::lag).sum();
         int partitions = cur.topics().stream().mapToInt(KafkaStats.Topic::partitions).sum();
         int under = cur.topics().stream().mapToInt(KafkaStats.Topic::underReplicated).sum();
         long offline = cur.topics().stream().mapToLong(t -> t.offline().size()).sum();
         long internal = cur.topics().stream().filter(KafkaStats.Topic::internal).count();
-        String controller = cur.brokers().stream().filter(KafkaStats.Broker::controller).map(b -> String.valueOf(b.id()))
-                .findFirst().orElse(cur.quorum() != null ? String.valueOf(cur.quorum().leader()) : Screen.RED + "?" + Screen.RESET);
-        List<String> parts = new ArrayList<>(List.of(
-                I18n.t("stats.kafka.brokers", cur.brokers().size()) + " " + Screen.GREEN + "●" + Screen.RESET + "  controller " + controller,
-                I18n.t("stats.kafka.topics", cur.topics().size() - internal, internal), "partition " + partitions,
-                I18n.t("stats.kafka.under") + " " + count(under), I18n.t("stats.kafka.offline") + " " + count(offline)));
-        if (cur.quorum() != null) {
-            parts.add("quorum " + Screen.GREEN + "ok" + Screen.RESET + " (leader " + cur.quorum().leader() + ", epoch "
-                    + cur.quorum().epoch() + ", lag " + cur.quorum().maxLag() + ")");
+        KafkaStats.Broker fullest = cur.brokers().stream().max(Comparator.comparingDouble(KafkaDashboard::diskUsed)).orElse(null);
+        double disk = fullest == null ? 0 : diskUsed(fullest);
+        List<Screen.Tile> tiles = new ArrayList<>(List.of(
+                new Screen.Tile(I18n.t("stats.kafka.write") + " msg/s", Screen.GREEN + rate(produce),
+                        I18n.t("stats.peak", Screen.compact(peak(produce)))),
+                new Screen.Tile(I18n.t("stats.kafka.read") + " msg/s", "\u001b[38;5;75m" + rate(consume),
+                        I18n.t("stats.peak", Screen.compact(peak(consume)))),
+                new Screen.Tile(I18n.t("stats.kafka.totalLag"), (lag == 0 ? Screen.GREEN : lagBefore != null && lag > lagBefore
+                        ? Screen.YELLOW : "\u001b[38;5;252m") + Screen.compact(lag),
+                        lagBefore == null ? I18n.t("stats.kafka.groups", cur.groups().size()) : lag > lagBefore
+                                ? Screen.YELLOW + "↑ +" + Screen.compact(lag - lagBefore) : lag < lagBefore
+                                ? Screen.GREEN + "↓ " + Screen.compact(lagBefore - lag) : "= · " + I18n.t("stats.kafka.groups", cur.groups().size())),
+                new Screen.Tile("Partition", (under + offline > 0 ? Screen.RED : "\u001b[38;5;252m") + partitions,
+                        under + offline == 0 ? Screen.GREEN + "✓ " + I18n.t("stats.kafka.healthy")
+                                : (offline > 0 ? Screen.RED + offline + " " + I18n.t("stats.kafka.offline") + Screen.DIM + " · " : "")
+                                + (under > 0 ? Screen.YELLOW + under + " " + I18n.t("stats.kafka.under") : "")),
+                new Screen.Tile(I18n.t("stats.kafka.disk"), Screen.level(disk, 0.8, 0.9) + Math.round(100 * disk) + "%",
+                        fullest == null || fullest.totalBytes() <= 0 ? "-" : "b" + fullest.id() + " " + KafkaStats.diskBytes(fullest))));
+        if (width < 90) {
+            tiles.remove(4); // màn hẹp: bớt 1 ô cho mỗi ô đủ rộng
         }
-        summary.addAll(Screen.flow(parts, "  · ", width - 4));
-        int barWidth = Math.max(10, Math.min(30, width / 4));
-        List<KafkaStats.Broker> byDisk = new ArrayList<>(cur.brokers());
-        byDisk.sort(Comparator.comparingDouble(KafkaDashboard::diskUsed).reversed());
-        for (KafkaStats.Broker b : byDisk.subList(0, Math.min(3, byDisk.size()))) {
-            double used = diskUsed(b);
-            summary.addAll(Screen.flow(List.of(String.format("%-11s", I18n.t("stats.kafka.disk") + " " + b.id()) + " "
-                    + (b.totalBytes() <= 0 ? Screen.DIM + "-" + Screen.RESET
-                    : Screen.bar(used, barWidth, 0.8, 0.9) + " " + Math.round(100 * used) + "%  " + KafkaStats.diskBytes(b)),
-                    Screen.DIM + "leaders " + b.leaders() + " · replicas " + b.replicas() + Screen.RESET), "   ", width - 4));
-        }
-        if (byDisk.size() > 3) {
-            summary.add(Screen.DIM + I18n.t("stats.kafka.moreBrokers", byDisk.size() - 3) + Screen.RESET);
-        }
-        List<Double> produce = produceSeries(h);
-        List<Double> consume = consumeSeries(h);
-        // đủ rộng: Ghi và Đọc chung 1 dòng; hẹp: mỗi cái 1 dòng, sparkline dài ra
-        boolean oneLine = width >= 110;
-        int sparkWidth = Math.max(8, Math.min(40, oneLine ? (width - 60) / 2 : width - 36));
-        summary.addAll(Screen.flow(List.of(
-                String.format("%-11s", I18n.t("stats.kafka.write")) + " " + Screen.spark(produce, sparkWidth) + " " + Screen.NUMBER
-                        + (produce.isEmpty() ? "…" : Screen.compact(last(produce))) + Screen.RESET + " msg/s",
-                String.format(oneLine ? "%s" : "%-11s", I18n.t("stats.kafka.read")) + " " + Screen.spark(consume, sparkWidth) + " "
-                        + Screen.NUMBER + (consume.isEmpty() ? "…" : Screen.compact(last(consume))) + Screen.RESET + " msg/s"),
-                "     ", width - 4));
-        out.addAll(Screen.box(I18n.t("stats.overview"), summary, width, summary.size() + 2, false));
+        out.addAll(Screen.tiles(tiles, width));
 
         List<String> warnings = KafkaStats.warnings(prev, cur);
         int warnLines = Math.min(4, Math.max(1, warnings.size()));
-        int footer = 1;
-        int panelHeight = Math.max(4, height - out.size() - (warnLines + 2) - footer);
+        int fixed = out.size() + (warnLines + 2) + 1;
+        boolean charts = height - fixed >= 6 + 8; // chừa ít nhất 8 dòng cho bảng
+        if (charts) {
+            int half = width / 2;
+            List<String> w = Screen.box(I18n.t("stats.kafka.write") + " msg/s · " + Screen.compact(last(produce)),
+                    Screen.area(produce, half - 4, 4, Screen.GREEN), half, 6, false);
+            List<String> r = Screen.box(I18n.t("stats.kafka.read") + " msg/s · " + Screen.compact(last(consume)),
+                    Screen.area(consume, width - half - 4, 4, "\u001b[38;5;75m"), width - half, 6, false);
+            out.addAll(Screen.beside(w, half, r));
+        }
+        int panelHeight = Math.max(4, height - out.size() - (warnLines + 2) - 1);
 
         if (state.detail) {
             out.addAll(detail(cur, prev, state, width, panelHeight));
@@ -237,39 +245,42 @@ final class KafkaDashboard implements Dashboard.View {
             List<List<String>> topicRows = new ArrayList<>();
             for (KafkaStats.Topic t : topics) {
                 List<Double> series = topicSeries(h, t.name());
-                topicRows.add(List.of(t.name(), String.valueOf(t.partitions()), String.valueOf(t.replicationFactor()),
+                topicRows.add(List.of(t.name(), String.valueOf(t.partitions()),
+                        (t.replicationFactor() == 1 && cur.brokers().size() > 1 ? Screen.YELLOW : "") + t.replicationFactor(),
                         Screen.spark(series, 10), series.isEmpty() ? "…" : Screen.compact(last(series)), Screen.compact(t.messages())));
             }
             List<Column> topicCols = List.of(new Column("topic", 'l', 8), new Column("p", 'r', 2), new Column("RF", 'r', 2),
                     new Column(I18n.t("stats.trend"), 'l', 10), new Column("msg/s", 'r', 6), new Column("messages", 'r', 8));
-            Map<String, Long> lagBefore = new HashMap<>();
+            Map<String, Long> lagPrev = new HashMap<>();
+            Map<String, Long> readPrev = new HashMap<>();
             if (prev != null) {
-                prev.groups().forEach(g -> lagBefore.put(g.id(), g.lag()));
-            }
-            Map<String, Long> readBefore = new HashMap<>();
-            if (prev != null) {
-                prev.groups().forEach(g -> readBefore.put(g.id(), g.committedSum()));
+                prev.groups().forEach(g -> {
+                    lagPrev.put(g.id(), g.lag());
+                    readPrev.put(g.id(), g.committedSum());
+                });
             }
             List<List<String>> groupRows = new ArrayList<>();
             for (KafkaStats.Group g : groups(cur)) {
-                Long before = lagBefore.get(g.id());
+                Long before = lagPrev.get(g.id());
                 String trend = before == null ? "" : g.lag() > before ? Screen.YELLOW + "↑ +" + Screen.compact(g.lag() - before)
                         : g.lag() < before ? Screen.GREEN + "↓ " + Screen.compact(before - g.lag()) : Screen.DIM + "=";
-                Long read = readBefore.get(g.id());
-                groupRows.add(List.of(g.id(), g.state(), String.valueOf(g.members()), Screen.compact(g.lag()), trend,
+                Long read = readPrev.get(g.id());
+                String lagColor = g.lag() == 0 ? Screen.GREEN : g.members() == 0 || before != null && g.lag() > before ? Screen.YELLOW : "";
+                groupRows.add(List.of(g.id(), stateColor(g.state()) + g.state(), String.valueOf(g.members()),
+                        lagColor + Screen.compact(g.lag()), trend,
                         read == null ? "…" : Screen.compact(Math.max(0, g.committedSum() - read) / dt(prev, cur))));
             }
             List<Column> groupCols = List.of(new Column("group", 'l', 8), new Column("state", 'l', 5), new Column("mem", 'r', 3),
                     new Column("lag", 'r', 5), new Column("Δ", 'l', 6), new Column(I18n.t("stats.kafka.readShort"), 'r', 6));
-            String topicTitle = "Topic (" + topics.size() + ")";
-            String groupTitle = "Group (" + groupRows.size() + ")";
+            String topicTitle = "Topic " + Screen.DIM + topics.size() + " (+" + internal + " " + I18n.t("stats.kafka.internal") + ")";
+            String groupTitle = "Consumer group " + Screen.DIM + groupRows.size();
             if (width >= 110) {
-                int left = width / 2;
-                List<String> a = Screen.box(topicTitle, Screen.table(topicCols, topicRows, left - 4, panelHeight - 2,
-                        state.selected[TOPICS], state.panel == TOPICS), left, panelHeight, state.panel == TOPICS);
-                List<String> b = Screen.box(groupTitle, Screen.table(groupCols, groupRows, width - left - 4, panelHeight - 2,
-                        state.selected[GROUPS], state.panel == GROUPS), width - left, panelHeight, state.panel == GROUPS);
-                out.addAll(Screen.beside(a, left, b));
+                int leftWidth = width / 2;
+                List<String> a = Screen.box(topicTitle, Screen.table(topicCols, topicRows, leftWidth - 4, panelHeight - 2,
+                        state.selected[TOPICS], state.panel == TOPICS), leftWidth, panelHeight, state.panel == TOPICS);
+                List<String> b = Screen.box(groupTitle, Screen.table(groupCols, groupRows, width - leftWidth - 4, panelHeight - 2,
+                        state.selected[GROUPS], state.panel == GROUPS), width - leftWidth, panelHeight, state.panel == GROUPS);
+                out.addAll(Screen.beside(a, leftWidth, b));
             } else {
                 int top = panelHeight / 2;
                 out.addAll(Screen.box(topicTitle, Screen.table(topicCols, topicRows, width - 4, top - 2, state.selected[TOPICS],
@@ -279,18 +290,27 @@ final class KafkaDashboard implements Dashboard.View {
             }
         }
 
-        List<String> warnBody = new ArrayList<>();
-        if (warnings.isEmpty()) {
-            warnBody.add(Screen.GREEN + "✓ " + I18n.t("kafka.stats.ok") + Screen.RESET);
-        } else {
-            warnBody.addAll(warnings.subList(0, Math.min(warnLines, warnings.size())));
-            if (warnings.size() > warnLines) {
-                warnBody.set(warnLines - 1, Screen.DIM + I18n.t("stats.moreWarnings", warnings.size() - warnLines + 1) + Screen.RESET);
-            }
-        }
-        out.addAll(Screen.box(I18n.t("stats.warnings") + " (" + warnings.size() + ")", warnBody, width, warnLines + 2, false));
+        out.addAll(Dashboard.warningsBox(warnings, warnLines, I18n.t("kafka.stats.ok"), width));
         out.add(Dashboard.footer(I18n.t(state.detail ? "stats.keysDetail" : "stats.keys"), width));
         return out.subList(0, Math.min(out.size(), height));
+    }
+
+    private static String stateColor(String state) {
+        return switch (state) {
+            case "Stable" -> Screen.GREEN;
+            case "Empty" -> Screen.DIM;
+            case "Dead" -> Screen.RED;
+            case "PreparingRebalance", "CompletingRebalance", "Assigning", "Reconciling" -> Screen.YELLOW;
+            default -> "";
+        };
+    }
+
+    private static String rate(List<Double> series) {
+        return series.isEmpty() ? "…" : Screen.compact(last(series));
+    }
+
+    private static double peak(List<Double> series) {
+        return series.stream().mapToDouble(Double::doubleValue).max().orElse(0);
     }
 
     private static String count(long n) {

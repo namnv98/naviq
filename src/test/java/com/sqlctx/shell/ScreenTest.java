@@ -38,13 +38,27 @@ class ScreenTest {
         List<String> box = Screen.box("Tiêu đề", List.of("một", "hai"), 20, 4, true);
         assertEquals(4, box.size());
         box.forEach(l -> assertEquals(20, Screen.width(l), l));
-        assertEquals(12, Screen.width(Screen.bar(0.5, 10, 0.8, 0.9)));
+        assertEquals(10, Screen.width(Screen.bar(0.5, 10, 0.8, 0.9)));
+        assertEquals(10, Screen.width(Screen.bar(0.33, 10, 0.8, 0.9)), "khối 1/8 vẫn đúng 10 ô");
         assertTrue(Screen.bar(0.95, 10, 0.8, 0.9).contains(Screen.RED));
         assertEquals(5, Screen.width(Screen.spark(List.of(0.0, 5.0, 10.0), 5)), "chưa đủ mẫu thì đệm vạch mờ");
         assertTrue(Screen.spark(List.of(0.0, 10.0), 2).contains("▁█"));
         assertEquals("19.9k", Screen.compact(19920));
         assertEquals("1.5M", Screen.compact(1_500_000));
         assertEquals("42", Screen.compact(42));
+    }
+
+    @Test
+    void biểuĐồVùngVàÔSốLiệu() {
+        List<String> chart = Screen.area(List.of(0.0, 4.0, 8.0), 20, 4, Screen.GREEN);
+        assertEquals(4, chart.size());
+        chart.forEach(l -> assertEquals(20, Screen.width(l), l));
+        assertTrue(Screen.plain(chart.get(0)).startsWith("▲ 8"), "nhãn giá trị lớn nhất\n" + chart);
+        assertTrue(Screen.plain(chart.get(3)).endsWith("▁██"), "cột cao nhất đầy cả 4 dòng\n" + chart);
+        List<String> tiles = Screen.tiles(List.of(new Screen.Tile("A", "1", "x"), new Screen.Tile("B", "2", "y"),
+                new Screen.Tile("C", "3", "z")), 61);
+        assertEquals(4, tiles.size());
+        tiles.forEach(l -> assertEquals(61, Screen.width(l), l));
     }
 
     @Test
