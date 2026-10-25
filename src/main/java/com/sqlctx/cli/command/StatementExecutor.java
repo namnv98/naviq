@@ -1,5 +1,7 @@
 package com.sqlctx.cli.command;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.cli.view.BottomStatusBar;
 import com.sqlctx.cli.view.DataViewTable;
 import com.sqlctx.dialect.DialectAdapters;
@@ -156,8 +158,8 @@ public final class StatementExecutor {
     /** Hỏi lại trước khi chạy lệnh có thể phá dữ liệu - đọc 1 phím thật từ terminal (y/Y mới chạy tiếp). */
     private static boolean confirmProceed(Terminal terminal, String sql) {
         try {
-            terminal.writer().print(YELLOW + "⚠ Câu lệnh sau có thể THAY ĐỔI/XOÁ dữ liệu:\n" + RESET
-                    + sql + "\n" + YELLOW + "Chạy không? [y/N] " + RESET);
+            terminal.writer().print(YELLOW + I18n.t("sql.confirmDestructive") + RESET
+                    + sql + "\n" + YELLOW + I18n.t("common.runIt") + RESET);
             terminal.writer().flush();
             var saved = terminal.enterRawMode();
             try {
@@ -179,7 +181,7 @@ public final class StatementExecutor {
         String trimmed = sql.stripLeading().toUpperCase();
 
         if (interactive && isDestructive(sql) && !confirmProceed(terminal, sql)) {
-            say(impl, "Đã huỷ.\n");
+            say(impl, I18n.t("common.cancelled") + "\n");
             return true; // người dùng chủ động không chạy - không tính là lỗi
         }
 
@@ -260,10 +262,9 @@ public final class StatementExecutor {
                     if (outputFile != null) {
                         try {
                             ResultExporter.export(outputFile, outputFormat, headers, rows);
-                            say(impl, "Đã xuất " + rows.size() + " dòng, " + headers.size() + " cột ra \""
-                                    + outputFile + "\".\n" + timingPart + "\n");
+                            say(impl, I18n.t("sql.exported", rows.size(), headers.size(), outputFile) + timingPart + "\n");
                         } catch (IOException e) {
-                            say(impl, RED + "ERROR: không ghi được file \"" + outputFile + "\" - " + e.getMessage() + RESET);
+                            say(impl, RED + I18n.t("sql.err.writeFile", outputFile, e.getMessage()) + RESET);
                         }
                         if (!"text".equals(outputFormat)) {
                             // csv/json là xuất 1 lần cho câu lệnh này rồi tự tắt - không thể ghi nối tiếp

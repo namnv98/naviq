@@ -1,0 +1,166 @@
+# Mô tả tiếng Việt (viết tay), đè lên mô tả tiếng Anh lấy từ COMMAND DOCS của server. Cột cách nhau bằng TAB:
+#   tên lệnh (lệnh con viết sau 1 dấu cách) | mô tả
+# Lệnh không có ở đây thì giữ mô tả tiếng Anh lấy từ COMMAND DOCS.
+DEL	Xoá key
+UNLINK	Xoá key, giải phóng bộ nhớ ở nền
+EXISTS	Đếm số key tồn tại
+TOUCH	Cập nhật thời điểm truy cập
+TYPE	Kiểu dữ liệu của key
+TTL	Thời gian sống còn lại (giây)
+PTTL	Thời gian sống còn lại (ms)
+EXPIRETIME	Thời điểm hết hạn (unix giây)
+PEXPIRETIME	Thời điểm hết hạn (unix ms)
+PERSIST	Bỏ thời gian hết hạn
+DUMP	Giá trị dạng tuần tự hoá
+EXPIRE	Đặt thời gian sống (giây)
+PEXPIRE	Đặt thời gian sống (ms)
+EXPIREAT	Hết hạn tại thời điểm (giây)
+PEXPIREAT	Hết hạn tại thời điểm (ms)
+RENAME	Đổi tên key (ghi đè nếu đã có)
+RENAMENX	Đổi tên key nếu tên mới chưa có
+COPY	Sao chép key
+MOVE	Chuyển key sang DB khác
+KEYS	Liệt kê key theo mẫu (chặn server khi nhiều key, nên dùng SCAN)
+SCAN	Duyệt key theo từng đợt
+RANDOMKEY	Một key ngẫu nhiên
+OBJECT	Thông tin nội bộ của key
+MEMORY	Dung lượng bộ nhớ
+MEMORY USAGE	Số byte bộ nhớ của 1 key
+GET	Đọc giá trị string
+GETDEL	Đọc rồi xoá
+GETEX	Đọc và đặt lại thời gian sống
+SET	Ghi giá trị string
+SETNX	Ghi nếu key chưa có
+SETEX	Ghi kèm thời gian sống (giây)
+PSETEX	Ghi kèm thời gian sống (ms)
+MGET	Đọc nhiều key
+MSET	Ghi nhiều key
+MSETNX	Ghi nhiều key nếu tất cả đều chưa có
+INCR	Tăng 1
+DECR	Giảm 1
+INCRBY	Tăng một số nguyên
+DECRBY	Giảm một số nguyên
+INCRBYFLOAT	Tăng một số thực
+APPEND	Nối thêm vào cuối
+STRLEN	Độ dài giá trị
+GETRANGE	Lấy một đoạn của giá trị
+SETRANGE	Ghi đè một đoạn của giá trị
+HGET	Đọc một field
+HSET	Ghi field
+HMSET	Ghi field (deprecated, dùng HSET)
+HSETNX	Ghi field nếu chưa có
+HMGET	Đọc nhiều field
+HDEL	Xoá field
+HEXISTS	Field có tồn tại không
+HSTRLEN	Độ dài giá trị của field
+HGETALL	Mọi field và giá trị
+HKEYS	Mọi tên field
+HVALS	Mọi giá trị
+HLEN	Số field
+HINCRBY	Tăng field một số nguyên
+HINCRBYFLOAT	Tăng field một số thực
+HRANDFIELD	Field ngẫu nhiên
+HSCAN	Duyệt field theo từng đợt
+LPUSH	Thêm vào đầu list
+RPUSH	Thêm vào cuối list
+LPUSHX	Thêm vào đầu nếu list đã có
+RPUSHX	Thêm vào cuối nếu list đã có
+LPOP	Lấy ra từ đầu list
+RPOP	Lấy ra từ cuối list
+LRANGE	Đọc một đoạn list (0 -1 là cả list)
+LTRIM	Chỉ giữ lại một đoạn
+LLEN	Độ dài list
+LINDEX	Phần tử tại vị trí
+LSET	Ghi phần tử tại vị trí
+LREM	Xoá phần tử bằng giá trị
+LINSERT	Chèn trước/sau một phần tử
+LPOS	Vị trí của phần tử
+LMOVE	Chuyển phần tử giữa 2 list
+BLMOVE	Như LMOVE, chờ nếu list rỗng
+BLPOP	Lấy từ đầu list, chờ nếu rỗng
+BRPOP	Lấy từ cuối list, chờ nếu rỗng
+SADD	Thêm phần tử
+SREM	Xoá phần tử
+SMEMBERS	Mọi phần tử
+SCARD	Số phần tử
+SISMEMBER	Phần tử có trong set không
+SMISMEMBER	Kiểm tra nhiều phần tử
+SPOP	Lấy ra phần tử ngẫu nhiên
+SRANDMEMBER	Phần tử ngẫu nhiên (không xoá)
+SINTER	Giao các set
+SUNION	Hợp các set
+SDIFF	Hiệu các set
+SINTERSTORE	Lưu giao các set
+SUNIONSTORE	Lưu hợp các set
+SDIFFSTORE	Lưu hiệu các set
+SMOVE	Chuyển phần tử giữa 2 set
+SSCAN	Duyệt phần tử theo từng đợt
+ZADD	Thêm phần tử kèm điểm
+ZREM	Xoá phần tử
+ZSCORE	Điểm của phần tử
+ZMSCORE	Điểm của nhiều phần tử
+ZINCRBY	Tăng điểm
+ZCARD	Số phần tử
+ZCOUNT	Đếm phần tử trong khoảng điểm
+ZRANK	Thứ hạng (điểm tăng dần)
+ZREVRANK	Thứ hạng (điểm giảm dần)
+ZRANGE	Đọc một đoạn theo thứ hạng/điểm
+ZRANGEBYSCORE	Đọc theo khoảng điểm
+ZREVRANGEBYSCORE	Đọc theo khoảng điểm, giảm dần
+ZREVRANGE	Đọc một đoạn, điểm giảm dần
+ZPOPMIN	Lấy ra phần tử điểm thấp nhất
+ZPOPMAX	Lấy ra phần tử điểm cao nhất
+ZREMRANGEBYRANK	Xoá theo thứ hạng
+ZREMRANGEBYSCORE	Xoá theo khoảng điểm
+ZSCAN	Duyệt phần tử theo từng đợt
+XADD	Thêm entry vào stream
+XLEN	Số entry
+XRANGE	Đọc entry theo khoảng id (- + là tất cả)
+XREVRANGE	Đọc entry, id giảm dần
+XDEL	Xoá entry
+XTRIM	Cắt bớt stream
+XREAD	Đọc entry mới
+XREADGROUP	Đọc entry theo consumer group
+XACK	Xác nhận đã xử lý entry
+XGROUP	Quản lý consumer group
+XINFO	Thông tin stream
+PUBLISH	Gửi tin vào channel
+SUBSCRIBE	Nghe channel (Ctrl+C để dừng)
+PSUBSCRIBE	Nghe channel theo mẫu (Ctrl+C để dừng)
+PUBSUB	Thông tin pub/sub
+MULTI	Bắt đầu transaction
+EXEC	Chạy transaction
+DISCARD	Huỷ transaction
+WATCH	Theo dõi key cho transaction
+UNWATCH	Bỏ theo dõi
+EVAL	Chạy script Lua
+EVALSHA	Chạy script Lua đã nạp
+DBSIZE	Số key trong DB hiện tại
+INFO	Thông tin server
+FLUSHDB	Xoá MỌI key của DB hiện tại
+FLUSHALL	Xoá MỌI key của MỌI DB
+CONFIG	Cấu hình server
+CONFIG GET	Đọc cấu hình server
+CONFIG SET	Đổi cấu hình server
+CONFIG REWRITE	Ghi cấu hình đang chạy ra file
+CLIENT	Quản lý kết nối
+CLIENT KILL	Ngắt kết nối của client khác
+SLOWLOG	Lệnh chạy chậm
+COMMAND	Thông tin lệnh
+ACL	Quyền truy cập
+TIME	Giờ server
+LASTSAVE	Lần lưu RDB gần nhất
+SAVE	Lưu RDB (chặn server tới khi xong)
+BGSAVE	Lưu RDB ở nền
+BGREWRITEAOF	Ghi lại AOF ở nền
+ROLE	Vai trò replication
+MONITOR	Xem mọi lệnh server nhận (Ctrl+C để dừng)
+SWAPDB	Đổi chỗ 2 DB
+SHUTDOWN	Tắt server
+PING	Kiểm tra kết nối
+ECHO	Trả lại đúng chuỗi gửi lên
+SELECT	Đổi DB (giống \c)
+AUTH	Đăng nhập
+HELLO	Bắt tay giao thức
+QUIT	Thoát
+RESET	Đặt lại trạng thái kết nối

@@ -1,5 +1,7 @@
 package com.sqlctx.cli.repl;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.cli.command.ContextManager;
 import com.sqlctx.cli.command.EditorLauncher;
 import com.sqlctx.cli.command.ResultExporter;
@@ -38,6 +40,7 @@ public final class CommandDispatcher {
                 || t.equalsIgnoreCase("\\l") || t.equalsIgnoreCase("\\list")
                 || t.equalsIgnoreCase("\\dt") || t.equalsIgnoreCase("\\dn") || t.equalsIgnoreCase("\\df")
                 || t.equalsIgnoreCase("\\du") || t.equalsIgnoreCase("\\refresh")
+                || t.equalsIgnoreCase("\\lang") || lower.startsWith("\\lang ")
                 || t.equalsIgnoreCase("\\o") || lower.startsWith("\\o ")
                 || t.equalsIgnoreCase("\\e")
                 || t.equalsIgnoreCase("\\ctx") || t.equalsIgnoreCase("\\context")
@@ -48,32 +51,7 @@ public final class CommandDispatcher {
     }
 
     public static void printHelp(LineReader reader) {
-        String text =
-            "\n╔══ Keys ════════════════════════════════════════╗\n" +
-                "F1          help\n" +
-                "Ctrl+T      Toggle multi-line\n" +
-                "Ctrl+F      định dạng câu đang gõ (hoặc Ctrl+Alt+L)\n" +
-                "Esc         đóng popup gợi ý\n" +
-                "TAB         autocomplete\n" +
-                "F10         quit\n" +
-                "\\q          exit\n" +
-                "\\l          list databases\n" +
-                "\\c <db>     switch database (cùng server)\n" +
-                "\\ctx        list saved contexts (kubectx-style)\n" +
-                "\\ctx <tên>  switch context (đổi cả host/user/dialect)\n" +
-                "\\ctx -      switch to previous context\n" +
-                "\\ctx save <tên>  save connection hiện tại\n" +
-                "\\dt         list tables\n" +
-                "\\dn         list schemas\n" +
-                "\\df         list functions\n" +
-                "\\du         list users/roles\n" +
-                "\\d <tbl>    describe table\n" +
-                "\\o <file>   xuất kết quả ra file (.csv/.json/khác)\n" +
-                "\\o          tắt xuất file\n" +
-                "\\i <file>   run SQL script\n" +
-                "\\e          edit last statement in $EDITOR\n" +
-                "\\refresh    nạp lại schema (bảng/cột/hàm...) cho gợi ý\n" +
-                "╚══════════════════════════════════════════════════╝\n";
+        String text = I18n.t("sql.help");
 
         reader.printAbove(text);
     }
@@ -105,11 +83,19 @@ public final class CommandDispatcher {
             return dialect;
         }
 
+        if (line.equalsIgnoreCase("\\lang") || line.toLowerCase().startsWith("\\lang ")) {
+            boolean[] ok = new boolean[1];
+            String msg = I18n.langCommand(line.length() > 5 ? line.substring(5) : null, ok);
+            impl.printAbove(ok[0] ? msg : RED + msg + RESET);
+            statusBar.render();
+            return dialect;
+        }
+
         if (line.equalsIgnoreCase("\\refresh")) {
             // người khác đổi schema (hay DDL chạy ngoài sqlctx) thì gợi ý không tự biết - nạp lại theo yêu cầu
             try {
                 SchemaIndex.reload(dialect);
-                impl.printAbove("schema reloaded: " + SchemaIndex.schemaTableIndex.size() + " tables");
+                impl.printAbove(I18n.t("sql.schemaReloaded", SchemaIndex.schemaTableIndex.size()));
             } catch (Exception e) {
                 impl.printAbove("\u001B[31mERROR: " + e.getMessage() + RESET);
             }
@@ -126,17 +112,17 @@ public final class CommandDispatcher {
         if (line.toLowerCase().startsWith("\\c ") || line.toLowerCase().startsWith("\\connect ")) {
             String target = line.substring(line.indexOf(' ') + 1).trim();
             if (target.isEmpty()) {
-                say(impl, RED + "ERROR: thiếu tên database - dùng \\c <database>" + RESET);
+                say(impl, RED + I18n.t("sql.err.missingDb") + RESET);
             } else {
                 try {
                     statusBar.setQueryStatus("CONNECTING...");
                     statusBar.render();
                     ContextManager.switchDatabase(target, dialect);
                     statusBar.setDbInfo(ContextManager.dbLabel(dialect));
-                    say(impl, "Đã chuyển sang database \"" + target + "\".\n");
+                    say(impl, I18n.t("sql.switchedDb", target));
                     statusBar.setQueryStatus("IDLE");
                 } catch (Exception e) {
-                    say(impl, RED + "ERROR: không chuyển được sang \"" + target + "\" - " + e.getMessage() + RESET);
+                    say(impl, RED + I18n.t("sql.err.switchDb", target, e.getMessage()) + RESET);
                     statusBar.setQueryStatus("ERROR");
                 }
             }
@@ -152,16 +138,16 @@ public final class CommandDispatcher {
         if (line.toLowerCase().startsWith("\\ctx save ") || line.toLowerCase().startsWith("\\context save ")) {
             String name = line.substring(line.toLowerCase().indexOf("save ") + 5).trim();
             if (name.isEmpty()) {
-                say(impl, RED + "ERROR: thiếu tên - dùng \\ctx save <tên>" + RESET);
+                say(impl, RED + I18n.t("sql.err.missingCtxName") + RESET);
             } else {
                 try {
                     ConnectionProfileStore.save(new ConnectionProfile(name, dialect,
                             System.getProperty("DB_HOST"), System.getProperty("DB_PORT"),
                             System.getProperty("DB_DBNAME"), System.getProperty("DB_USER"),
                             System.getProperty("DB_PASSWORD")));
-                    say(impl, "Đã lưu context \"" + name + "\" (kết nối đang dùng hiện tại).\n");
+                    say(impl, I18n.t("sql.ctxSaved", name));
                 } catch (Exception e) {
-                    say(impl, RED + "ERROR: không lưu được - " + e.getMessage() + RESET);
+                    say(impl, RED + I18n.t("sql.err.save", e.getMessage()) + RESET);
                 }
             }
             return dialect;
@@ -174,18 +160,18 @@ public final class CommandDispatcher {
                 ConnectionProfile targetProfile;
                 if (target.equals("-")) {
                     if (previousConnection == null) {
-                        throw new IllegalStateException("chưa có connection nào trước đó để quay lại bằng \\ctx -");
+                        throw new IllegalStateException(I18n.t("sql.err.noPrevious"));
                     }
                     targetProfile = previousConnection;
                 } else if (target.isEmpty()) {
-                    throw new IllegalStateException("thiếu tên context - dùng \\ctx <tên>, xem \\ctx để liệt kê");
+                    throw new IllegalStateException(I18n.t("sql.err.missingCtx"));
                 } else {
                     targetProfile = ConnectionProfileStore.find(target)
-                            .orElseThrow(() -> new IllegalStateException("không có context tên \"" + target + "\" - xem \\ctx để liệt kê"));
+                            .orElseThrow(() -> new IllegalStateException(I18n.t("sql.err.unknownCtx", target)));
                 }
                 // Tên hiện ra trong lời xác nhận LUÔN lấy từ chính targetProfile (nơi SẮP chuyển TỚI) -
                 // "(trước đó)" chỉ khi connection sắp quay lại (qua \ctx -) chưa từng được đặt tên.
-                String label = targetProfile.name() != null ? targetProfile.name() : "(trước đó)";
+                String label = targetProfile.name() != null ? targetProfile.name() : I18n.t("sql.previous");
 
                 statusBar.setQueryStatus("CONNECTING...");
                 statusBar.render();
@@ -203,11 +189,10 @@ public final class CommandDispatcher {
                     ConnectionProfileStore.setLastContextName(currentContextName);
                 }
                 statusBar.setDbInfo(ContextManager.dbLabel(result));
-                say(impl, "Đã chuyển sang context \"" + label + "\" (" + result + " "
-                        + targetProfile.host() + ":" + targetProfile.port() + "/" + targetProfile.dbname() + ").\n");
+                say(impl, I18n.t("sql.switchedCtx", label, result, targetProfile.host(), targetProfile.port(), targetProfile.dbname()));
                 statusBar.setQueryStatus("IDLE");
             } catch (Exception e) {
-                say(impl, RED + "ERROR: không chuyển context được - " + e.getMessage() + RESET);
+                say(impl, RED + I18n.t("sql.err.switchCtx", e.getMessage()) + RESET);
                 statusBar.setQueryStatus("ERROR");
             }
             statusBar.render();
@@ -242,10 +227,10 @@ public final class CommandDispatcher {
                         StatementExecutor.splitStatements(Files.readString(Paths.get(path))),
                         dialect, impl, terminal, statusBar, true);
                 if (rc != 0) {
-                    say(impl, RED + "Script dừng do lỗi.\n" + RESET);
+                    say(impl, RED + I18n.t("sql.scriptStopped") + RESET);
                 }
             } catch (Exception e) {
-                say(impl, RED + "ERROR: không đọc được file \"" + path + "\" - " + e.getMessage() + RESET);
+                say(impl, RED + I18n.t("sql.err.readFile", path, e.getMessage()) + RESET);
             }
             return dialect;
         }
@@ -253,25 +238,25 @@ public final class CommandDispatcher {
         if (line.toLowerCase().startsWith("\\o ")) {
             String path = line.substring(3).trim();
             if (path.isEmpty()) {
-                say(impl, RED + "ERROR: thiếu tên file - dùng \\o <file>" + RESET);
+                say(impl, RED + I18n.t("sql.err.missingFile") + RESET);
             } else {
                 outputFile = Paths.get(path);
                 outputFormat = ResultExporter.formatFor(path);
                 if ("text".equals(outputFormat)) {
-                    say(impl, "Đã bật xuất kết quả ra \"" + path + "\" (text, ghi nối tiếp cho tới khi \\o tắt).\n");
+                    say(impl, I18n.t("sql.exportOnText", path));
                 } else {
-                    say(impl, "Đã bật xuất kết quả câu lệnh KẾ TIẾP ra \"" + path + "\" (" + outputFormat + ").\n");
+                    say(impl, I18n.t("sql.exportOnNext", path, outputFormat));
                 }
             }
             return dialect;
         }
         if (line.equalsIgnoreCase("\\o")) {
             if (outputFile != null) {
-                say(impl, "Đã tắt xuất file (" + outputFile + ").\n");
+                say(impl, I18n.t("sql.exportOff", outputFile));
                 outputFile = null;
                 outputFormat = null;
             } else {
-                say(impl, "(không có xuất file nào đang bật)\n");
+                say(impl, I18n.t("sql.exportNone"));
             }
             return dialect;
         }
@@ -282,7 +267,7 @@ public final class CommandDispatcher {
             try {
                 pendingEditorBuffer = EditorLauncher.openInEditor(terminal, lastStatement);
             } catch (Exception e) {
-                say(impl, RED + "ERROR: không mở được editor - " + e.getMessage() + RESET);
+                say(impl, RED + I18n.t("sql.err.editor", e.getMessage()) + RESET);
             }
             return dialect;
         }

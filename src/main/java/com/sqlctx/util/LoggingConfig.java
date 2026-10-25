@@ -1,5 +1,7 @@
 package com.sqlctx.util;
 
+import com.sqlctx.util.I18n;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.logging.LogManager;
@@ -22,13 +24,12 @@ public final class LoggingConfig {
     public static void init() {
         try (InputStream in = LoggingConfig.class.getResourceAsStream("/logging.properties")) {
             if (in == null) {
-                System.err.println("[LoggingConfig] Không tìm thấy /logging.properties trong classpath - "
-                        + "dùng cấu hình logging mặc định của JVM.");
+                System.err.println(I18n.t("log.noConfig"));
                 return;
             }
             LogManager.getLogManager().readConfiguration(in);
         } catch (IOException e) {
-            System.err.println("[LoggingConfig] Lỗi đọc logging.properties: " + e.getMessage());
+            System.err.println(I18n.t("log.readError", e.getMessage()));
         }
     }
 

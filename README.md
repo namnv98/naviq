@@ -1,6 +1,6 @@
 # sqlctx
 
-Một REPL SQL cho PostgreSQL và Oracle, gợi ý dựa trên grammar thật.
+Một REPL SQL cho PostgreSQL và Oracle (kèm chế độ Redis và Kafka), gợi ý dựa trên grammar thật.
 
 ```
 app> select id, name from users
@@ -25,6 +25,8 @@ Query: 0.003s  ·  Fetch: 0.003s  ·  Total: 0.006s
 - **Chịu được gõ dở** // câu chưa hoàn chỉnh vẫn có gợi ý
 - **Context** // lưu kết nối theo tên và chuyển qua lại bằng `\ctx`, kiểu kubectx
 - **Hai dialect** // PostgreSQL và Oracle, mỗi bên grammar riêng, đứng sau chung 1 interface `DialectAdapter`
+- **Redis** // REPL riêng, gợi ý theo `COMMAND DOCS` của chính server đang nối: lệnh và tuỳ chọn đúng phiên bản, key đúng kiểu, field thật
+- **Kafka** // gõ lệnh `kafka-*.sh` như tài liệu (bỏ `--bootstrap-server`), gợi ý topic/group/config thật, Avro/JSON Schema/Protobuf qua Schema Registry
 
 ## Cài
 
@@ -33,7 +35,7 @@ git clone <repo> && cd sqlctx
 ./install.sh
 ```
 
-Cần JDK 21 và Maven. Cài `sqlctx` vào `~/.local/bin`. `docker compose up -d` dựng sẵn Postgres (54329) và Oracle (1521) để thử.
+Cần JDK 21 và Maven. Cài `sqlctx` vào `~/.local/bin`. `docker compose up -d` dựng sẵn Postgres (54329), Oracle (1521), Redis (63790), Kafka (19092) và Schema Registry (18081) để thử; dữ liệu mẫu trong `seed/`.
 
 ## Dùng
 
@@ -70,6 +72,7 @@ Chế độ này không có ai trả lời `[y/N]`: lô có câu xoá/sửa dữ
 \o                   tắt xuất file
 \i FILE              chạy 1 file SQL
 \e                   sửa câu gần nhất bằng $EDITOR
+\lang [vi|en]        ngôn ngữ hiển thị (cả chế độ Redis, Kafka)
 \refresh             nạp lại schema cho gợi ý (khi schema đổi ngoài sqlctx)
 \q                   thoát
 ```
@@ -82,9 +85,61 @@ Chế độ này không có ai trả lời `[y/N]`: lô có câu xoá/sửa dữ
 
 Không muốn lưu mật khẩu plaintext: bỏ `--password`, sqlctx tìm lần lượt ở biến môi trường `SQLCTX_PASSWORD`, rồi (Postgres) `PGPASSWORD` và `~/.pgpass` (hoặc `PGPASSFILE`) giống psql. Context lưu khi đó không kèm mật khẩu.
 
+### Ngôn ngữ
+
+Tiếng Việt hoặc tiếng Anh. Thứ tự chọn: `--lang=vi|en`, biến môi trường `SQLCTX_LANG`, `lang=` trong `~/.sqlctx/settings.conf`, rồi ngôn ngữ hệ thống (`LANG=vi_*` thì tiếng Việt, còn lại tiếng Anh). `\lang en` / `\lang vi` trong REPL đổi ngay và lưu vào `settings.conf`. Chữ nằm ở `src/main/resources/i18n/` (`messages_vi.properties`, `messages_en.properties`, và `texts_en.tsv` cho mô tả tuỳ chọn của các tool Kafka); tên cột theo tool gốc (`GROUP`, `TOPIC`, `LAG`...) và output kiểu tool gốc (`Created topic x.`) giữ nguyên tiếng Anh.
+
 ### SSL
 
 Postgres: `--sslmode=require` (kèm `--sslrootcert`, `--sslcert`, `--sslkey`). Oracle: `--ssl=true --sslwallet=DIR`. Chưa thử với server TLS thật.
+
+## Redis
+
+```sh
+sqlctx --context=redis-dev --dialect=redis --host=127.0.0.1 --port=63790 --password=x
+sqlctx --context=redis-dev                    # lần sau
+sqlctx --context=redis-dev --command="GET a; HGETALL user:1"
+```
+
+Thêm `--dbname=N` (số DB), `--user=` (ACL), `--tls=true`, `--readonly=true`. Context Redis lưu ở `~/.sqlctx/redis.conf`, tách khỏi `connections.conf`; mật khẩu không lưu thì lấy từ `SQLCTX_PASSWORD` hoặc `REDISCLI_AUTH`.
+
+Gõ lệnh như redis-cli. Popup gợi ý tự hiện khi gõ, giống phía SQL (↓/↑/Tab chọn, Enter/Space điền, Esc đóng), theo cây tham số `COMMAND DOCS` của server, lấy lúc kết nối và cache ở `~/.sqlctx/redis-docs/` theo phiên bản (lên Redis mới không cần cập nhật sqlctx): lệnh và lệnh con, tuỳ chọn đúng chỗ (`SET k v |` ra `NX XX EX...`), key đúng kiểu với lệnh (`HGET |` chỉ ra key hash, qua `SCAN ... TYPE`), field/member thật (`HGET user:1 |`), tham số `CONFIG GET`, section `INFO`. Dòng dưới ô nhập hiện cú pháp lệnh đang gõ; thừa tham số thì gạch đỏ.
+
+```
+\ctx [NAME|-|save NAME]   context Redis       \dt [PATTERN]   key, kiểu, TTL (SCAN)
+\c N                      đổi DB              \d KEY          chi tiết + xem trước
+\l                        DB đang có key      \h [LỆNH]       cú pháp lệnh
+\i FILE                   chạy file lệnh      \q              thoát
+```
+
+`HGETALL`, `CONFIG GET`, `ZRANGE ... WITHSCORES`, `XRANGE` hiện thành bảng. `FLUSHALL`, `DEL`, `KEYS`... hỏi `[y/N]` (batch cần `--yes`); context `readonly` chặn mọi lệnh ghi và lệnh lạ. Ctrl+C dừng `BLPOP`, `SUBSCRIBE`, `MONITOR` rồi tự nối lại.
+
+## Kafka
+
+```sh
+sqlctx --context=kafka-dev --dialect=kafka --bootstrap-server=localhost:19092 --schema-registry=http://localhost:18081
+sqlctx --context=kafka-dev                    # lần sau
+sqlctx --context=kafka-dev --command='kafka-topics --list'
+printf 'k1\thello\n' | sqlctx --context=kafka-dev --command='kafka-console-producer --topic t --property parse.key=true'
+```
+
+Context lưu ở `~/.sqlctx/kafka.conf`; mọi khoá không phải của sqlctx là config của client Kafka, nên SASL/SSL đặt thẳng vào đó (`security.protocol`, `sasl.mechanism`, `sasl.jaas.config`, `ssl.truststore.location`...). `--readonly=true` chặn mọi lệnh ghi.
+
+Gõ lệnh như các tool `kafka-*.sh` của Kafka 3.9; `--bootstrap-server`/`--command-config` được nhận nhưng bỏ qua (dán lệnh từ tài liệu là chạy), `\` cuối dòng để nối dòng:
+
+| Tool | Làm gì |
+|---|---|
+| `kafka-topics` | `--list --describe --create --delete --alter`, lọc `--under-replicated-partitions`..., thêm cột offset đầu/cuối |
+| `kafka-console-consumer` | `--from-beginning --partition --offset --max-messages --timeout-ms --group --property print.key=true...`; Ctrl+C để dừng |
+| `kafka-console-producer` | mỗi dòng 1 message (Ctrl+D để dừng; batch đọc stdin), `parse.key`, `parse.headers`, `--sync` |
+| `kafka-consumer-groups` | `--list --describe (--members --state --verbose) --reset-offsets --delete --delete-offsets` |
+| `kafka-configs` | topic, broker, broker-logger, quota user/client, SCRAM credential |
+| `kafka-acls` | `--list --add --remove`, `--producer`/`--consumer` |
+| `kafka-get-offsets`, `kafka-delete-records`, `kafka-log-dirs`, `kafka-cluster`, `kafka-metadata-quorum` | như tool gốc |
+| `kafka-avro-*`, `kafka-json-schema-*`, `kafka-protobuf-console-consumer` | message qua Schema Registry (protobuf chỉ đọc, dạng thô `1: 7 2: "click"`) |
+| `schema-registry` | `--list --versions --describe --register --delete --compatibility --id` (không phải tool có thật: Schema Registry chỉ có REST) |
+
+Khác tool gốc có chủ đích: consumer không `--group` đọc bằng `assign()` (không tạo group rác); consumer có `--group` chỉ commit tới message đã in (`--max-messages` không làm mất message đã lấy về mà chưa in); byte không phải UTF-8 in dạng `\xNN`; `kafka-consumer-groups --describe` hiện cả partition group chưa từng commit (CURRENT-OFFSET `-`, LAG tính từ offset đầu) - tool gốc bỏ qua chúng nên tổng lag trông nhỏ hơn thật. `--delete`, `--reset-offsets --execute`, `kafka-acls --remove`, `kafka-delete-records`... hỏi `[y/N]` (batch cần `--yes`). `\h TOOL` xem tuỳ chọn, `\brokers` xem broker. Dữ liệu mẫu: `seed/kafka.sh`.
 
 ## Format
 
@@ -142,7 +197,7 @@ Tầng REPL chưa có test tự động.
 
 ## Giới hạn
 
-- Chỉ có PostgreSQL và Oracle.
+- SQL chỉ có PostgreSQL và Oracle. Kafka: chưa có `kafka-reassign-partitions`, `kafka-leader-election`, `kafka-transactions`, `kafka-streams-application-reset`; ghi Protobuf chưa hỗ trợ. Redis: chỉ server đơn (chưa có Cluster/Sentinel). Server không có `COMMAND DOCS` (Redis < 7.0, hoặc ACL chặn lệnh `COMMAND`) dùng bản mô tả đóng gói sẵn từ Valkey (`tools/redis-fallback/update.sh`), lọc theo lệnh và phiên bản của server. Lệnh module không khai báo docs vẫn chạy được nhưng không có gợi ý tham số.
 - Đi trên grammar không có error recovery: token trước con trỏ không parse được thì không có gợi ý keyword.
 - Báo lỗi cú pháp dựa trên grammar ANTLR: cú pháp mới mà grammar chưa có sẽ bị báo nhầm là lỗi.
 - Mỗi tầng phân tích có giới hạn 300ms (`-Dsqlctx.completion.budgetMs=`); câu cực dài có thể không có gợi ý keyword.

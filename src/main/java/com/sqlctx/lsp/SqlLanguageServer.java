@@ -1,5 +1,7 @@
 package com.sqlctx.lsp;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.completion.hint.InputHints;
 import com.sqlctx.completion.input.CompletionInputPreparer;
 import com.sqlctx.completion.model.Suggestion;
@@ -73,7 +75,7 @@ public class SqlLanguageServer implements LanguageServer, LanguageClientAware, T
             // vẫn chạy (gợi ý keyword, báo lỗi cú pháp) để editor không chỉ báo "server stopped" mà không rõ vì sao
             if (client != null) {
                 client.showMessage(new MessageParams(MessageType.Error,
-                        "sqlctx: " + startupError + " - chỉ có gợi ý keyword, không có bảng/cột."));
+                        I18n.t("lsp.keywordsOnly", startupError)));
             }
             return;
         }

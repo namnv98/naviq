@@ -1,5 +1,7 @@
 package com.sqlctx.cli.command;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.cli.view.BottomStatusBar;
 import com.sqlctx.cli.view.DataViewTable;
 import com.sqlctx.dialect.DialectAdapters;
@@ -43,7 +45,7 @@ public final class SchemaCommands {
                 rows.add(List.of(s.name(), t.name(), t.kind()));
             }
         }
-        printSimpleTable(reader, terminal, statusBar, rows.isEmpty() ? "(không có bảng/view nào)\n" : null, headers, rows);
+        printSimpleTable(reader, terminal, statusBar, rows.isEmpty() ? I18n.t("sql.noTables") : null, headers, rows);
     }
 
     public static void describeSchemas(LineReader reader, Terminal terminal, BottomStatusBar statusBar) {
@@ -52,20 +54,20 @@ public final class SchemaCommands {
         for (var s : SchemaIndex.schemas) {
             rows.add(List.of(s.name(), String.valueOf(s.tables().size())));
         }
-        printSimpleTable(reader, terminal, statusBar, rows.isEmpty() ? "(không có schema nào)\n" : null, headers, rows);
+        printSimpleTable(reader, terminal, statusBar, rows.isEmpty() ? I18n.t("sql.noSchemas") : null, headers, rows);
     }
 
     public static void describeFunctions(LineReader reader, Terminal terminal, BottomStatusBar statusBar) {
         List<String> headers = List.of("Function");
         List<List<String>> rows = SchemaIndex.functions.stream().map(List::of).toList();
-        printSimpleTable(reader, terminal, statusBar, rows.isEmpty() ? "(không có hàm nào)\n" : null, headers, rows);
+        printSimpleTable(reader, terminal, statusBar, rows.isEmpty() ? I18n.t("sql.noFunctions") : null, headers, rows);
     }
 
     /** \du - khác \dt/\dn/\df ở chỗ SchemaIndex không cache sẵn user/role, phải hỏi DB trực tiếp mỗi lần gọi. */
     public static void describeUsers(Dialect dialect, LineReader reader, Terminal terminal, BottomStatusBar statusBar) {
         try {
             var result = DialectAdapters.of(dialect).describeUsers();
-            printSimpleTable(reader, terminal, statusBar, result.rows().isEmpty() ? "(không có user/role nào)\n" : null,
+            printSimpleTable(reader, terminal, statusBar, result.rows().isEmpty() ? I18n.t("sql.noRoles") : null,
                     result.headers(), result.rows());
         } catch (Exception e) {
             say(reader, RED + "ERROR: " + e.getMessage() + RESET);
@@ -75,7 +77,7 @@ public final class SchemaCommands {
     public static void describeTable(String tableName, Dialect dialect, LineReader reader, Terminal terminal, BottomStatusBar statusBar) {
         var table = SchemaIndex.findTable(tableName);
         if (table == null) {
-            say(reader, RED + "ERROR: không thấy bảng/view \"" + tableName + "\"" + RESET);
+            say(reader, RED + I18n.t("sql.err.noTable", tableName) + RESET);
             return;
         }
         Set<String> pk;

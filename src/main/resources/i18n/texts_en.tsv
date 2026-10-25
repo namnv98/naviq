@@ -1,0 +1,181 @@
+# Bản tiếng Anh của chữ để thẳng trong code (bảng mô tả tool Kafka...), tra theo câu tiếng Việt - xem I18n.tr().
+# Cột cách nhau bằng TAB: tiếng Việt <TAB> English. {0} trong câu là phần thay đổi (vd tên định dạng avro/json-schema).
+bỏ qua - sqlctx dùng kết nối của context	ignored - sqlctx uses the context's connection
+bỏ qua - cấu hình client đặt trong context (kafka.conf)	ignored - client config lives in the context (kafka.conf)
+Tạo, xoá, xem, sửa topic	Create, delete, describe, alter topics
+liệt kê topic	list topics
+partition, leader, replica, ISR, config riêng của topic	partitions, leader, replicas, ISR, topic overrides
+tạo topic	create a topic
+xoá topic	delete a topic
+tăng số partition	increase the number of partitions
+tên topic (--list/--describe/--delete/--alter nhận cả regex)	topic name (--list/--describe/--delete/--alter also take a regex)
+số partition	number of partitions
+số bản sao mỗi partition	replicas per partition
+config của topic khi tạo	topic config at creation
+gán replica thủ công cho từng partition	manual replica assignment per partition
+bỏ topic nội bộ (__consumer_offsets...)	exclude internal topics (__consumer_offsets...)
+không báo lỗi nếu topic không có	no error if the topic does not exist
+không báo lỗi nếu topic đã có	no error if the topic already exists
+chỉ topic có config riêng	only topics with config overrides
+chỉ partition thiếu replica trong ISR	only partitions missing replicas from the ISR
+chỉ partition có ISR < min.insync.replicas	only partitions with ISR < min.insync.replicas
+chỉ partition có ISR = min.insync.replicas	only partitions with ISR = min.insync.replicas
+chỉ partition không có leader	only partitions without a leader
+Đọc message của topic	Read messages from a topic
+Đọc message {0} qua Schema Registry (tool của Confluent)	Read {0} messages via Schema Registry (Confluent tool)
+topic cần đọc	topic to read
+đọc mọi topic khớp regex	read every topic matching the regex
+(cũ) như --include	(old) same as --include
+đọc từ message đầu tiên (mặc định: chỉ message mới)	read from the first message (default: only new messages)
+chỉ đọc 1 partition	read a single partition
+vị trí bắt đầu (cần --partition)	start position (needs --partition)
+dừng sau n message	stop after n messages
+dừng nếu không có message mới trong ms	stop if no new message arrives within ms
+đọc theo consumer group (commit offset)	read as a consumer group (commits offsets)
+read_committed: bỏ message của transaction bị huỷ	read_committed: skip messages of aborted transactions
+định dạng in: print.key, print.timestamp, print.partition, print.offset, print.headers...	output format: print.key, print.timestamp, print.partition, print.offset, print.headers...
+config của consumer	consumer config
+file config của consumer	consumer config file
+bỏ qua message không giải mã được	skip messages that cannot be decoded
+bỏ qua - sqlctx tự hiện key dạng chữ/hex	ignored - sqlctx shows keys as text/hex
+bỏ qua - sqlctx tự hiện value dạng chữ/hex	ignored - sqlctx shows values as text/hex
+bỏ qua - dùng định dạng mặc định	ignored - the default format is used
+Ghi message vào topic (mỗi dòng 1 message, Ctrl+D để dừng)	Write messages to a topic (one per line, Ctrl+D to stop)
+Ghi message {0} qua Schema Registry, mỗi dòng 1 JSON (tool của Confluent)	Write {0} messages via Schema Registry, one JSON per line (Confluent tool)
+topic cần ghi	topic to write to
+config của producer	producer config
+file config của producer	producer config file
+gửi từng message, chờ xác nhận	send messages one by one and wait for the ack
+số message mỗi lô	messages per batch
+Xem, reset offset, xoá consumer group	Describe, reset offsets of, delete consumer groups
+liệt kê group	list groups
+offset, lag, member của group	offsets, lag, members of a group
+đặt lại offset (mặc định chỉ xem trước, thêm --execute để áp dụng)	reset offsets (dry run by default, add --execute to apply)
+xoá group	delete a group
+xoá offset đã commit của group cho 1 topic	delete a group's committed offsets for a topic
+mọi group	all groups
+liệt kê member	list members
+offset và lag từng partition (mặc định)	offsets and lag per partition (default)
+trạng thái group (--list: lọc theo trạng thái)	group state (--list: filter by state)
+thêm partition được gán cho từng member	also show the partitions assigned to each member
+topic (và partition) áp dụng	topic (and partitions) to apply to
+mọi topic group đang có offset	every topic the group has offsets for
+về offset đầu	to the earliest offset
+tới offset cuối	to the latest offset
+giữ offset hiện tại	keep the current offset
+tới offset n	to offset n
+dịch n offset (âm = lùi)	shift by n offsets (negative = back)
+tới message đầu tiên từ thời điểm này	to the first message at or after this time
+lùi về trước 1 khoảng thời gian	go back by a duration
+chỉ xem trước (mặc định)	dry run only (default)
+áp dụng thật	apply for real
+thời gian chờ broker	broker timeout
+Xem, sửa config của topic, broker, logger, quota user/client	Describe/alter configs of topics, brokers, loggers, user/client quotas
+xem config	describe configs
+thêm/sửa/xoá config	add/change/delete configs
+tên topic / id broker / tên user, client	topic name / broker id / user or client name
+giá trị mặc định (broker/user/client)	the default entity (broker/user/client)
+cả config đang để mặc định	include configs left at their defaults
+thêm/sửa config	add/change configs
+xoá config (về mặc định)	delete configs (back to default)
+bỏ qua kiểm tra	skip validation
+Xem, thêm, xoá ACL (cần broker bật authorizer)	List, add, remove ACLs (needs an authorizer on the broker)
+liệt kê ACL	list ACLs
+thêm ACL	add ACLs
+xoá ACL	remove ACLs
+ACL trên topic ('*' = mọi topic)	ACL on a topic ('*' = all topics)
+ACL trên consumer group	ACL on a consumer group
+ACL trên cluster	ACL on the cluster
+ACL trên transactional id	ACL on a transactional id
+literal, prefixed (match/any để lọc)	literal, prefixed (match/any for filtering)
+principal được phép	allowed principal
+principal bị cấm	denied principal
+host được phép (mặc định *)	allowed host (default *)
+host bị cấm	denied host
+đủ quyền cho producer (Write, Describe, Create trên topic)	everything a producer needs (Write, Describe, Create on the topic)
+đủ quyền cho consumer (Read, Describe trên topic và group)	everything a consumer needs (Read, Describe on topic and group)
+kèm IdempotentWrite cho --producer	also IdempotentWrite for --producer
+chỉ ACL của principal này	only ACLs of this principal
+xoá không hỏi lại	remove without asking
+Offset của partition tại 1 thời điểm (đầu, cuối, theo thời gian)	Partition offsets at a point in time (earliest, latest, by timestamp)
+topic (regex được)	topic (regex allowed)
+chỉ các partition này	only these partitions
+danh sách topic[:partition|khoảng]	list of topic[:partition|range]
+-1/latest, -2/earliest, -3/max-timestamp, hoặc mốc thời gian (ms)	-1/latest, -2/earliest, -3/max-timestamp, or a timestamp (ms)
+bỏ topic nội bộ	exclude internal topics
+Xoá message cũ hơn 1 offset (theo file JSON)	Delete messages before an offset (from a JSON file)
+{\"partitions\":[{\"topic\":\"t\",\"partition\":0,\"offset\":10}]} (offset -1 = tới cuối)	{"partitions":[{"topic":"t","partition":0,"offset":10}]} (offset -1 = up to the end)
+{"partitions":[{"topic":"t","partition":0,"offset":10}]} (offset -1 = tới cuối)	{"partitions":[{"topic":"t","partition":0,"offset":10}]} (offset -1 = up to the end)
+Dung lượng của từng partition trên đĩa của broker	Disk usage of each partition on the brokers
+xem log dir	describe log dirs
+chỉ các topic này	only these topics
+chỉ các broker này	only these brokers
+Thông tin cluster	Cluster information
+id của cluster	the cluster id
+Trạng thái quorum controller (KRaft)	Controller quorum status (KRaft)
+xem quorum	describe the quorum
+bỏ qua - dùng kết nối của context	ignored - the context's connection is used
+leader, epoch, high watermark, voter/observer	leader, epoch, high watermark, voters/observers
+độ trễ của từng voter/observer	lag of each voter/observer
+thời gian dạng dễ đọc	human-readable times
+Schema Registry (không phải tool có thật - Schema Registry chỉ có REST API)	Schema Registry (not a real tool - Schema Registry only has a REST API)
+liệt kê subject	list subjects
+các version của 1 subject	versions of a subject
+schema của subject (version mới nhất hoặc --version)	a subject's schema (latest version or --version)
+đăng ký schema mới cho subject	register a new schema for a subject
+xoá subject hoặc 1 version	delete a subject or one version
+xem/đặt mức tương thích	show/set the compatibility level
+schema theo id	schema by id
+subject (thường là <topic>-value / <topic>-key)	subject (usually <topic>-value / <topic>-key)
+id của schema	schema id
+nội dung schema	schema text
+đọc schema từ file	read the schema from a file
+AVRO (mặc định), JSON, PROTOBUF	AVRO (default), JSON, PROTOBUF
+BACKWARD, FORWARD, FULL, NONE..., bỏ trống = xem	BACKWARD, FORWARD, FULL, NONE..., empty = show
+chỉ subject bắt đầu bằng	only subjects starting with
+kèm subject đã xoá mềm	include soft-deleted subjects
+xoá hẳn (phải xoá mềm trước)	delete permanently (must be soft-deleted first)
+config của topic	topic configs
+config của broker	broker configs
+mức log của broker	broker log levels
+quota theo user	quotas per user
+quota theo client-id	quotas per client-id
+bỏ message của transaction chưa commit/bị huỷ	skip messages of uncommitted/aborted transactions
+đọc mọi message (mặc định)	read every message (default)
+mọi thao tác	every operation
+đúng tên (mặc định)	exact name (default)
+mọi tên bắt đầu bằng	every name starting with
+(lọc) khớp theo cả 2 cách	(filter) match both ways
+(lọc) mọi kiểu	(filter) any type
+đầu partition	start of the partition
+cuối partition	end of the partition
+latest: offset cuối	latest: the last offset
+earliest: offset đầu	earliest: the first offset
+max-timestamp: message có timestamp lớn nhất	max-timestamp: the message with the largest timestamp
+chờ mọi ISR (= -1)	wait for all ISR (= -1)
+chỉ chờ leader	wait for the leader only
+không chờ	do not wait
+version mới nhất	latest version
+in key	print the key
+không in value	do not print the value
+in thời điểm	print the timestamp
+in partition	print the partition
+in offset	print the offset
+in header	print headers
+in schema id	print the schema id
+giữa các cột (mặc định tab)	between columns (default tab)
+giữa các header (mặc định ,)	between headers (default ,)
+chữ in cho null (mặc định null)	text printed for null (default null)
+mặc định lấy từ context	defaults to the context's
+dòng có key: key<tab>value	lines carry a key: key<tab>value
+giữa key và value (mặc định tab)	between key and value (default tab)
+dòng có header: h1:v1,h2:v2<tab>...	lines carry headers: h1:v1,h2:v2<tab>...
+giữa header và phần còn lại	between the headers and the rest
+giữa các header	between headers
+giữa tên và giá trị header	between a header name and value
+chữ coi là null	text treated as null
+bỏ qua dòng sai định dạng	skip malformed lines
+schema của value (JSON)	value schema (JSON)
+dùng schema đã đăng ký	use an already registered schema
+đọc schema từ file	read the schema from a file
+schema của key	key schema

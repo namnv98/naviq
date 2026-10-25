@@ -1,5 +1,7 @@
 package com.sqlctx.cli.startup;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.datasource.ConnectionProfileStore;
 import com.sqlctx.dialect.DialectAdapter;
 import com.sqlctx.dialect.DialectAdapters;
@@ -37,21 +39,27 @@ public final class StartupBanner {
         int columnCount = SchemaIndex.schemaTableIndex.values().stream().mapToInt(t -> t.columns().size()).sum();
 
         String info =
-            TITLE_COLOR + "sqlctx CLI 1.0.0 — SQL completion & data browser" + RESET + "\n" +
+            TITLE_COLOR + I18n.t("banner.sql.title") + RESET + "\n" +
                 "\n" +
-                DIM + "Connected:  " + RESET + GREEN + user + "@" + host + ":" + port + "/" + db + " (" + dialect + ")" + RESET + "\n" +
-                DIM + "Config:     " + RESET + ConnectionProfileStore.configDir() + "\n" +
-                DIM + "Server:     " + RESET + serverVersion + "\n" +
-                DIM + "Driver:     " + RESET + driver + "\n" +
-                DIM + "Encoding:   " + RESET + encoding + "\n" +
-                DIM + "Time:       " + RESET + "server " + serverTime + " (" + serverZone + ")" + DIM + "  ·  " + RESET + "client " + clientZone + "\n" +
+                label("banner.connected") + GREEN + user + "@" + host + ":" + port + "/" + db + " (" + dialect + ")" + RESET + "\n" +
+                label("banner.config") + ConnectionProfileStore.configDir() + "\n" +
+                label("banner.server") + serverVersion + "\n" +
+                label("banner.driver") + driver + "\n" +
+                label("banner.encoding") + encoding + "\n" +
+                label("banner.time") + I18n.t("banner.timeValue", serverTime, serverZone, DIM, RESET, clientZone) + "\n" +
                 "\n" +
                 // schema nạp ở nền lúc khởi động (SchemaIndex.reloadInBackground) - chưa xong thì chưa có số liệu
                 (schemaCount == 0
-                        ? DIM + "Schema:     " + RESET + "loading in background (status bar shows when done)\n"
-                        : DIM + "Schema:     " + RESET + schemaCount + " schema(s), " + tableCount + " table/view(s), " + columnCount + " column(s) indexed\n" +
-                          DIM + "Suggest:    " + RESET + SchemaIndex.functions.size() + " function(s), " + SchemaIndex.dataTypes.size() + " data type(s)\n");
+                        ? label("banner.schema") + I18n.t("banner.schemaLoading") + "\n"
+                        : label("banner.schema") + I18n.t("banner.schemaCounts", schemaCount, tableCount, columnCount) + "\n" +
+                          label("banner.suggest") + I18n.t("banner.suggestCounts", SchemaIndex.functions.size(), SchemaIndex.dataTypes.size()) + "\n");
 
         reader.printAbove(info);
+    }
+
+    /** "Kết nối:    " - nhãn cột trái của banner, căn thẳng theo độ dài nhãn dài nhất (đổi theo ngôn ngữ). */
+    public static String label(String key) {
+        String text = I18n.t(key) + ":";
+        return DIM + text + " ".repeat(Math.max(1, 12 - text.length())) + RESET;
     }
 }

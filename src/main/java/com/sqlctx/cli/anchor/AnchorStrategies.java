@@ -20,9 +20,9 @@ public class AnchorStrategies {
             int h = Math.min(lines.size(), maxVisible);
             int menuWidth = lines.stream().mapToInt(AttributedString::columnLength).max().orElse(0);
 
-            boolean canRight = (cursorCol + menuWidth) <= termWidth;
-
-            int col = canRight ? cursorCol : (cursorCol - menuWidth);
+            // Không đủ chỗ bên phải thì chỉ dịch sang trái vừa đủ cho khỏi tràn mép, không lật hẳn sang bên trái con
+            // trỏ: terminal hẹp (vd thu nửa màn hình) popup từng nhảy về cột 1, cách xa chữ đang gõ.
+            int col = Math.max(1, Math.min(cursorCol, termWidth - menuWidth + 1));
 
             return new Anchor(cursorRow, col, h);
         };

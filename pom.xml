@@ -67,6 +67,32 @@
             <artifactId>commons-lang3</artifactId>
             <version>3.20.0</version>
         </dependency>
+        <!-- Chế độ Kafka (com.sqlctx.kafka): Admin/Producer/Consumer chính chủ. 3.9 vẫn nói chuyện được với broker từ 2.x;
+             4.x bỏ hỗ trợ broker cũ hơn 2.1. Kéo theo zstd/snappy/lz4 để đọc được message đã nén. -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>3.9.1</version>
+        </dependency>
+        <!-- Message Avro qua Schema Registry (kafka-avro-console-consumer/producer) - không dùng thư viện của Confluent:
+             định dạng trên dây chỉ là byte 0 + 4 byte schema id + Avro binary, schema lấy qua REST. -->
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>1.12.1</version>
+        </dependency>
+        <!-- kafka-clients/avro log qua slf4j: không có provider thì slf4j in cảnh báo ra stderr, đè lên REPL. Chuyển sang
+             java.util.logging để đi chung file log của sqlctx (logging.properties). -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.18</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-jdk14</artifactId>
+            <version>2.0.18</version>
+        </dependency>
         <!-- JUnit 5 -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -174,6 +200,18 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <!-- Test chạy với tiếng Việt cố định (không theo máy/settings.conf của người chạy): test so khớp thông báo
+                     theo ngôn ngữ này; test nào cần tiếng Anh tự đặt I18n.set(EN). -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <sqlctx.lang>vi</sqlctx.lang>
+                    </systemPropertyVariables>
+                </configuration>
             </plugin>
 
             <plugin>

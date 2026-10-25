@@ -1,5 +1,7 @@
 package com.sqlctx.cli;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.cli.command.ContextManager;
 import com.sqlctx.cli.command.StatementExecutor;
 import com.sqlctx.cli.repl.CommandDispatcher;
@@ -59,6 +61,15 @@ public class SqlctxCli {
         if (java.util.Arrays.asList(args).contains("--format")) {
             System.exit(runFormatter());
         }
+        // Redis, Kafka chạy REPL riêng (com.sqlctx.redis, com.sqlctx.kafka), không đi qua phần SQL bên dưới.
+        if (com.sqlctx.redis.RedisCli.handles()) {
+            com.sqlctx.redis.RedisCli.run(args);
+            return;
+        }
+        if (com.sqlctx.kafka.KafkaCli.handles()) {
+            com.sqlctx.kafka.KafkaCli.run(args);
+            return;
+        }
 
         // --context=<tên> (kiểu kubectx): nạp connection đã LƯU SẴN (~/.sqlctx/connections.conf) - chỉ điền
         // vào những gì CHƯA được truyền tường minh qua --host=/--port=/... khác trên cùng dòng lệnh, để
@@ -88,7 +99,7 @@ public class SqlctxCli {
             // ném thẳng RuntimeException lồng nhau ra ngoài, JVM in cả stack trace ~20 dòng (kể cả
             // internal frame của pgjdbc/socket) ra màn hình. Chỉ hiện thông điệp gốc, gọn, giống các
             // lỗi khác trong app, rồi thoát sạch - không có gì để chạy tiếp nếu không kết nối được.
-            System.err.println(RED + "ERROR: không kết nối được tới database - " + rootCauseMessage(e) + RESET);
+            System.err.println(RED + I18n.t("sql.cannotConnect", rootCauseMessage(e)) + RESET);
             System.exit(1);
         }
 
@@ -170,11 +181,10 @@ public class SqlctxCli {
                 List<String> destructive = new ArrayList<>(StatementExecutor.destructiveStatements(commandStatements));
                 destructive.addAll(StatementExecutor.destructiveStatements(fileStatements));
                 if (!destructive.isEmpty() && !java.util.Arrays.asList(args).contains("--yes")) {
-                    terminal.writer().println(RED + "ERROR: có " + destructive.size()
-                            + " câu có thể xoá/sửa dữ liệu - không chạy câu nào. Thêm --yes nếu chắc chắn:" + RESET);
+                    terminal.writer().println(RED + I18n.t("batch.destructiveRefused", destructive.size()) + RESET);
                     destructive.stream().limit(5).forEach(st -> terminal.writer().println("  " + firstLine(st)));
                     if (destructive.size() > 5) {
-                        terminal.writer().println("  ... và " + (destructive.size() - 5) + " câu khác");
+                        terminal.writer().println(I18n.t("batch.andMore", destructive.size() - 5));
                     }
                     terminal.flush();
                     System.exit(2);
@@ -249,7 +259,7 @@ public class SqlctxCli {
         try {
             String contextArg = System.getProperty("DB_CONTEXT");
             if (contextArg == null && System.getProperty("DB_HOST") == null) {
-                throw new IllegalStateException("thiếu --context=<tên> (hoặc --host=/--port=/--dbname=/--user=) trong lệnh chạy server");
+                throw new IllegalStateException(I18n.t("lsp.missingContext"));
             }
             if (contextArg != null) {
                 ContextManager.applyContext(contextArg);

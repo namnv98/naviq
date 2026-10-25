@@ -1,5 +1,7 @@
 package com.sqlctx.cli.command;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.cli.terminal.SqlHighlighter;
 import com.sqlctx.datasource.ConnectionProfile;
 import com.sqlctx.datasource.ConnectionProfileStore;
@@ -52,17 +54,15 @@ public final class ContextManager {
         // mật khẩu không bắt buộc: có thể đến từ SQLCTX_PASSWORD / PGPASSWORD / ~/.pgpass (PasswordResolver),
         // khi đó context lưu không kèm mật khẩu
         if (host == null || port == null || dbname == null || user == null) {
-            throw new RuntimeException("Không có context tên \"" + name + "\", và dòng lệnh cũng chưa gõ đủ "
-                    + "--host=/--port=/--dbname=/--user= để tự lưu thành context mới - "
-                    + "xem \\ctx (sau khi đã nối được lần nào đó) để biết tên đã lưu.");
+            throw new RuntimeException(I18n.t("sql.err.ctxNotFoundNoArgs", name));
         }
         Dialect dialect = "oracle".equalsIgnoreCase(System.getProperty("DB_DIALECT", "postgres"))
                 ? Dialect.ORACLE : Dialect.POSTGRES;
         try {
             ConnectionProfileStore.save(new ConnectionProfile(name, dialect, host, port, dbname, user, password));
-            System.err.println("Đã lưu context \"" + name + "\" - lần sau chỉ cần: --context=" + name);
+            System.err.println(I18n.t("ctx.savedHint", name));
         } catch (Exception e) {
-            System.err.println("WARNING: không lưu được context \"" + name + "\" - " + e.getMessage());
+            System.err.println(I18n.t("ctx.saveWarning", name, e.getMessage()));
         }
     }
 
@@ -121,7 +121,7 @@ public final class ContextManager {
     public static void listContexts(LineReader reader) {
         List<ConnectionProfile> profiles = ConnectionProfileStore.loadAll();
         if (profiles.isEmpty()) {
-            say(reader, "(chưa lưu context nào - dùng \\ctx save <tên> để lưu connection đang dùng)\n");
+            say(reader, I18n.t("sql.noContexts"));
             return;
         }
         StringBuilder sb = new StringBuilder();

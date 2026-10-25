@@ -1,5 +1,7 @@
 package com.sqlctx.datasource;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.schema.Dialect;
 
 import java.nio.file.Files;
@@ -57,7 +59,7 @@ public final class PasswordResolver {
         try {
             Set<PosixFilePermission> perms = Files.getPosixFilePermissions(file);
             if (perms.contains(PosixFilePermission.GROUP_READ) || perms.contains(PosixFilePermission.OTHERS_READ)) {
-                System.err.println("WARNING: bỏ qua " + file + " vì người khác đọc được - chạy: chmod 600 " + file);
+                System.err.println(I18n.t("cfg.pgpassSkipped", file));
                 return null;
             }
         } catch (UnsupportedOperationException | java.io.IOException ignored) {

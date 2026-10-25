@@ -1,5 +1,7 @@
 package com.sqlctx.dialect;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.antlr4.oracle.PlSqlLexer;
 import com.sqlctx.completion.model.Suggestion;
 import com.sqlctx.completion.input.CompletionInputPreparer;
@@ -151,7 +153,7 @@ public final class OracleAdapter implements DialectAdapter {
                 while (rs.next()) {
                     names.add(rs.getString(1));
                 }
-                return new DatabaseList("(không thấy PDB nào - đây là danh sách schema/user trong PDB hiện tại)\n", names);
+                return new DatabaseList(I18n.t("sql.oracleNoPdb"), names);
             }
         }
     }
@@ -194,7 +196,7 @@ public final class OracleAdapter implements DialectAdapter {
              ResultSet rs = stmt.executeQuery("SELECT banner FROM v$version WHERE ROWNUM = 1")) {
             return rs.next() ? rs.getString(1) : "(unknown)";
         } catch (Exception e) {
-            return "Oracle (không đọc được version: " + e.getMessage() + ")";
+            return I18n.t("sql.versionUnknown", "Oracle", e.getMessage());
         }
     }
 

@@ -1,5 +1,7 @@
 package com.sqlctx.datasource;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.schema.Dialect;
 
 import java.io.IOException;
@@ -50,8 +52,7 @@ public class ConnectionProfileStore {
         try {
             if (Files.exists(oldDir) && !Files.exists(newDir)) {
                 Files.move(oldDir, newDir);
-                System.err.println("Đã tự chuyển config cũ \"" + oldDir + "\" sang \"" + newDir
-                        + "\" (đổi tên dự án naviq -> sqlctx).");
+                System.err.println(I18n.t("cfg.migrated", oldDir, newDir));
             }
         } catch (IOException ignored) {
             // Không di chuyển được (khác filesystem, quyền...) - không chặn khởi động, coi như bắt đầu config mới.
@@ -175,9 +176,7 @@ public class ConnectionProfileStore {
             boolean tooOpen = perms.contains(PosixFilePermission.GROUP_READ)
                     || perms.contains(PosixFilePermission.OTHERS_READ);
             if (tooOpen) {
-                System.err.println("WARNING: " + file + " chứa mật khẩu dạng thường và đang cho phép "
-                        + "người khác đọc được (quyền " + PosixFilePermissions.toString(perms) + ") - nên chạy: "
-                        + "chmod 600 " + file);
+                System.err.println(I18n.t("cfg.permsTooOpen", file, PosixFilePermissions.toString(perms)));
             }
         } catch (IOException | UnsupportedOperationException ignored) {
             // Không đọc được permission (vd không phải POSIX filesystem) - không cảnh báo được, bỏ qua.

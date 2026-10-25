@@ -1,5 +1,7 @@
 package com.sqlctx.completion.hint;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.antlr4.oracle.PlSqlLexer;
 import com.sqlctx.antlr4.oracle.PlSqlParser;
 import com.sqlctx.antlr4.postgresql.PostgreSQLLexer;
@@ -183,7 +185,7 @@ public final class InputHints {
                 col++;
             }
         }
-        return "syntax error near '" + problem.tokenText() + "' (Ln " + line + ", Col " + col + ")";
+        return I18n.t("sql.hint.syntaxError", problem.tokenText(), line, col);
     }
 
     private static Lexer lexer(String sql, Dialect dialect) {

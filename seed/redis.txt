@@ -1,0 +1,28 @@
+# Dữ liệu mẫu cho sqlctx-redis (DB 0), đủ mọi kiểu key để thử gợi ý/\dt/\d. Chạy lại được nhiều lần:
+#   grep -v "^#" seed/redis.txt | docker exec -i sqlctx-redis redis-cli -a Redis123 --no-auth-warning
+FLUSHDB
+SET app:name "sqlctx demo"
+SET app:version 1.0.0
+SET counter:visits 1024
+SET session:abc123 "{\"user_id\":1,\"role\":\"admin\"}" EX 3600
+SET session:def456 "{\"user_id\":2,\"role\":\"viewer\"}" EX 7200
+SET greeting:vi "Xin chào, thế giới"
+HSET user:1 name An email an@example.com city "Ha Noi" age 31
+HSET user:2 name Binh email binh@example.com city "Ho Chi Minh" age 27
+HSET user:3 name Chi email chi@example.com city "Da Nang" age 35
+HSET product:1001 sku SKU-1001 name Keyboard price 49.90 stock 120
+HSET product:1002 sku SKU-1002 name Mouse price 19.90 stock 300
+RPUSH queue:emails welcome:1 welcome:2 reset:3 invoice:4
+LPUSH recent:views product:1002 product:1001 product:1002
+SADD tags:product:1001 mechanical rgb wired
+SADD tags:product:1002 wireless ergonomic
+SADD online:users 1 3
+ZADD leaderboard 1500 An 2200 Binh 1800 Chi 900 Dung 2500 Em
+ZADD trending:products 42 product:1001 77 product:1002
+XADD events:orders * order_id 1 status paid total 120.50
+XADD events:orders * order_id 2 status new total 75.00
+XADD events:orders * order_id 3 status shipped total 310.00
+SELECT 1
+FLUSHDB
+SET cache:home "<html>...</html>" EX 600
+SET cache:about "<html>about</html>" EX 600

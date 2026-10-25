@@ -2,6 +2,7 @@ package com.sqlctx.completion.hint;
 
 import com.sqlctx.schema.Dialect;
 import com.sqlctx.schema.SchemaIndex;
+import com.sqlctx.util.I18n;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,12 +20,14 @@ class InputHintsTest {
         savedSignatures = SchemaIndex.functionSignatures;
         SchemaIndex.functionSignatures = Map.of("date_trunc", "(text, timestamp) → timestamp +3");
         InputHints.clearCache();
+        I18n.set(I18n.Lang.EN, false); // so khớp thông báo lỗi tiếng Anh ("syntax error near ...")
     }
 
     @AfterEach
     void tearDown() {
         SchemaIndex.functionSignatures = savedSignatures;
         InputHints.clearCache();
+        I18n.set(I18n.Lang.VI, false);
     }
 
     private static String at(String sqlWithCursor, Dialect dialect) {

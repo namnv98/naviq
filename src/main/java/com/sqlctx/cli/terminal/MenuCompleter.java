@@ -1,5 +1,7 @@
 package com.sqlctx.cli.terminal;
 
+import com.sqlctx.util.I18n;
+
 import com.sqlctx.completion.ranking.CompletionHistory;
 import com.sqlctx.completion.input.CompletionInputPreparer;
 import com.sqlctx.completion.ranking.SuggestFilter;
@@ -60,20 +62,21 @@ public class MenuCompleter {
     private static final Map<String, String> COMMAND_DOCS = new LinkedHashMap<>();
 
     static {
-        COMMAND_DOCS.put("\\l", "list databases");
-        COMMAND_DOCS.put("\\c ", "switch database");
-        COMMAND_DOCS.put("\\q", "exit");
-        COMMAND_DOCS.put("\\?", "help");
-        COMMAND_DOCS.put("\\dt", "list tables");
-        COMMAND_DOCS.put("\\dn", "list schemas");
-        COMMAND_DOCS.put("\\df", "list functions");
-        COMMAND_DOCS.put("\\d ", "describe table");
-        COMMAND_DOCS.put("\\i ", "run SQL script");
-        COMMAND_DOCS.put("\\e", "edit in $EDITOR");
-        COMMAND_DOCS.put("\\ctx ", "switch saved context (kubectx-style)");
-        COMMAND_DOCS.put("\\du", "list users/roles");
-        COMMAND_DOCS.put("\\o ", "export result (csv/json/text)");
-        COMMAND_DOCS.put("\\refresh", "reload schema for completion");
+        COMMAND_DOCS.put("\\l", "sql.meta.list");
+        COMMAND_DOCS.put("\\c ", "sql.meta.connect");
+        COMMAND_DOCS.put("\\q", "sql.meta.quit");
+        COMMAND_DOCS.put("\\?", "sql.meta.help");
+        COMMAND_DOCS.put("\\dt", "sql.meta.dt");
+        COMMAND_DOCS.put("\\dn", "sql.meta.dn");
+        COMMAND_DOCS.put("\\df", "sql.meta.df");
+        COMMAND_DOCS.put("\\d ", "sql.meta.d");
+        COMMAND_DOCS.put("\\i ", "sql.meta.i");
+        COMMAND_DOCS.put("\\e", "sql.meta.e");
+        COMMAND_DOCS.put("\\ctx ", "sql.meta.ctx");
+        COMMAND_DOCS.put("\\du", "sql.meta.du");
+        COMMAND_DOCS.put("\\o ", "sql.meta.o");
+        COMMAND_DOCS.put("\\refresh", "sql.meta.refresh");
+        COMMAND_DOCS.put("\\lang ", "sql.meta.lang");
     }
 
     private static final int PAGE_SIZE = 10;
@@ -230,7 +233,7 @@ public class MenuCompleter {
             prefix = trimmed;
             suggests = COMMAND_DOCS.entrySet().stream()
                     .filter(e -> e.getKey().startsWith(trimmed))
-                    .map(e -> Suggestion.of(e.getKey(), SuggestionType.COMMAND, e.getValue()))
+                    .map(e -> Suggestion.of(e.getKey(), SuggestionType.COMMAND, I18n.t(e.getValue())))
                     .toList();
         } else {
             String cmd = trimmed.substring(0, sp);

@@ -1,5 +1,7 @@
 package com.sqlctx.cli.view;
 
+import com.sqlctx.util.I18n;
+
 import org.jline.terminal.Terminal;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
@@ -34,11 +36,11 @@ public class BottomStatusBar {
     }
 
     private static final String[][] MENU_ITEMS = {
-            {"F1", "Help"},
-            {"Ctrl T", "Multiline"},
-            {"Ctrl F", "Format"},
-            {"Esc", "Close popup"},
-            {"F10", "Quit"},
+            {"F1", "bar.help"},
+            {"Ctrl T", "bar.multiline"},
+            {"Ctrl F", "bar.format"},
+            {"Esc", "bar.closePopup"},
+            {"F10", "bar.quit"},
     };
 
     // Cùng 1 nền (36,36,36) xuyên suốt thanh - phân biệt từng mục bằng MÀU CHỮ thay vì đổi khối nền (đỡ
@@ -88,7 +90,7 @@ public class BottomStatusBar {
             return sb.toAttributedString();
         }
         String text = hint.length() > width - 2 ? hint.substring(0, Math.max(0, width - 3)) + "…" : hint;
-        if (text.startsWith("syntax error")) {
+        if (text.startsWith("syntax error") || text.startsWith("lỗi cú pháp")) { // tiếng Anh / tiếng Việt (sql.hint.syntaxError)
             return sb.style(HINT_ERROR_STYLE).append(" ⚠ ").append(text).toAttributedString();
         }
         sb.style(HINT_STYLE).append(" ");
@@ -191,7 +193,7 @@ public class BottomStatusBar {
     }
 
     private String menuLabel(String[] item) {
-        return item[0].equals("Ctrl T") ? "Multiline " + (multiLine ? "ON" : "OFF") : item[1];
+        return item[0].equals("Ctrl T") ? I18n.t("bar.multiline") + " " + (multiLine ? "ON" : "OFF") : I18n.t(item[1]);
     }
 
     private int menuItemWidth(String[] item) {
