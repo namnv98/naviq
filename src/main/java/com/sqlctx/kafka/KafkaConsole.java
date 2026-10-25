@@ -307,7 +307,11 @@ final class KafkaConsole {
             if (sr == null) {
                 throw new KafkaCommands.UsageException(I18n.t("kafka.err.needSr"));
             }
-            String type = flavor.equals("avro") ? "AVRO" : "JSON";
+            String type = switch (flavor) {
+                case "avro" -> "AVRO";
+                case "protobuf" -> "PROTOBUF";
+                default -> "JSON";
+            };
             valueSchemaId = schemaId(sr, topic + "-value", fmt, "value", type);
             if (valueSchemaId < 0) {
                 throw new KafkaCommands.UsageException(I18n.t("kafka.err.needValueSchema"));
@@ -344,7 +348,7 @@ final class KafkaConsole {
                 ProducerRecord<byte[], byte[]> record;
                 try {
                     record = record(topic, line, parseKey, keySep, parseHeaders, headersDelimiter, headersSep, headerKeySep,
-                            nullMarker, flavor, sr, keySchemaId, valueSchemaId);
+                            nullMarker, flavor, sr, keySchemaId, valueSchemaId, fmt.get("key.message"), fmt.get("value.message"));
                 } catch (IOException | RuntimeException e) {
                     if (ignoreError) {
                         continue;
@@ -387,7 +391,8 @@ final class KafkaConsole {
     private static ProducerRecord<byte[], byte[]> record(String topic, String line, boolean parseKey, String keySep,
                                                          boolean parseHeaders, String headersDelimiter, String headersSep,
                                                          String headerKeySep, String nullMarker, String flavor,
-                                                         SchemaRegistry sr, int keySchemaId, int valueSchemaId) throws IOException {
+                                                         SchemaRegistry sr, int keySchemaId, int valueSchemaId,
+                                                         String keyMessage, String valueMessage) throws IOException {
         List<Header> headers = new ArrayList<>();
         String rest = line;
         if (parseHeaders) {
@@ -411,18 +416,24 @@ final class KafkaConsole {
             key = rest.substring(0, k);
             rest = rest.substring(k + keySep.length());
         }
-        byte[] keyBytes = encode(key, nullMarker, flavor, sr, keySchemaId);
-        byte[] valueBytes = encode(rest, nullMarker, flavor, sr, valueSchemaId);
+        byte[] keyBytes = encode(key, nullMarker, flavor, sr, keySchemaId, keyMessage);
+        byte[] valueBytes = encode(rest, nullMarker, flavor, sr, valueSchemaId, valueMessage);
         return new ProducerRecord<>(topic, null, keyBytes, valueBytes, headers);
     }
 
-    private static byte[] encode(String s, String nullMarker, String flavor, SchemaRegistry sr, int schemaId) throws IOException {
+    /** {@code message}: message protobuf cần dùng (null = message đầu tiên của schema). */
+    private static byte[] encode(String s, String nullMarker, String flavor, SchemaRegistry sr, int schemaId, String message)
+            throws IOException {
         if (s == null || s.equals(nullMarker)) {
             return null;
         }
         if (flavor.isEmpty() || schemaId < 0) {
             return s.getBytes(StandardCharsets.UTF_8);
         }
-        return flavor.equals("avro") ? KafkaSerde.encodeAvro(s, schemaId, sr) : KafkaSerde.encodeJsonSchema(s, schemaId);
+        return switch (flavor) {
+            case "avro" -> KafkaSerde.encodeAvro(s, schemaId, sr);
+            case "protobuf" -> KafkaSerde.encodeProtobuf(s, schemaId, message, sr);
+            default -> KafkaSerde.encodeJsonSchema(s, schemaId);
+        };
     }
 }

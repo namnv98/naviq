@@ -179,3 +179,33 @@ schema của value (JSON)	value schema (JSON)
 dùng schema đã đăng ký	use an already registered schema
 đọc schema từ file	read the schema from a file
 schema của key	key schema
+protobuf: message dùng cho value (mặc định message đầu tiên)	protobuf: message used for the value (default: the first message)
+protobuf: message dùng cho key	protobuf: message used for the key
+Chuyển replica của partition sang broker khác	Move partition replicas to other brokers
+đề xuất cách phân bổ replica lên các broker cho trước (chỉ in ra)	propose a replica assignment over the given brokers (print only)
+bắt đầu chuyển theo file JSON	start the reassignment in the JSON file
+kiểm tra đã chuyển xong chưa	check whether the reassignment has finished
+huỷ các lần chuyển đang chạy trong file JSON	cancel the running reassignments in the JSON file
+các lần chuyển đang chạy	reassignments in progress
+các broker nhận replica	brokers to receive the replicas
+bỏ qua - đề xuất không xét rack	ignored - the proposal does not consider racks
+bỏ qua - sqlctx không đặt throttle	ignored - sqlctx does not set throttles
+bỏ qua - luôn cho chạy thêm khi đang có lần chuyển khác	ignored - always allowed while another reassignment runs
+Bầu lại leader cho partition (preferred hoặc unclean)	Elect partition leaders (preferred or unclean)
+PREFERRED: về replica ưu tiên; UNCLEAN: cho replica ngoài ISR làm leader	PREFERRED: back to the preferred replica; UNCLEAN: let an out-of-ISR replica lead
+topic cần bầu lại leader	topic to run the election for
+partition (cần --topic)	partition (requires --topic)
+mọi partition của mọi topic	every partition of every topic
+về replica ưu tiên (replica đầu tiên)	back to the preferred replica (the first one)
+cho replica ngoài ISR làm leader - có thể mất dữ liệu	let an out-of-ISR replica lead - may lose data
+Xem, huỷ transaction của producer; tìm transaction bị treo	Describe and abort producer transactions; find hanging ones
+liệt kê transactional id	list transactional ids
+trạng thái 1 transaction	state of one transaction
+producer đang ghi vào 1 partition	producers writing to a partition
+transaction mở quá lâu trên partition (treo, chặn read_committed)	transactions open too long on a partition (hanging, block read_committed)
+huỷ transaction đang mở trên 1 partition	abort an open transaction on a partition
+chỉ transaction chạy lâu hơn (ms)	only transactions running longer than (ms)
+broker (describe-producers: hỏi replica này thay vì leader; find-hanging: mọi partition của broker)	broker (describe-producers: ask this replica instead of the leader; find-hanging: every partition on the broker)
+mở lâu hơn chừng này phút là treo (mặc định 15)	open longer than this many minutes counts as hanging (default 15)
+offset bắt đầu của transaction cần huỷ	start offset of the transaction to abort
+producer id (thay cho --start-offset)	producer id (instead of --start-offset)

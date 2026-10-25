@@ -99,4 +99,17 @@ class KafkaCompletionTest {
     void giáTrịTựDoKhôngGợiÝTuỳChọn() {
         assertEquals(List.of(), values("kafka-topics --list or"));
     }
+
+    @Test
+    void toolQuảnTrịPartitionVàTransaction() {
+        assertEquals(List.of("list", "describe", "describe-producers", "find-hanging", "abort"), values("kafka-transactions "));
+        List<String> abort = values("kafka-transactions abort ");
+        assertTrue(abort.containsAll(List.of("--topic", "--partition", "--start-offset", "--producer-id")), abort.toString());
+        assertFalse(abort.contains("--transactional-id"), "tuỳ chọn của describe không hiện ở abort");
+        assertEquals(List.of("0", "1", "2"), values("kafka-transactions describe-producers --topic orders --partition "));
+        assertEquals(List.of("PREFERRED", "UNCLEAN"), values("kafka-leader-election --election-type "));
+        assertEquals(List.of("--generate", "--execute", "--verify", "--cancel", "--list"),
+                values("kafka-reassign-partitions ").subList(0, 5));
+        assertFalse(values("kafka-reassign-partitions --list ").contains("--reassignment-json-file"));
+    }
 }

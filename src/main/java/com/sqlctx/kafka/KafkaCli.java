@@ -343,6 +343,9 @@ public final class KafkaCli {
         if (p.tool().name().equals("kafka-acls") && p.has("--force")) {
             return false;
         }
+        if (p.tool().name().equals("kafka-leader-election")) {
+            return "unclean".equalsIgnoreCase(p.get("--election-type")); // preferred chỉ đưa leader về đúng chỗ
+        }
         return p.tool().dangerous().contains("*") || p.mode() != null && p.tool().dangerous().contains(p.mode());
     }
 

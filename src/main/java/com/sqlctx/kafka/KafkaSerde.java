@@ -16,14 +16,16 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Hiển thị và tạo nội dung message. Định dạng trên dây của Schema Registry (Confluent): byte 0, 4 byte schema id
- * (big-endian), rồi dữ liệu - Avro binary; JSON Schema: chữ JSON; Protobuf: dãy chỉ số message (varint) rồi
- * protobuf binary. Protobuf chỉ giải mã thô (số field: giá trị, như protoc --decode_raw) vì muốn hiện tên field phải
- * biên dịch được file .proto lúc chạy.
+ * (big-endian), rồi dữ liệu - Avro binary; JSON Schema: chữ JSON; Protobuf: dãy chỉ số message (varint zigzag) rồi
+ * protobuf binary. Protobuf đọc schema .proto bằng {@link ProtoSchema}; schema dùng thứ nó không hiểu (import...) thì
+ * giải mã thô (số field: giá trị, như protoc --decode_raw).
  */
 public final class KafkaSerde {
 
@@ -31,6 +33,7 @@ public final class KafkaSerde {
     }
 
     private static final Map<Integer, Schema> AVRO = new ConcurrentHashMap<>();
+    private static final Map<Integer, ProtoSchema> PROTO = new ConcurrentHashMap<>();
 
     // ------------------------------------------------------------------ chữ thường
 
@@ -88,11 +91,14 @@ public final class KafkaSerde {
             }
             case "protobuf" -> {
                 int[] pos = {offset};
-                long count = zigzag(readVarint(bytes, pos));
-                for (long i = 0; i < count; i++) { // chỉ số message lồng nhau trong file .proto, bỏ qua
-                    readVarint(bytes, pos);
+                List<Integer> indexes = readIndexes(bytes, pos);
+                ProtoSchema proto;
+                try {
+                    proto = protoSchema(id, sr);
+                } catch (IOException e) {
+                    return decodeRaw(bytes, pos[0], bytes.length); // schema không đọc được: vẫn hiện được nội dung
                 }
-                return decodeRaw(bytes, pos[0], bytes.length);
+                return proto.decode(proto.byIndexes(indexes), bytes, pos[0], bytes.length).toString();
             }
             default -> throw new IOException(I18n.t("serde.unknownFormat", flavor));
         }
@@ -126,6 +132,62 @@ public final class KafkaSerde {
         BinaryEncoder enc = EncoderFactory.get().binaryEncoder(out, null);
         new GenericDatumWriter<>(schema).write(datum, enc);
         enc.flush();
+        return out.toByteArray();
+    }
+
+    private static ProtoSchema protoSchema(int id, SchemaRegistry sr) throws IOException {
+        ProtoSchema cached = PROTO.get(id);
+        if (cached != null) {
+            return cached;
+        }
+        SchemaRegistry.Schema s = sr.byId(id);
+        if (!"PROTOBUF".equalsIgnoreCase(s.type())) {
+            throw new IOException(I18n.t("serde.notProtobuf", id, s.type()));
+        }
+        ProtoSchema parsed = ProtoSchema.parse(s.schema());
+        PROTO.put(id, parsed);
+        return parsed;
+    }
+
+    /** Chỉ số message kiểu Confluent: 1 byte 0 = [0] (message đầu tiên), không thì số phần tử rồi từng chỉ số. */
+    static List<Integer> readIndexes(byte[] bytes, int[] pos) throws IOException {
+        int count = (int) zigzag(readVarint(bytes, pos));
+        if (count == 0) {
+            return List.of(0);
+        }
+        List<Integer> out = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            out.add((int) zigzag(readVarint(bytes, pos)));
+        }
+        return out;
+    }
+
+    private static void writeIndexes(ByteArrayOutputStream out, List<Integer> indexes) {
+        if (indexes.equals(List.of(0))) {
+            out.write(0);
+            return;
+        }
+        ProtoSchema.varint(out, (long) indexes.size() << 1);
+        for (int i : indexes) {
+            ProtoSchema.varint(out, ((long) i << 1) ^ (i >> 31));
+        }
+    }
+
+    /** Protobuf: 1 dòng JSON (ánh xạ JSON chuẩn của proto3) -> byte có tiền tố id; {@code message} null = message đầu tiên. */
+    public static byte[] encodeProtobuf(String json, int id, String message, SchemaRegistry sr) throws IOException {
+        ProtoSchema proto = protoSchema(id, sr);
+        ProtoSchema.Message m = proto.message(message);
+        com.google.gson.JsonElement parsed;
+        try {
+            parsed = com.google.gson.JsonParser.parseString(json);
+        } catch (RuntimeException e) {
+            throw new IOException(I18n.t("serde.badJson", e.getMessage()));
+        }
+        byte[] body = proto.encode(m, parsed);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        writeHeader(out, id);
+        writeIndexes(out, proto.indexes(m));
+        out.writeBytes(body);
         return out.toByteArray();
     }
 

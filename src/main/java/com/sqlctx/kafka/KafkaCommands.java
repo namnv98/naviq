@@ -76,8 +76,8 @@ import java.util.stream.Collectors;
 
 /**
  * Các tool quản trị (mọi thứ trừ console consumer/producer): kafka-topics, kafka-consumer-groups, kafka-configs,
- * kafka-acls, kafka-get-offsets, kafka-delete-records, kafka-log-dirs, kafka-cluster, kafka-metadata-quorum,
- * schema-registry. Kết quả in thành bảng thay vì văn bản căn cột của tool gốc, cùng cột và cùng tên.
+ * kafka-acls, kafka-get-offsets, kafka-delete-records, kafka-log-dirs, kafka-reassign-partitions,
+ * kafka-leader-election, kafka-transactions, kafka-cluster, kafka-metadata-quorum, schema-registry. Kết quả in thành bảng thay vì văn bản căn cột của tool gốc, cùng cột và cùng tên.
  */
 final class KafkaCommands {
 
@@ -118,6 +118,9 @@ final class KafkaCommands {
             case "kafka-get-offsets" -> getOffsets(p);
             case "kafka-delete-records" -> deleteRecords(p);
             case "kafka-log-dirs" -> logDirs(p);
+            case "kafka-reassign-partitions" -> reassign(p);
+            case "kafka-leader-election" -> leaderElection(p);
+            case "kafka-transactions" -> transactions(p);
             case "kafka-cluster" -> out.info("Cluster ID: " + admin().describeCluster().clusterId().get());
             case "kafka-metadata-quorum" -> quorum(p);
             case "schema-registry" -> schemaRegistry(p);
@@ -1017,6 +1020,365 @@ final class KafkaCommands {
             u++;
         }
         return u == 0 ? bytes + " B" : String.format("%.1f %s", v, units[u]);
+    }
+
+    // ================================================================== kafka-reassign-partitions
+
+    private static JsonObject readJson(String file) throws IOException {
+        try {
+            return JsonParser.parseString(Files.readString(Path.of(file))).getAsJsonObject();
+        } catch (RuntimeException e) {
+            throw new UsageException(I18n.t("kafka.err.badJsonFile", file, e.getMessage()));
+        }
+    }
+
+    /** {"partitions":[{"topic","partition","replicas":[..]}]} -> replica đích theo partition (giữ thứ tự file). */
+    private static Map<TopicPartition, List<Integer>> reassignmentFile(String file) throws IOException {
+        Map<TopicPartition, List<Integer>> out = new LinkedHashMap<>();
+        for (JsonElement e : readJson(file).getAsJsonArray("partitions")) {
+            JsonObject o = e.getAsJsonObject();
+            List<Integer> replicas = new ArrayList<>();
+            if (o.has("replicas")) {
+                o.getAsJsonArray("replicas").forEach(r -> replicas.add(r.getAsInt()));
+            }
+            out.put(new TopicPartition(o.get("topic").getAsString(), o.get("partition").getAsInt()), replicas);
+        }
+        return out;
+    }
+
+    private static String reassignmentJson(Map<TopicPartition, List<Integer>> assignment) {
+        JsonObject root = new JsonObject();
+        root.addProperty("version", 1);
+        com.google.gson.JsonArray parts = new com.google.gson.JsonArray();
+        assignment.forEach((tp, replicas) -> {
+            JsonObject o = new JsonObject();
+            o.addProperty("topic", tp.topic());
+            o.addProperty("partition", tp.partition());
+            com.google.gson.JsonArray r = new com.google.gson.JsonArray();
+            replicas.forEach(r::add);
+            o.add("replicas", r);
+            com.google.gson.JsonArray dirs = new com.google.gson.JsonArray();
+            replicas.forEach(x -> dirs.add("any"));
+            o.add("log_dirs", dirs);
+            parts.add(o);
+        });
+        root.add("partitions", parts);
+        return root.toString();
+    }
+
+    /** Replica hiện tại của các partition (theo thứ tự topic, partition). */
+    private Map<TopicPartition, List<Integer>> currentAssignment(Collection<String> topics) throws Exception {
+        Map<TopicPartition, List<Integer>> out = new LinkedHashMap<>();
+        for (var d : new TreeMap<>(admin().describeTopics(topics).allTopicNames().get()).entrySet()) {
+            for (TopicPartitionInfo pi : d.getValue().partitions()) {
+                out.put(new TopicPartition(d.getKey(), pi.partition()), pi.replicas().stream().map(Node::id).toList());
+            }
+        }
+        return out;
+    }
+
+    private void reassign(KafkaArgs.Parsed p) throws Exception {
+        switch (p.mode()) {
+            case "--generate" -> {
+                List<String> topics = new ArrayList<>();
+                for (JsonElement e : readJson(p.get("--topics-to-move-json-file")).getAsJsonArray("topics")) {
+                    topics.add(e.getAsJsonObject().get("topic").getAsString());
+                }
+                List<Integer> brokers = new ArrayList<>();
+                for (String s : p.get("--broker-list").split(",")) {
+                    brokers.add(Integer.parseInt(s.strip()));
+                }
+                Map<TopicPartition, List<Integer>> current = currentAssignment(topics);
+                out.info(I18n.t("kafka.reassign.current"));
+                out.lines(List.of(reassignmentJson(current), ""));
+                out.info(I18n.t("kafka.reassign.proposed"));
+                out.lines(List.of(reassignmentJson(proposeAssignment(current, brokers))));
+            }
+            case "--execute" -> {
+                Map<TopicPartition, List<Integer>> target = reassignmentFile(p.get("--reassignment-json-file"));
+                Set<String> topics = target.keySet().stream().map(TopicPartition::topic).collect(Collectors.toCollection(LinkedHashSet::new));
+                Map<TopicPartition, List<Integer>> current = currentAssignment(topics);
+                Map<TopicPartition, List<Integer>> rollback = new LinkedHashMap<>();
+                target.keySet().forEach(tp -> {
+                    if (!current.containsKey(tp)) {
+                        throw new UsageException(I18n.t("kafka.err.noPartition", tp));
+                    }
+                    rollback.put(tp, current.get(tp));
+                });
+                out.info(I18n.t("kafka.reassign.rollback"));
+                out.lines(List.of(reassignmentJson(rollback), ""));
+                Map<TopicPartition, Optional<org.apache.kafka.clients.admin.NewPartitionReassignment>> req = new LinkedHashMap<>();
+                target.forEach((tp, r) -> req.put(tp, Optional.of(new org.apache.kafka.clients.admin.NewPartitionReassignment(r))));
+                List<List<String>> rows = new ArrayList<>();
+                for (var e : admin().alterPartitionReassignments(req).values().entrySet()) {
+                    rows.add(List.of(e.getKey().topic(), String.valueOf(e.getKey().partition()),
+                            String.valueOf(target.get(e.getKey())), outcome(e.getValue(), I18n.t("kafka.reassign.started"))));
+                }
+                out.table(List.of("topic", "partition", "replicas", I18n.t("common.result")), rows);
+            }
+            case "--verify" -> {
+                Map<TopicPartition, List<Integer>> target = reassignmentFile(p.get("--reassignment-json-file"));
+                var running = admin().listPartitionReassignments(target.keySet()).reassignments().get();
+                Map<TopicPartition, List<Integer>> current = currentAssignment(
+                        target.keySet().stream().map(TopicPartition::topic).collect(Collectors.toCollection(LinkedHashSet::new)));
+                List<List<String>> rows = new ArrayList<>();
+                target.forEach((tp, r) -> {
+                    String status = running.containsKey(tp) ? I18n.t("kafka.reassign.inProgress")
+                            : r.equals(current.get(tp)) ? I18n.t("kafka.reassign.done")
+                            : I18n.t("kafka.reassign.mismatch", current.get(tp));
+                    rows.add(List.of(tp.topic(), String.valueOf(tp.partition()), String.valueOf(r), status));
+                });
+                out.table(List.of("topic", "partition", "replicas", I18n.t("common.status")), rows);
+            }
+            case "--cancel" -> {
+                Map<TopicPartition, List<Integer>> target = reassignmentFile(p.get("--reassignment-json-file"));
+                var running = admin().listPartitionReassignments(target.keySet()).reassignments().get();
+                Map<TopicPartition, Optional<org.apache.kafka.clients.admin.NewPartitionReassignment>> req = new LinkedHashMap<>();
+                target.keySet().stream().filter(running::containsKey).forEach(tp -> req.put(tp, Optional.empty()));
+                if (req.isEmpty()) {
+                    out.info(I18n.t("kafka.reassign.nothingToCancel"));
+                    return;
+                }
+                List<List<String>> rows = new ArrayList<>();
+                for (var e : admin().alterPartitionReassignments(req).values().entrySet()) {
+                    rows.add(List.of(e.getKey().topic(), String.valueOf(e.getKey().partition()),
+                            outcome(e.getValue(), I18n.t("kafka.reassign.cancelled"))));
+                }
+                out.table(List.of("topic", "partition", I18n.t("common.result")), rows);
+            }
+            case "--list" -> {
+                List<List<String>> rows = new ArrayList<>();
+                for (var e : byPartition(admin().listPartitionReassignments().reassignments().get())) {
+                    rows.add(List.of(e.getKey().topic(), String.valueOf(e.getKey().partition()), String.valueOf(e.getValue().replicas()),
+                            String.valueOf(e.getValue().addingReplicas()), String.valueOf(e.getValue().removingReplicas())));
+                }
+                if (rows.isEmpty()) {
+                    out.info(I18n.t("kafka.reassign.none"));
+                } else {
+                    out.table(List.of("topic", "partition", "replicas", "adding", "removing"), rows);
+                }
+            }
+            default -> throw new UsageException(I18n.t("kafka.err.pickMode", String.join(", ", p.tool().modes())));
+        }
+    }
+
+    /**
+     * Rải replica vòng tròn lên {@code brokers}, mỗi topic bắt đầu lệch 1 broker để leader không dồn vào 1 chỗ; giữ
+     * nguyên số replica của từng partition. Không xét rack.
+     */
+    static Map<TopicPartition, List<Integer>> proposeAssignment(Map<TopicPartition, List<Integer>> current, List<Integer> brokers) {
+        Map<TopicPartition, List<Integer>> out = new LinkedHashMap<>();
+        Map<String, Integer> topicStart = new HashMap<>();
+        int n = brokers.size();
+        current.forEach((tp, replicas) -> {
+            if (replicas.size() > n) {
+                throw new UsageException(I18n.t("kafka.reassign.tooFewBrokers", tp, replicas.size(), n));
+            }
+            int start = topicStart.computeIfAbsent(tp.topic(), t -> topicStart.size() % n);
+            List<Integer> r = new ArrayList<>();
+            for (int j = 0; j < replicas.size(); j++) {
+                r.add(brokers.get((start + tp.partition() + j) % n));
+            }
+            out.put(tp, r);
+        });
+        return out;
+    }
+
+    private static <V> List<Map.Entry<TopicPartition, V>> byPartition(Map<TopicPartition, V> m) {
+        return m.entrySet().stream().sorted(Map.Entry.comparingByKey(
+                java.util.Comparator.comparing(TopicPartition::topic).thenComparingInt(TopicPartition::partition))).toList();
+    }
+
+    private static String outcome(org.apache.kafka.common.KafkaFuture<Void> f, String ok) {
+        try {
+            f.get();
+            return ok;
+        } catch (Exception e) {
+            return "ERROR: " + message(e);
+        }
+    }
+
+    // ================================================================== kafka-leader-election
+
+    private void leaderElection(KafkaArgs.Parsed p) throws Exception {
+        org.apache.kafka.common.ElectionType type;
+        try {
+            type = org.apache.kafka.common.ElectionType.valueOf(p.get("--election-type").toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new UsageException(I18n.t("kafka.err.electionType", p.get("--election-type")));
+        }
+        Set<TopicPartition> partitions = null; // null = mọi partition
+        if (p.has("--path-to-json-file")) {
+            partitions = new LinkedHashSet<>();
+            for (JsonElement e : readJson(p.get("--path-to-json-file")).getAsJsonArray("partitions")) {
+                JsonObject o = e.getAsJsonObject();
+                partitions.add(new TopicPartition(o.get("topic").getAsString(), o.get("partition").getAsInt()));
+            }
+        } else if (p.has("--topic")) {
+            partitions = new LinkedHashSet<>(p.has("--partition")
+                    ? List.of(new TopicPartition(p.get("--topic"), Integer.parseInt(p.get("--partition"))))
+                    : topicPartitions(p.get("--topic")));
+        } else if (p.has("--partition")) {
+            throw new UsageException(I18n.t("kafka.err.partitionNeedsTopic"));
+        }
+        Map<TopicPartition, Optional<Throwable>> result = admin().electLeaders(type, partitions).partitions().get();
+        List<List<String>> rows = new ArrayList<>();
+        for (var e : byPartition(result)) {
+            String r = e.getValue().map(t -> t instanceof org.apache.kafka.common.errors.ElectionNotNeededException
+                    ? I18n.t("kafka.election.notNeeded") : "ERROR: " + message(t)).orElse(I18n.t("kafka.election.done", type));
+            rows.add(List.of(e.getKey().topic(), String.valueOf(e.getKey().partition()), r));
+        }
+        if (rows.isEmpty()) {
+            out.info(I18n.t("kafka.election.nothing"));
+        } else {
+            out.table(List.of("topic", "partition", I18n.t("common.result")), rows);
+        }
+    }
+
+    // ================================================================== kafka-transactions
+
+    private void transactions(KafkaArgs.Parsed p) throws Exception {
+        switch (p.mode()) {
+            case "list" -> {
+                var options = new org.apache.kafka.clients.admin.ListTransactionsOptions();
+                if (p.has("--duration-filter")) {
+                    options.filterOnDuration(Long.parseLong(p.get("--duration-filter")));
+                }
+                List<List<String>> rows = new ArrayList<>();
+                for (var b : new TreeMap<>(admin().listTransactions(options).allByBrokerId().get()).entrySet()) {
+                    for (var t : b.getValue()) {
+                        rows.add(List.of(t.transactionalId(), String.valueOf(b.getKey()), String.valueOf(t.producerId()),
+                                t.state().toString()));
+                    }
+                }
+                rows.sort(java.util.Comparator.comparing(r -> r.get(0)));
+                out.table(List.of("TransactionalId", "Coordinator", "ProducerId", "TransactionState"), rows);
+            }
+            case "describe" -> {
+                String id = p.get("--transactional-id");
+                var d = admin().describeTransactions(List.of(id)).all().get().get(id);
+                long now = System.currentTimeMillis();
+                String start = d.transactionStartTimeMs().isPresent() ? String.valueOf(d.transactionStartTimeMs().getAsLong()) : "None";
+                String duration = d.transactionStartTimeMs().isPresent() ? String.valueOf(now - d.transactionStartTimeMs().getAsLong()) : "None";
+                out.table(List.of("CoordinatorId", "TransactionalId", "ProducerId", "ProducerEpoch", "TransactionState",
+                                "TransactionTimeoutMs", "CurrentTransactionStartTimeMs", "TransactionDurationMs", "TopicPartitions"),
+                        List.of(List.of(String.valueOf(d.coordinatorId()), id, String.valueOf(d.producerId()),
+                                String.valueOf(d.producerEpoch()), d.state().toString(), String.valueOf(d.transactionTimeoutMs()),
+                                start, duration, d.topicPartitions().stream().map(TopicPartition::toString).sorted()
+                                        .collect(Collectors.joining(",")))));
+            }
+            case "describe-producers" -> {
+                TopicPartition tp = new TopicPartition(p.get("--topic"), Integer.parseInt(p.get("--partition")));
+                List<List<String>> rows = new ArrayList<>();
+                for (var s : producers(tp, p.get("--broker-id"))) {
+                    rows.add(List.of(String.valueOf(s.producerId()), String.valueOf(s.producerEpoch()),
+                            s.coordinatorEpoch().isPresent() ? String.valueOf(s.coordinatorEpoch().getAsInt()) : "None",
+                            String.valueOf(s.lastSequence()), String.valueOf(s.lastTimestamp()),
+                            s.currentTransactionStartOffset().isPresent() ? String.valueOf(s.currentTransactionStartOffset().getAsLong()) : "None"));
+                }
+                out.table(List.of("ProducerId", "ProducerEpoch", "LatestCoordinatorEpoch", "LastSequence", "LastTimestamp",
+                        "CurrentTransactionStartOffset"), rows);
+            }
+            case "find-hanging" -> findHanging(p);
+            case "abort" -> {
+                TopicPartition tp = new TopicPartition(p.get("--topic"), Integer.parseInt(p.get("--partition")));
+                org.apache.kafka.clients.admin.AbortTransactionSpec spec;
+                if (p.has("--start-offset")) {
+                    long startOffset = Long.parseLong(p.get("--start-offset"));
+                    var s = producers(tp, null).stream()
+                            .filter(x -> x.currentTransactionStartOffset().orElse(-1) == startOffset).findFirst()
+                            .orElseThrow(() -> new UsageException(I18n.t("kafka.tx.noOpenAt", tp, startOffset)));
+                    spec = new org.apache.kafka.clients.admin.AbortTransactionSpec(tp, s.producerId(), (short) s.producerEpoch(),
+                            s.coordinatorEpoch().orElse(0));
+                } else {
+                    if (!p.has("--producer-epoch") || !p.has("--coordinator-epoch")) {
+                        throw new UsageException(I18n.t("kafka.tx.needEpochs"));
+                    }
+                    spec = new org.apache.kafka.clients.admin.AbortTransactionSpec(tp, Long.parseLong(p.get("--producer-id")),
+                            Short.parseShort(p.get("--producer-epoch")), Integer.parseInt(p.get("--coordinator-epoch")));
+                }
+                admin().abortTransaction(spec).all().get();
+                out.info(I18n.t("kafka.tx.aborted", spec.producerId(), tp));
+            }
+            default -> throw new UsageException(I18n.t("kafka.err.pickMode", String.join(", ", p.tool().modes())));
+        }
+    }
+
+    private List<org.apache.kafka.clients.admin.ProducerState> producers(TopicPartition tp, String brokerId) throws Exception {
+        var options = new org.apache.kafka.clients.admin.DescribeProducersOptions();
+        if (brokerId != null) {
+            options.brokerId(Integer.parseInt(brokerId));
+        }
+        return admin().describeProducers(List.of(tp), options).partitionResult(tp).get().activeProducers();
+    }
+
+    /**
+     * Như tool gốc: transaction đang mở trên partition lâu hơn --max-transaction-timeout mà coordinator không còn coi
+     * là đang chạy trên partition đó (transactional id không còn, đã sang transaction khác, hoặc không chứa partition)
+     * thì là treo - nó chặn consumer read_committed ở mãi offset bắt đầu. Huỷ bằng: abort --start-offset.
+     */
+    private void findHanging(KafkaArgs.Parsed p) throws Exception {
+        long maxMs = Long.parseLong(p.has("--max-transaction-timeout") ? p.get("--max-transaction-timeout") : "15") * 60_000;
+        List<TopicPartition> partitions = new ArrayList<>();
+        String broker = p.get("--broker-id");
+        if (p.has("--topic")) {
+            partitions.addAll(p.has("--partition")
+                    ? List.of(new TopicPartition(p.get("--topic"), Integer.parseInt(p.get("--partition"))))
+                    : topicPartitions(p.get("--topic")));
+        } else {
+            int id = Integer.parseInt(broker);
+            for (var d : admin().describeTopics(matchTopics(null, false)).allTopicNames().get().values()) {
+                for (TopicPartitionInfo pi : d.partitions()) {
+                    if (pi.replicas().stream().anyMatch(n -> n.id() == id)) {
+                        partitions.add(new TopicPartition(d.name(), pi.partition()));
+                    }
+                }
+            }
+        }
+        var options = new org.apache.kafka.clients.admin.DescribeProducersOptions();
+        if (broker != null) {
+            options.brokerId(Integer.parseInt(broker));
+        }
+        long now = System.currentTimeMillis();
+        record Open(TopicPartition tp, org.apache.kafka.clients.admin.ProducerState s) {
+        }
+        List<Open> candidates = new ArrayList<>();
+        for (var e : admin().describeProducers(partitions, options).all().get().entrySet()) {
+            for (var s : e.getValue().activeProducers()) {
+                if (s.currentTransactionStartOffset().isPresent() && now - s.lastTimestamp() > maxMs) {
+                    candidates.add(new Open(e.getKey(), s));
+                }
+            }
+        }
+        Map<Long, org.apache.kafka.clients.admin.TransactionDescription> byProducer = new HashMap<>();
+        if (!candidates.isEmpty()) {
+            Set<Long> ids = candidates.stream().map(c -> c.s().producerId()).collect(Collectors.toSet());
+            List<String> txIds = admin().listTransactions(new org.apache.kafka.clients.admin.ListTransactionsOptions()
+                    .filterProducerIds(ids)).all().get().stream().map(org.apache.kafka.clients.admin.TransactionListing::transactionalId).toList();
+            if (!txIds.isEmpty()) {
+                admin().describeTransactions(txIds).all().get().values().forEach(d -> byProducer.put(d.producerId(), d));
+            }
+        }
+        List<List<String>> rows = new ArrayList<>();
+        for (Open c : candidates) {
+            var d = byProducer.get(c.s().producerId());
+            boolean stillRunning = d != null && d.producerEpoch() == c.s().producerEpoch()
+                    && d.state() == org.apache.kafka.clients.admin.TransactionState.ONGOING && d.topicPartitions().contains(c.tp());
+            if (stillRunning) {
+                continue;
+            }
+            rows.add(List.of(c.tp().topic(), String.valueOf(c.tp().partition()), String.valueOf(c.s().producerId()),
+                    String.valueOf(c.s().producerEpoch()),
+                    c.s().coordinatorEpoch().isPresent() ? String.valueOf(c.s().coordinatorEpoch().getAsInt()) : "None",
+                    String.valueOf(c.s().currentTransactionStartOffset().getAsLong()), String.valueOf(c.s().lastTimestamp()),
+                    String.valueOf((now - c.s().lastTimestamp()) / 60_000)));
+        }
+        if (rows.isEmpty()) {
+            out.info(I18n.t("kafka.tx.noHanging", partitions.size()));
+        } else {
+            out.table(List.of("Topic", "Partition", "ProducerId", "ProducerEpoch", "CoordinatorEpoch", "StartOffset",
+                    "LastTimestamp", "Duration(min)"), rows);
+        }
     }
 
     // ================================================================== kafka-metadata-quorum

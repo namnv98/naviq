@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class KafkaArgsTest {
@@ -106,5 +107,16 @@ class KafkaArgsTest {
     void thờiĐiểmCóVàKhôngCóMúiGiờ() {
         assertEquals(0L, KafkaCommands.parseDatetime("1970-01-01T00:00:00Z"));
         assertEquals(1000L, KafkaCommands.parseDatetime("1970-01-01T07:00:01+07:00"));
+    }
+
+    @Test
+    void đềXuấtPhânBổReplicaVòngTròn() {
+        var current = new java.util.LinkedHashMap<org.apache.kafka.common.TopicPartition, List<Integer>>();
+        current.put(new org.apache.kafka.common.TopicPartition("a", 0), List.of(1, 2));
+        current.put(new org.apache.kafka.common.TopicPartition("a", 1), List.of(1, 2));
+        current.put(new org.apache.kafka.common.TopicPartition("b", 0), List.of(3, 1));
+        var proposed = KafkaCommands.proposeAssignment(current, List.of(4, 5, 6));
+        assertEquals(List.of(List.of(4, 5), List.of(5, 6), List.of(5, 6)), List.copyOf(proposed.values()));
+        assertThrows(KafkaCommands.UsageException.class, () -> KafkaCommands.proposeAssignment(current, List.of(4)));
     }
 }

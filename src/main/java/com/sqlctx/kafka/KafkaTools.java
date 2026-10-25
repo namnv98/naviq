@@ -199,7 +199,7 @@ public final class KafkaTools {
             t.put(consumer.name, consumer.build());
         }
 
-        for (String flavor : List.of("", "avro", "json-schema")) {
+        for (String flavor : List.of("", "avro", "json-schema", "protobuf")) {
             String producerName = flavor.isEmpty() ? "kafka-console-producer" : "kafka-" + flavor + "-console-producer";
             B producer = new B(producerName, flavor.isEmpty() ? "Ghi message vào topic (mỗi dòng 1 message, Ctrl+D để dừng)"
                     : "Ghi message " + flavor + " qua Schema Registry, mỗi dòng 1 JSON (tool của Confluent)")
@@ -335,6 +335,71 @@ public final class KafkaTools {
                 .value("--broker-list", "string", "1,2", "chỉ các broker này");
         t.put(logDirs.name, logDirs.build());
 
+        B reassign = new B("kafka-reassign-partitions", "Chuyển replica của partition sang broker khác")
+                .mode("--generate", "đề xuất cách phân bổ replica lên các broker cho trước (chỉ in ra)")
+                .mode("--execute", "bắt đầu chuyển theo file JSON")
+                .mode("--verify", "kiểm tra đã chuyển xong chưa")
+                .mode("--cancel", "huỷ các lần chuyển đang chạy trong file JSON")
+                .mode("--list", "các lần chuyển đang chạy")
+                .connection()
+                .value("--topics-to-move-json-file", "file", "file", "{\"topics\":[{\"topic\":\"t\"}],\"version\":1}",
+                        "--generate")
+                .value("--broker-list", "string", "1,2,3", "các broker nhận replica", "--generate")
+                .value("--reassignment-json-file", "file", "file",
+                        "{\"partitions\":[{\"topic\":\"t\",\"partition\":0,\"replicas\":[1,2]}],\"version\":1}",
+                        "--execute", "--verify", "--cancel")
+                .flag("--disable-rack-aware", "bỏ qua - đề xuất không xét rack", "--generate")
+                .value("--throttle", "long", "bytes/s", "bỏ qua - sqlctx không đặt throttle", "--execute")
+                .value("--replica-alter-log-dirs-throttle", "long", "bytes/s", "bỏ qua - sqlctx không đặt throttle", "--execute")
+                .flag("--additional", "bỏ qua - luôn cho chạy thêm khi đang có lần chuyển khác", "--execute")
+                .flag("--preserve-throttles", "bỏ qua - sqlctx không đặt throttle", "--verify", "--cancel")
+                .value("--timeout", "int", "ms", "thời gian chờ broker")
+                .requires("--generate", one("--topics-to-move-json-file"), one("--broker-list"))
+                .requires("--execute", one("--reassignment-json-file"))
+                .requires("--verify", one("--reassignment-json-file"))
+                .requires("--cancel", one("--reassignment-json-file"))
+                .writes("--execute", "--cancel")
+                .dangerous("--execute", "--cancel");
+        t.put(reassign.name, reassign.build());
+
+        B election = new B("kafka-leader-election", "Bầu lại leader cho partition (preferred hoặc unclean)")
+                .connection()
+                .value("--election-type", "electionType", "type", "PREFERRED: về replica ưu tiên; UNCLEAN: cho replica ngoài ISR làm leader")
+                .value("--topic", "topic", "topic", "topic cần bầu lại leader")
+                .value("--partition", "partition", "n", "partition (cần --topic)")
+                .flag("--all-topic-partitions", "mọi partition của mọi topic")
+                .value("--path-to-json-file", "file", "file", "{\"partitions\":[{\"topic\":\"t\",\"partition\":0}]}")
+                .requires("", one("--election-type"), one("--topic", "--all-topic-partitions", "--path-to-json-file"))
+                .writes("*");
+        t.put(election.name, election.build());
+
+        B tx = new B("kafka-transactions", "Xem, huỷ transaction của producer; tìm transaction bị treo")
+                .mode("list", "liệt kê transactional id")
+                .mode("describe", "trạng thái 1 transaction")
+                .mode("describe-producers", "producer đang ghi vào 1 partition")
+                .mode("find-hanging", "transaction mở quá lâu trên partition (treo, chặn read_committed)")
+                .mode("abort", "huỷ transaction đang mở trên 1 partition")
+                .connection()
+                .value("--transactional-id", "string", "id", "transactional id", "describe")
+                .value("--duration-filter", "long", "ms", "chỉ transaction chạy lâu hơn (ms)", "list")
+                .value("--topic", "topic", "topic", "topic", "describe-producers", "find-hanging", "abort")
+                .value("--partition", "partition", "n", "partition", "describe-producers", "find-hanging", "abort")
+                .value("--broker-id", "broker", "id", "broker (describe-producers: hỏi replica này thay vì leader; "
+                        + "find-hanging: mọi partition của broker)", "describe-producers", "find-hanging")
+                .value("--max-transaction-timeout", "int", "phút", "mở lâu hơn chừng này phút là treo (mặc định 15)",
+                        "find-hanging")
+                .value("--start-offset", "long", "offset", "offset bắt đầu của transaction cần huỷ", "abort")
+                .value("--producer-id", "long", "id", "producer id (thay cho --start-offset)", "abort")
+                .value("--producer-epoch", "int", "epoch", "producer epoch", "abort")
+                .value("--coordinator-epoch", "int", "epoch", "coordinator epoch", "abort")
+                .requires("describe", one("--transactional-id"))
+                .requires("describe-producers", one("--topic"), one("--partition"))
+                .requires("find-hanging", one("--topic", "--broker-id"))
+                .requires("abort", one("--topic"), one("--partition"), one("--start-offset", "--producer-id"))
+                .writes("abort")
+                .dangerous("abort");
+        t.put(tx.name, tx.build());
+
         B cluster = new B("kafka-cluster", "Thông tin cluster")
                 .mode("cluster-id", "id của cluster")
                 .connection();
@@ -405,6 +470,8 @@ public final class KafkaTools {
             Map.entry("groupState", List.of(new String[]{"Stable", null}, new String[]{"Empty", null},
                     new String[]{"PreparingRebalance", null}, new String[]{"CompletingRebalance", null},
                     new String[]{"Dead", null})),
+            Map.entry("electionType", List.of(new String[]{"PREFERRED", "về replica ưu tiên (replica đầu tiên)"},
+                    new String[]{"UNCLEAN", "cho replica ngoài ISR làm leader - có thể mất dữ liệu"})),
             Map.entry("schemaType", List.of(new String[]{"AVRO", null}, new String[]{"JSON", null},
                     new String[]{"PROTOBUF", null})),
             Map.entry("compatLevel", List.of(new String[]{"BACKWARD", null}, new String[]{"BACKWARD_TRANSITIVE", null},
@@ -428,7 +495,9 @@ public final class KafkaTools {
             Map.entry("srProducerProperty", properties("value.schema=", "schema của value (JSON)",
                     "value.schema.id=", "dùng schema đã đăng ký", "value.schema.file=", "đọc schema từ file",
                     "key.schema=", "schema của key", "parse.key=true", "dòng có key: key<tab>value",
-                    "key.separator=", "giữa key và value (mặc định tab)", "schema.registry.url=", "mặc định lấy từ context")));
+                    "key.separator=", "giữa key và value (mặc định tab)", "schema.registry.url=", "mặc định lấy từ context",
+                    "value.message=", "protobuf: message dùng cho value (mặc định message đầu tiên)",
+                    "key.message=", "protobuf: message dùng cho key")));
 
     /** Cho test (I18nTest): mọi mô tả giá trị cố định đều phải có bản tiếng Anh. */
     public static final Map<String, List<String[]>> ENUMS_FOR_TEST = ENUMS;
