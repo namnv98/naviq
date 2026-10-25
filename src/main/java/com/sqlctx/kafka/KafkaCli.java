@@ -6,6 +6,7 @@ import com.sqlctx.cli.startup.StartupBanner;
 import com.sqlctx.cli.view.DataViewTable;
 import com.sqlctx.datasource.ConnectionProfileStore;
 import com.sqlctx.shell.CompletionMenu;
+import com.sqlctx.shell.LiveView;
 import com.sqlctx.shell.MenuItem;
 import com.sqlctx.shell.ShellReader;
 import com.sqlctx.shell.ShellStatusBar;
@@ -524,6 +525,57 @@ public final class KafkaCli {
 
     // ===================================================================== lệnh \
 
+    /**
+     * Tình trạng cluster, vẽ lại mỗi {@code arg} giây (mặc định 5) tới khi Ctrl+C. Batch: lấy mẫu 2 lần cách 1 giây để
+     * có tốc độ, in 1 lần.
+     */
+    private boolean stats(String arg) {
+        long seconds;
+        try {
+            seconds = arg == null ? 5 : Math.max(1, Long.parseLong(arg));
+        } catch (NumberFormatException e) {
+            println(RED + I18n.t("common.usage", "\\stats [SECONDS]") + RESET);
+            return false;
+        }
+        String name = session.profile.name();
+        session.cancelled = false;
+        session.running = true;
+        Thread main = Thread.currentThread();
+        session.onCancel = main::interrupt;
+        try {
+            if (batch) {
+                KafkaStats.Sample first = KafkaStats.sample(session.admin());
+                Thread.sleep(1000);
+                KafkaStats.Sample second = KafkaStats.sample(session.admin());
+                DataViewTable.printPlainStatic(terminal, KafkaStats.frame(KafkaStats.title(name, second, seconds, false),
+                        first, second, terminal.getWidth()));
+                return true;
+            }
+            setStatus("STATS · " + I18n.t("common.ctrlcToStop"));
+            KafkaStats.Sample[] prev = {null};
+            LiveView.run(terminal, seconds * 1000, () -> session.cancelled, () -> {
+                KafkaStats.Sample cur = KafkaStats.sample(session.admin());
+                List<String> frame = KafkaStats.frame(KafkaStats.title(name, cur, seconds, true), prev[0], cur, terminal.getWidth());
+                prev[0] = cur;
+                return frame;
+            });
+            return true;
+        } catch (InterruptedException e) {
+            return true;
+        } catch (Exception e) {
+            if (session.cancelled) {
+                return true;
+            }
+            println(RED + "(error) " + KafkaCommands.message(e) + RESET);
+            return false;
+        } finally {
+            session.running = false;
+            session.onCancel = null;
+            Thread.interrupted();
+            setStatus("idle");
+        }
+    }
+
     private boolean meta(String line) {
         String[] parts = line.split("\\s+", 3);
         String cmd = parts[0];
@@ -545,6 +597,9 @@ public final class KafkaCli {
             }
             case "\\ctx", "\\context" -> {
                 return context(arg, parts.length > 2 ? parts[2] : null);
+            }
+            case "\\stats" -> {
+                return stats(arg);
             }
             case "\\brokers" -> {
                 try {

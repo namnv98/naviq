@@ -81,6 +81,15 @@ public class DataViewTable {
         terminal.writer().flush();
     }
 
+    /** Bảng có khung dưới dạng chuỗi (đã tô màu), cột co lại cho vừa {@code width} (<= 0: không giới hạn) - cho màn hình tự làm mới (\\stats). */
+    public static String renderFit(List<String> columns, List<List<String>> rows, int width) {
+        int[] widths = calcWidths(columns, rows, DEFAULT_MAX_FIELD_WIDTH);
+        if (width > 0 && calcTableWidth(widths) > width) {
+            widths = truncateWidths(widths, width);
+        }
+        return render(columns, rows, widths);
+    }
+
     /**
      * terminal.getWidth() trả về 0 khi stdout không phải TTY thật (bị pipe/redirect ra file - đúng tình
      * huống của chế độ batch --file/--command) - không có gì để "vừa khít" cả, nên KHÔNG cắt bớt cột gì

@@ -44,6 +44,7 @@ public final class KafkaCompletion {
     static final List<String[]> META = List.of(
             new String[]{"\\ctx", "kafka.meta.ctx"},
             new String[]{"\\brokers", "kafka.meta.brokers"},
+            new String[]{"\\stats", "kafka.meta.stats"},
             new String[]{"\\h", "kafka.meta.h"},
             new String[]{"\\i", "kafka.meta.i"},
             new String[]{"\\lang", "meta.lang"},

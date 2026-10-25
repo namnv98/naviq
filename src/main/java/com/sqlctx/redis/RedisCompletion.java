@@ -60,6 +60,7 @@ public final class RedisCompletion {
             new String[]{"\\h", "redis.meta.h"},
             new String[]{"\\i", "redis.meta.i"},
             new String[]{"\\o", "redis.meta.o"},
+            new String[]{"\\stats", "redis.meta.stats"},
             new String[]{"\\lang", "meta.lang"},
             new String[]{"\\q", "redis.meta.q"});
 

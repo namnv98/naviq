@@ -75,6 +75,11 @@ final class RedisConnection implements Closeable {
         return cluster;
     }
 
+    /** Profile của node đang nối (sentinel: của master đã hỏi ra). */
+    RedisProfile profile() {
+        return profile;
+    }
+
     /** host:port của node đang chạy lệnh. */
     String address() {
         return currentAddress;
@@ -261,6 +266,41 @@ final class RedisConnection implements Closeable {
             out.add(normalize(f[1].split("@")[0].split(",")[0]));
         }
         return out.isEmpty() ? List.of(currentAddress) : out;
+    }
+
+    /** 1 dòng của CLUSTER NODES. {@code masterId}: node mà replica này sao chép ("-" nếu là master). */
+    record ClusterNode(String id, String address, boolean master, String masterId, boolean failed, String slots) {
+    }
+
+    /** Mọi node (master lẫn replica) theo CLUSTER NODES; rỗng nếu không phải cluster. */
+    List<ClusterNode> clusterNodes() throws IOException {
+        List<ClusterNode> out = new ArrayList<>();
+        if (!cluster || !(call("CLUSTER", "NODES") instanceof RespClient.Bulk b)) {
+            return out;
+        }
+        for (String line : b.utf8().split("\n")) {
+            String[] f = line.strip().split(" ");
+            if (f.length < 8) {
+                continue;
+            }
+            StringBuilder slots = new StringBuilder();
+            for (int i = 8; i < f.length; i++) {
+                slots.append(slots.isEmpty() ? "" : " ").append(f[i]);
+            }
+            out.add(new ClusterNode(f[0], normalize(f[1].split("@")[0].split(",")[0]), f[2].contains("master"), f[3],
+                    f[2].contains("fail") && !f[2].contains("fail?"), slots.toString()));
+        }
+        out.sort(java.util.Comparator.comparing(ClusterNode::address));
+        return out;
+    }
+
+    /** Chạy lệnh ở đúng 1 node (INFO của từng node), không theo MOVED. */
+    Object callOn(String address, String... args) throws IOException {
+        List<byte[]> raw = new ArrayList<>(args.length);
+        for (String a : args) {
+            raw.add(a.getBytes(StandardCharsets.UTF_8));
+        }
+        return node(address).call(raw);
     }
 
     record ScanResult(List<String> keys, boolean complete, String error) {

@@ -117,7 +117,7 @@ Gõ lệnh như redis-cli. Popup gợi ý tự hiện khi gõ, giống phía SQL
 \c N                      đổi DB              \d KEY          chi tiết + xem trước
 \l                        DB đang có key      \h [LỆNH]       cú pháp lệnh
 \i FILE                   chạy file lệnh      \o [FILE]       xuất kết quả (.csv/.json/text)
-\q                        thoát
+\stats [GIÂY]             chỉ số từng node    \q              thoát
 ```
 
 `HGETALL`, `CONFIG GET`, `ZRANGE ... WITHSCORES`, `XRANGE` hiện thành bảng. `FLUSHALL`, `DEL`, `KEYS`... hỏi `[y/N]` (batch cần `--yes`); context `readonly` chặn mọi lệnh ghi và lệnh lạ. Ctrl+C dừng `BLPOP`, `SUBSCRIBE`, `MONITOR` rồi tự nối lại.
@@ -152,6 +152,10 @@ Gõ lệnh như các tool `kafka-*.sh` của Kafka 3.9; `--bootstrap-server`/`--
 | `schema-registry` | `--list --versions --describe --register --delete --compatibility --id` (không phải tool có thật: Schema Registry chỉ có REST) |
 
 Khác tool gốc có chủ đích: consumer không `--group` đọc bằng `assign()` (không tạo group rác); consumer có `--group` chỉ commit tới message đã in (`--max-messages` không làm mất message đã lấy về mà chưa in); byte không phải UTF-8 in dạng `\xNN`; `kafka-consumer-groups --describe` hiện cả partition group chưa từng commit (CURRENT-OFFSET `-`, LAG tính từ offset đầu) - tool gốc bỏ qua chúng nên tổng lag trông nhỏ hơn thật. `--delete`, `--reset-offsets --execute`, `kafka-acls --remove`, `kafka-delete-records`... hỏi `[y/N]` (batch cần `--yes`). `\h TOOL` xem tuỳ chọn, `\brokers` xem broker. Dữ liệu mẫu: `seed/kafka.sh`.
+
+`\stats [GIÂY]` (cả Redis lẫn Kafka) là màn hình theo dõi tự làm mới kiểu `top` (mặc định 2s với Redis, 5s với Kafka; Ctrl+C để dừng; chạy batch thì in 1 lần), kèm cảnh báo đỏ/vàng:
+- Redis: mỗi node một dòng (cluster: mọi master và replica; server đơn/sentinel: master và replica của nó): ops/s, kB/s vào/ra, bộ nhớ/maxmemory, phân mảnh, client, hit rate, số key, evict. Cảnh báo: cluster_state khác ok, node lỗi, sắp đầy maxmemory hoặc không đặt maxmemory, đang evict, từ chối kết nối, lưu RDB/AOF lỗi, replica mất kết nối, master không có replica.
+- Kafka: broker (leader, replica, đĩa), số partition thiếu replica/mất leader, quorum, topic ghi nhiều nhất và group lag nhiều nhất. Tốc độ ghi/đọc (msg/s) tính từ chênh lệch offset giữa 2 lần làm mới, vì Admin API không có số liệu JMX. Cảnh báo: partition mất leader, thiếu replica, đĩa ≥ 80%, topic chỉ 1 replica, lag đang tăng, có lag mà không có consumer.
 
 ## Format
 
