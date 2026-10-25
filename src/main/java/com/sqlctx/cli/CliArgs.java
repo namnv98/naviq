@@ -20,7 +20,8 @@ public final class CliArgs {
     /** Tuỳ chọn có giá trị. */
     static final Set<String> VALUE_OPTIONS = Set.of("context", "host", "port", "dbname", "user", "password", "dialect",
             "command", "file", "lang", "sslmode", "sslrootcert", "sslcert", "sslkey", "sslpassword", "sslwallet",
-            "sslserverdnmatch", "keyword-case", "indent", "bootstrap-server", "bootstrap", "schema-registry");
+            "sslserverdnmatch", "keyword-case", "indent", "bootstrap-server", "bootstrap", "schema-registry",
+            "sentinel-master", "sentinel-password");
     /** Đúng/sai: "--readonly" trống là true, "--readonly false" / "--readonly=false" thì như viết. */
     static final Set<String> BOOLEAN_OPTIONS = Set.of("readonly", "tls", "ssl");
     /** Cờ không có giá trị (đọc thẳng từ args ở nơi dùng). */

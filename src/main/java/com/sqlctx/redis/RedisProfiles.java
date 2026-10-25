@@ -23,6 +23,9 @@ import java.util.Optional;
  * password=x
  * tls=false
  * readonly=false
+ * # Sentinel: host/port là của sentinel
+ * sentinel-master=mymaster
+ * sentinel-password=x
  * </pre>
  * Không ghi chung connections.conf: ConnectionProfileStore.save() viết lại cả file theo enum Dialect (chỉ có
  * POSTGRES/ORACLE), lưu 1 context SQL sẽ biến mọi section Redis thành "dialect=postgres".
@@ -94,6 +97,12 @@ public final class RedisProfiles {
                 sb.append("password=").append(p.password()).append('\n');
             }
             sb.append("tls=").append(p.tls()).append('\n');
+            if (p.sentinelMaster() != null) {
+                sb.append("sentinel-master=").append(p.sentinelMaster()).append('\n');
+            }
+            if (p.sentinelPassword() != null && !p.sentinelPassword().isEmpty()) {
+                sb.append("sentinel-password=").append(p.sentinelPassword()).append('\n');
+            }
             sb.append("readonly=").append(p.readonly()).append("\n\n");
         }
         Path file = file();
@@ -114,7 +123,9 @@ public final class RedisProfiles {
                 f.get("password"),
                 parseInt(f.get("db"), 0),
                 Boolean.parseBoolean(f.get("tls")),
-                Boolean.parseBoolean(f.get("readonly")));
+                Boolean.parseBoolean(f.get("readonly")),
+                f.get("sentinel-master"),
+                f.get("sentinel-password"));
     }
 
     static int parseInt(String s, int fallback) {

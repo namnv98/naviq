@@ -64,6 +64,54 @@ services:
       timeout: 5s
       retries: 10
 
+  # Redis Cluster 3 master trong 1 container (chỉ chạy khi gọi: docker compose --profile redis-cluster up -d).
+  # Node tự báo địa chỉ 127.0.0.1:700x và cổng ngoài = cổng trong, nên MOVED/ASK từ máy host nối thẳng được.
+  # sqlctx --dialect=redis --host=127.0.0.1 --port=7001 --password=Redis123
+  redis-cluster:
+    image: redis:7.4
+    container_name: sqlctx-redis-cluster
+    profiles: ["redis-cluster"]
+    restart: unless-stopped
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        for p in 7001 7002 7003; do
+          redis-server --port $$p --cluster-enabled yes --cluster-config-file /tmp/nodes-$$p.conf \
+            --cluster-announce-ip 127.0.0.1 --requirepass Redis123 --masterauth Redis123 --daemonize yes
+        done
+        sleep 1
+        redis-cli -a Redis123 --no-auth-warning --cluster create 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 --cluster-yes
+        exec tail -f /dev/null
+    ports:
+      - "7001:7001"
+      - "7002:7002"
+      - "7003:7003"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p 7001 -a Redis123 --no-auth-warning cluster info | grep -q cluster_state:ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Master 6390 + replica 6391 + 1 sentinel 26390 theo dõi "mymaster" (docker compose --profile redis-sentinel up -d).
+  # sqlctx --dialect=redis --host=127.0.0.1 --port=26390 --sentinel-master=mymaster --password=Redis123
+  # Thử failover: redis-cli -p 26390 SENTINEL FAILOVER mymaster, rồi \c lại trong sqlctx.
+  redis-sentinel:
+    image: redis:7.4
+    container_name: sqlctx-redis-sentinel
+    profiles: ["redis-sentinel"]
+    restart: unless-stopped
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        redis-server --port 6390 --requirepass Redis123 --masterauth Redis123 --daemonize yes
+        redis-server --port 6391 --requirepass Redis123 --masterauth Redis123 --replicaof 127.0.0.1 6390 --daemonize yes
+        printf 'port 26390\nsentinel monitor mymaster 127.0.0.1 6390 1\nsentinel auth-pass mymaster Redis123\nsentinel down-after-milliseconds mymaster 3000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf
+        exec redis-sentinel /tmp/sentinel.conf
+    ports:
+      - "6390:6390"
+      - "6391:6391"
+      - "26390:26390"
+
   # Kafka 3.8 KRaft 1 node (broker + controller), không cần ZooKeeper. Máy dev có sẵn container "kafka" ở 9092
   # nên dùng 19092. Bật StandardAuthorizer để thử được kafka-acls; ANONYMOUS (PLAINTEXT) là super user nên mọi
   # thao tác khác vẫn chạy như không có ACL.

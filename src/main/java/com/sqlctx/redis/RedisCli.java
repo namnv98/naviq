@@ -2,6 +2,7 @@ package com.sqlctx.redis;
 
 import com.sqlctx.util.I18n;
 
+import com.sqlctx.cli.command.ResultExporter;
 import com.sqlctx.cli.startup.StartupBanner;
 import com.sqlctx.cli.view.DataViewTable;
 import com.sqlctx.datasource.ConnectionProfileStore;
@@ -138,7 +139,10 @@ public final class RedisCli {
         System.exit(0);
     }
 
-    /** --context= (đã lưu) và/hoặc --host= --port= --user= --password= --dbname= (số DB) --tls=true --readonly=true. */
+    /**
+     * --context= (đã lưu) và/hoặc --host= --port= --user= --password= --dbname= (số DB) --tls=true --readonly=true
+     * --sentinel-master= (host/port là của sentinel) --sentinel-password=.
+     */
     static RedisProfile resolveProfile() throws IOException {
         String context = System.getProperty("DB_CONTEXT");
         if (context == null && System.getProperty("DB_HOST") == null) {
@@ -146,7 +150,7 @@ public final class RedisCli {
         }
         Optional<RedisProfile> saved = context == null ? Optional.empty() : RedisProfiles.find(context);
         boolean overrides = Arrays.asList("DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_DBNAME", "DB_TLS",
-                "DB_READONLY").stream().anyMatch(k -> System.getProperty(k) != null);
+                "DB_READONLY", "DB_SENTINEL-MASTER", "DB_SENTINEL-PASSWORD").stream().anyMatch(k -> System.getProperty(k) != null);
         if (context != null && saved.isEmpty() && System.getProperty("DB_HOST") == null) {
             throw new IllegalArgumentException(I18n.t("redis.err.noContext", context, RedisProfiles.file()));
         }
@@ -160,8 +164,11 @@ public final class RedisCli {
                 : base != null && base.tls();
         boolean readonly = System.getProperty("DB_READONLY") != null
                 ? Boolean.parseBoolean(System.getProperty("DB_READONLY")) : base != null && base.readonly();
+        String sentinelMaster = System.getProperty("DB_SENTINEL-MASTER", base != null ? base.sentinelMaster() : null);
+        String sentinelPassword = System.getProperty("DB_SENTINEL-PASSWORD", base != null ? base.sentinelPassword() : null);
         String name = context != null ? context : host + ":" + port;
-        RedisProfile profile = new RedisProfile(name, host, port, user, password, db, tls, readonly);
+        RedisProfile profile = new RedisProfile(name, host, port, user, password, db, tls, readonly,
+                sentinelMaster == null || sentinelMaster.isEmpty() ? null : sentinelMaster, sentinelPassword);
         if (context != null && (saved.isEmpty() || overrides)) {
             RedisProfiles.save(profile);
         }
@@ -248,7 +255,8 @@ public final class RedisCli {
     private String prompt() {
         RedisProfile p = session.profile();
         String tx = session.inTransaction ? YELLOW + "(TX)" + RESET : "";
-        return CYAN + p.name() + RESET + DIM + "[" + p.db() + "]" + RESET + tx + "> ";
+        String where = session.main().cluster() ? session.main().address() : String.valueOf(p.db()); // cluster chỉ có db 0
+        return CYAN + p.name() + RESET + DIM + "[" + where + "]" + RESET + tx + "> ";
     }
 
     private String info() {
@@ -262,6 +270,7 @@ public final class RedisCli {
         RedisProfile p = session.profile();
         String text = TITLE + I18n.t("redis.banner.title") + RESET + "\n\n"
                 + StartupBanner.label("banner.connected") + GREEN + p.label() + RESET
+                + (p.sentinelMaster() != null || session.main().cluster() ? " → " + session.main().address() : "")
                 + (p.readonly() ? YELLOW + I18n.t("common.readonlyBanner") + RESET : "") + "\n"
                 + StartupBanner.label("banner.config") + RedisProfiles.file() + "\n"
                 + StartupBanner.label("banner.server") + server.getOrDefault("redis_version", "?")
@@ -269,6 +278,7 @@ public final class RedisCli {
                 + StartupBanner.label("banner.keys") + I18n.t("banner.keysValue", dbsize instanceof Long n ? n : "?", p.db()) + "\n"
                 + StartupBanner.label("banner.commands") + I18n.t("banner.commandsValue", RedisCommandTree.current().commands().size(),
                 RedisCommandTree.current().source()) + "\n\n"
+                + (session.main().cluster() ? DIM + I18n.t("redis.banner.cluster") + RESET + "\n" : "")
                 + DIM + I18n.t("redis.banner.tip") + RESET + "\n";
         reader.printAbove(text);
     }
@@ -386,7 +396,7 @@ public final class RedisCli {
         if (ok) {
             track(cmd, words, reply);
         }
-        print(RedisReplyRenderer.render(words, reply));
+        show(RedisReplyRenderer.render(words, reply), reply);
         if (!batch) {
             println(DIM + String.format("(%.3fs)", seconds) + RESET);
         }
@@ -533,6 +543,9 @@ public final class RedisCli {
             case "\\tail" -> {
                 return tail(line.substring(cmd.length()).strip());
             }
+            case "\\o" -> {
+                return output(arg);
+            }
             case "\\i" -> {
                 if (arg == null) {
                     println(RED + I18n.t("common.usage", "\\i FILE") + RESET);
@@ -675,7 +688,8 @@ public final class RedisCli {
             }
             RedisProfile p = session.profile();
             try {
-                RedisProfiles.save(new RedisProfile(extra, p.host(), p.port(), p.user(), p.password(), p.db(), p.tls(), p.readonly()));
+                RedisProfiles.save(new RedisProfile(extra, p.host(), p.port(), p.user(), p.password(), p.db(), p.tls(),
+                        p.readonly(), p.sentinelMaster(), p.sentinelPassword()));
             } catch (IOException e) {
                 println(RED + "ERROR: " + e.getMessage() + RESET);
                 return false;
@@ -728,34 +742,22 @@ public final class RedisCli {
             rows.add(List.of(db.equals(String.valueOf(session.profile().db())) ? "*" : "", db,
                     stats.getOrDefault("keys", ""), stats.getOrDefault("expires", ""), stats.getOrDefault("avg_ttl", "")));
         }
-        print(new RedisReplyRenderer.Table(List.of("", "db", "keys", "expires", "avg_ttl"), rows));
+        show(new RedisReplyRenderer.Table(List.of("", "db", "keys", "expires", "avg_ttl"), rows), null);
         return true;
     }
 
     private static final int LIST_LIMIT = 1000;
 
-    /** \dt: SCAN toàn bộ theo mẫu (tối đa {@link #LIST_LIMIT} key), rồi lấy TYPE + PTTL bằng 1 lần pipeline. */
+    /** \dt: SCAN toàn bộ theo mẫu (cluster: mọi master; tối đa {@link #LIST_LIMIT} key), rồi lấy TYPE + PTTL bằng pipeline. */
     private boolean listKeys(String pattern) {
         try {
-            List<String> keys = new ArrayList<>();
-            String cursor = "0";
-            boolean truncated = false;
-            do {
-                Object reply = session.main().call("SCAN", cursor, "MATCH", pattern, "COUNT", "1000");
-                if (reply instanceof RespError e) {
-                    println(RED + "(error) " + e.message() + RESET);
-                    return false;
-                }
-                List<?> page = (List<?>) reply;
-                cursor = RedisSession.text(page.get(0));
-                for (Object k : (List<?>) page.get(1)) {
-                    if (keys.size() >= LIST_LIMIT) {
-                        truncated = true;
-                        break;
-                    }
-                    keys.add(RedisSession.text(k));
-                }
-            } while (!"0".equals(cursor) && !truncated);
+            RedisConnection.ScanResult scan = session.main().scan(pattern, null, LIST_LIMIT, 0);
+            if (scan.error() != null) {
+                println(RED + "(error) " + scan.error() + RESET);
+                return false;
+            }
+            List<String> keys = new ArrayList<>(scan.keys());
+            boolean truncated = !scan.complete();
             if (keys.isEmpty()) {
                 println(DIM + I18n.t("redis.noKeysMatch", pattern) + RESET);
                 return true;
@@ -771,7 +773,7 @@ public final class RedisCli {
             for (int i = 0; i < keys.size(); i++) {
                 rows.add(List.of(keys.get(i), RedisSession.text(replies.get(2 * i)), ttl(replies.get(2 * i + 1))));
             }
-            print(new RedisReplyRenderer.Table(List.of("key", "type", "ttl"), rows));
+            show(new RedisReplyRenderer.Table(List.of("key", "type", "ttl"), rows), null);
             println(DIM + I18n.t("redis.keysCount", keys.size()) + (truncated ? I18n.t("redis.keysTruncated", LIST_LIMIT) : "") + RESET);
             return true;
         } catch (IOException e) {
@@ -904,6 +906,77 @@ public final class RedisCli {
         } catch (IOException e) {
             return null;
         }
+    }
+
+    // ===================================================================== \\o: xuất kết quả ra file
+
+    /** Như \\o phía SQL: .csv/.json là kết quả của lệnh kế tiếp rồi tự tắt; tên khác là text, ghi nối tới khi \\o. */
+    private Path outputFile;
+    private String outputFormat;
+
+    private boolean output(String arg) {
+        if (arg == null) {
+            println(outputFile != null ? I18n.t("redis.exportOff", outputFile) : I18n.t("redis.exportNone"));
+            outputFile = null;
+            outputFormat = null;
+            return true;
+        }
+        outputFile = Paths.get(arg);
+        outputFormat = ResultExporter.formatFor(arg);
+        println("text".equals(outputFormat) ? I18n.t("redis.exportOnText", arg) : I18n.t("redis.exportOnNext", arg, outputFormat));
+        return true;
+    }
+
+    /** In ra màn hình, hoặc ra file nếu \\o đang bật (lỗi thì vẫn in ra màn hình). {@code reply}: reply gốc nếu có. */
+    private void show(RedisReplyRenderer.Output output, Object reply) {
+        if (outputFile == null || output instanceof RedisReplyRenderer.Lines l && l.error()) {
+            print(output);
+            return;
+        }
+        RedisReplyRenderer.Table t = exportTable(output, reply);
+        try {
+            ResultExporter.export(outputFile, outputFormat, t.headers(), t.rows());
+            println(I18n.t("redis.exported", t.rows().size(), t.headers().size(), outputFile));
+        } catch (IOException e) {
+            println(RED + I18n.t("common.err.writeFile", outputFile, e.getMessage()) + RESET);
+        }
+        if (!"text".equals(outputFormat)) {
+            outputFile = null;
+            outputFormat = null;
+        }
+    }
+
+    /** Bảng giữ nguyên; reply dạng mảng thành 1 cột "value" (giá trị thô, không có 1) "..." như khi in); còn lại 1 ô. */
+    static RedisReplyRenderer.Table exportTable(RedisReplyRenderer.Output output, Object reply) {
+        if (output instanceof RedisReplyRenderer.Table t) {
+            return t;
+        }
+        if (output instanceof RedisReplyRenderer.Many m) {
+            for (RedisReplyRenderer.Output part : m.parts()) {
+                if (part instanceof RedisReplyRenderer.Table t) {
+                    return t;
+                }
+            }
+        }
+        List<List<String>> rows = new ArrayList<>();
+        if (reply instanceof List<?> items) {
+            for (Object item : items) {
+                rows.add(List.of(cell(item)));
+            }
+        } else {
+            rows.add(List.of(cell(reply))); // nil -> null trong json, ô trống trong csv
+        }
+        return new RedisReplyRenderer.Table(List.of("value"), rows);
+    }
+
+    private static String cell(Object o) {
+        if (o == null) {
+            return "<null>"; // ResultExporter: ô trống trong csv, null trong json
+        }
+        if (o instanceof List<?> nested) {
+            return nested.stream().map(RedisCli::cell).collect(java.util.stream.Collectors.joining(", ", "[", "]"));
+        }
+        return RedisSession.text(o);
     }
 
     private void print(RedisReplyRenderer.Output output) {

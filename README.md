@@ -105,13 +105,19 @@ sqlctx --context=redis-dev --command="GET a; HGETALL user:1"
 
 Thêm `--dbname=N` (số DB), `--user=` (ACL), `--tls=true`, `--readonly=true`. Context Redis lưu ở `~/.sqlctx/redis.conf`, tách khỏi `connections.conf`; mật khẩu không lưu thì lấy từ `SQLCTX_PASSWORD` hoặc `REDISCLI_AUTH`.
 
+- **Cluster**: tự nhận ra khi kết nối. Lệnh có key theo `MOVED`/`ASK` sang đúng node như `redis-cli -c` (dấu nhắc hiện node đang ở); `\dt` và gợi ý key quét mọi master; lệnh không có key (`DBSIZE`, `KEYS`, `FLUSHALL`) chạy ở node hiện tại.
+- **Sentinel**: `--host`/`--port` của sentinel kèm `--sentinel-master=mymaster` (thêm `--sentinel-password=` nếu sentinel có mật khẩu riêng). Mỗi lần kết nối lại đều hỏi sentinel, nên sau failover sqlctx sang master mới.
+
+Thử với docker: `docker compose --profile redis-cluster --profile redis-sentinel up -d` (cluster ở 7001-7003, sentinel ở 26390, mật khẩu `Redis123`).
+
 Gõ lệnh như redis-cli. Popup gợi ý tự hiện khi gõ, giống phía SQL (↓/↑/Tab chọn, Enter/Space điền, Esc đóng), theo cây tham số `COMMAND DOCS` của server, lấy lúc kết nối và cache ở `~/.sqlctx/redis-docs/` theo phiên bản (lên Redis mới không cần cập nhật sqlctx): lệnh và lệnh con, tuỳ chọn đúng chỗ (`SET k v |` ra `NX XX EX...`), key đúng kiểu với lệnh (`HGET |` chỉ ra key hash, qua `SCAN ... TYPE`), field/member thật (`HGET user:1 |`), tham số `CONFIG GET`, section `INFO`. Dòng dưới ô nhập hiện cú pháp lệnh đang gõ; thừa tham số thì gạch đỏ.
 
 ```
 \ctx [NAME|-|save NAME]   context Redis       \dt [PATTERN]   key, kiểu, TTL (SCAN)
 \c N                      đổi DB              \d KEY          chi tiết + xem trước
 \l                        DB đang có key      \h [LỆNH]       cú pháp lệnh
-\i FILE                   chạy file lệnh      \q              thoát
+\i FILE                   chạy file lệnh      \o [FILE]       xuất kết quả (.csv/.json/text)
+\q                        thoát
 ```
 
 `HGETALL`, `CONFIG GET`, `ZRANGE ... WITHSCORES`, `XRANGE` hiện thành bảng. `FLUSHALL`, `DEL`, `KEYS`... hỏi `[y/N]` (batch cần `--yes`); context `readonly` chặn mọi lệnh ghi và lệnh lạ. Ctrl+C dừng `BLPOP`, `SUBSCRIBE`, `MONITOR` rồi tự nối lại.
@@ -138,7 +144,10 @@ Gõ lệnh như các tool `kafka-*.sh` của Kafka 3.9; `--bootstrap-server`/`--
 | `kafka-configs` | topic, broker, broker-logger, quota user/client, SCRAM credential |
 | `kafka-acls` | `--list --add --remove`, `--producer`/`--consumer` |
 | `kafka-get-offsets`, `kafka-delete-records`, `kafka-log-dirs`, `kafka-cluster`, `kafka-metadata-quorum` | như tool gốc |
-| `kafka-avro-*`, `kafka-json-schema-*`, `kafka-protobuf-console-consumer` | message qua Schema Registry (protobuf chỉ đọc, dạng thô `1: 7 2: "click"`) |
+| `kafka-reassign-partitions` | `--generate --execute --verify --cancel --list` (không đặt throttle, đề xuất không xét rack) |
+| `kafka-leader-election` | `--election-type PREFERRED/UNCLEAN`, theo `--topic [--partition]`, `--path-to-json-file` hoặc `--all-topic-partitions` |
+| `kafka-transactions` | `list`, `describe`, `describe-producers`, `find-hanging`, `abort` (theo `--start-offset` hoặc producer id/epoch) |
+| `kafka-avro-*`, `kafka-json-schema-*`, `kafka-protobuf-*` | message qua Schema Registry. Protobuf đọc file `.proto` lúc chạy: ghi từ JSON, đọc ra JSON có tên field (như tool của Confluent); `--property value.message=Tên` chọn message (mặc định message đầu tiên). Schema dùng `import` sang file khác thì đọc dạng thô `1: 7 2: "click"` |
 | `schema-registry` | `--list --versions --describe --register --delete --compatibility --id` (không phải tool có thật: Schema Registry chỉ có REST) |
 
 Khác tool gốc có chủ đích: consumer không `--group` đọc bằng `assign()` (không tạo group rác); consumer có `--group` chỉ commit tới message đã in (`--max-messages` không làm mất message đã lấy về mà chưa in); byte không phải UTF-8 in dạng `\xNN`; `kafka-consumer-groups --describe` hiện cả partition group chưa từng commit (CURRENT-OFFSET `-`, LAG tính từ offset đầu) - tool gốc bỏ qua chúng nên tổng lag trông nhỏ hơn thật. `--delete`, `--reset-offsets --execute`, `kafka-acls --remove`, `kafka-delete-records`... hỏi `[y/N]` (batch cần `--yes`). `\h TOOL` xem tuỳ chọn, `\brokers` xem broker. Dữ liệu mẫu: `seed/kafka.sh`.
@@ -186,10 +195,10 @@ VS Code không có client LSP chung sẵn - cần một extension client LSP t�
 
 ```sh
 mvn package      # target/sqlctx-1.0.0.jar
-mvn test         # test completion engine, LSP, schema helpers (không cần DB)
+mvn test         # test completion engine, LSP, schema helpers, Kafka/Redis (không cần DB)
 ```
 
-Tầng REPL chưa có test tự động.
+Test cần server thật (`KafkaIntegrationTest`, phần Cluster/Sentinel của `RedisConnectionTest`) chạy với container của `docker-compose.yml` nếu đang bật, không thì tự bỏ qua. Chạy hết mọi lệnh qua sqlctx: `tools/kafka-sweep.py` (broker thử nghiệm), `tools/redis-sweep.py` (Redis dùng xong bỏ - script chạy `FLUSHALL`). Tầng REPL chưa có test tự động.
 
 ## Thiết kế
 
@@ -199,7 +208,7 @@ Tầng REPL chưa có test tự động.
 
 ## Giới hạn
 
-- SQL chỉ có PostgreSQL và Oracle. Kafka: chưa có `kafka-reassign-partitions`, `kafka-leader-election`, `kafka-transactions`, `kafka-streams-application-reset`; ghi Protobuf chưa hỗ trợ. Redis: chỉ server đơn (chưa có Cluster/Sentinel). Server không có `COMMAND DOCS` (Redis < 7.0, hoặc ACL chặn lệnh `COMMAND`) dùng bản mô tả đóng gói sẵn từ Valkey (`tools/redis-fallback/update.sh`), lọc theo lệnh và phiên bản của server. Lệnh module không khai báo docs vẫn chạy được nhưng không có gợi ý tham số.
+- SQL chỉ có PostgreSQL và Oracle. Kafka: chưa có `kafka-streams-application-reset`; Protobuf chưa hỗ trợ `import`/references, extension, group của proto2. Redis Cluster: pipeline (`\dt` lấy TYPE/TTL) chạy lần lượt từng lệnh thay vì gom theo node. Server không có `COMMAND DOCS` (Redis < 7.0, hoặc ACL chặn lệnh `COMMAND`) dùng bản mô tả đóng gói sẵn từ Valkey (`tools/redis-fallback/update.sh`), lọc theo lệnh và phiên bản của server. Lệnh module không khai báo docs vẫn chạy được nhưng không có gợi ý tham số.
 - Đi trên grammar không có error recovery: token trước con trỏ không parse được thì không có gợi ý keyword.
 - Báo lỗi cú pháp dựa trên grammar ANTLR: cú pháp mới mà grammar chưa có sẽ bị báo nhầm là lỗi.
 - Mỗi tầng phân tích có giới hạn 300ms (`-Dsqlctx.completion.budgetMs=`); câu cực dài có thể không có gợi ý keyword.

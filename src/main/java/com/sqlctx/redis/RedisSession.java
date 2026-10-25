@@ -20,8 +20,8 @@ final class RedisSession implements RedisCompletion.Source {
     private static final int MAX_SUGGESTIONS = 200;
 
     private RedisProfile profile;
-    private RespClient main;
-    private RespClient meta;
+    private RedisConnection main;
+    private RedisConnection meta;
     volatile boolean running;
     volatile boolean cancelled;
     boolean inTransaction;
@@ -34,12 +34,13 @@ final class RedisSession implements RedisCompletion.Source {
 
     RedisSession(RedisProfile profile) throws IOException {
         this.profile = profile;
-        this.main = RespClient.connect(profile, 0);
+        this.main = RedisConnection.open(profile, 0);
     }
 
     /** Cây lệnh của server này (COMMAND DOCS, qua cache), trên 1 kết nối riêng để không chen vào kết nối chính. */
     RedisCommandTree loadCommands() {
-        try (RespClient client = RespClient.connect(profile, 5000)) {
+        try (RespClient client = RespClient.connect(
+                profile.sentinelMaster() != null ? RedisConnection.resolveMaster(profile) : profile, 5000)) {
             return RedisCommandTree.load(client, com.sqlctx.datasource.ConnectionProfileStore.configDir().resolve("redis-docs"));
         } catch (IOException e) {
             return RedisCommandTree.fallback();
@@ -50,7 +51,7 @@ final class RedisSession implements RedisCompletion.Source {
         return profile;
     }
 
-    RespClient main() {
+    RedisConnection main() {
         return main;
     }
 
@@ -64,7 +65,7 @@ final class RedisSession implements RedisCompletion.Source {
     void reconnect() throws IOException {
         main.close();
         inTransaction = false;
-        main = RespClient.connect(profile, 0);
+        main = RedisConnection.open(profile, 0); // sentinel: hỏi lại master (có thể vừa failover)
     }
 
     /** Gọi từ thread xử lý Ctrl+C: đóng socket để lệnh đang chặn (BLPOP, SUBSCRIBE...) thoát ra ngay. */
@@ -91,9 +92,25 @@ final class RedisSession implements RedisCompletion.Source {
     private synchronized Object metaCall(String... args) {
         try {
             if (meta == null || meta.isClosed()) {
-                meta = RespClient.connect(profile, 1500);
+                meta = RedisConnection.open(profile, 1500);
             }
             return meta.call(args);
+        } catch (IOException e) {
+            if (meta != null) {
+                meta.close();
+                meta = null;
+            }
+            return null;
+        }
+    }
+
+    /** SCAN trên kết nối phụ (cluster: mọi master); lỗi thì null. */
+    private synchronized RedisConnection.ScanResult metaScan(String match, String type, long deadline) {
+        try {
+            if (meta == null || meta.isClosed()) {
+                meta = RedisConnection.open(profile, 1500);
+            }
+            return meta.scan(match, type, MAX_SUGGESTIONS, deadline);
         } catch (IOException e) {
             if (meta != null) {
                 meta.close();
@@ -123,32 +140,12 @@ final class RedisSession implements RedisCompletion.Source {
                 return len == prefix.length() ? c.keys() : c.keys().stream().filter(k -> k.startsWith(prefix)).toList();
             }
         }
-        TreeSet<String> found = new TreeSet<>();
-        String cursor = "0";
-        long deadline = now + 300;
-        boolean complete = false;
-        for (int round = 0; round < 10 && found.size() < MAX_SUGGESTIONS && System.currentTimeMillis() < deadline; round++) {
-            List<String> args = new ArrayList<>(List.of("SCAN", cursor, "MATCH", escapeGlob(prefix) + "*", "COUNT", "1000"));
-            if (type != null) {
-                args.add("TYPE");
-                args.add(type);
-            }
-            Object reply = metaCall(args.toArray(String[]::new));
-            if (!(reply instanceof List<?> page) || page.size() != 2) {
-                break;
-            }
-            cursor = text(page.get(0));
-            if (page.get(1) instanceof List<?> keys) {
-                for (Object k : keys) {
-                    found.add(text(k));
-                }
-            }
-            if ("0".equals(cursor)) {
-                complete = found.size() < MAX_SUGGESTIONS;
-                break;
-            }
+        RedisConnection.ScanResult scan = metaScan(escapeGlob(prefix) + "*", type, now + 300);
+        if (scan == null) {
+            return List.of();
         }
-        List<String> keys = List.copyOf(found);
+        List<String> keys = scan.keys();
+        boolean complete = scan.complete();
         keyScans.put(t + "\0" + prefix, new KeyScan(now, keys, complete));
         return keys;
     }
