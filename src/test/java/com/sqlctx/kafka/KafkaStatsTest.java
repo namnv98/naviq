@@ -28,10 +28,10 @@ class KafkaStatsTest {
 
     private static KafkaStats.Sample sample(long at, long ordersEnd, long lag, int members) {
         return new KafkaStats.Sample(at, "c1", List.of(broker(1, 100, 50), broker(2, 100, 5)),
-                List.of(new KafkaStats.Topic("orders", false, 3, 2, ordersEnd, ordersEnd, 0, List.of()),
-                        new KafkaStats.Topic("logs", false, 1, 1, 10, 10, 1, List.of("logs-0")),
-                        new KafkaStats.Topic("__consumer_offsets", true, 50, 1, 0, 0, 0, List.of())),
-                List.of(new KafkaStats.Group("billing", "Stable", members, lag, ordersEnd - lag)),
+                List.of(new KafkaStats.Topic("orders", false, 3, 2, ordersEnd, ordersEnd, 0, List.of(), List.of()),
+                        new KafkaStats.Topic("logs", false, 1, 1, 10, 10, 1, List.of("logs-0"), List.of()),
+                        new KafkaStats.Topic("__consumer_offsets", true, 50, 1, 0, 0, 0, List.of(), List.of())),
+                List.of(new KafkaStats.Group("billing", "Stable", members, lag, ordersEnd - lag, List.of())),
                 new KafkaStats.Quorum(1, 3, 0));
     }
 

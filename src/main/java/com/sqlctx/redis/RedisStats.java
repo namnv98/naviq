@@ -1,7 +1,7 @@
 package com.sqlctx.redis;
 
 import com.sqlctx.cli.view.DataViewTable;
-import com.sqlctx.shell.LiveView;
+import com.sqlctx.shell.Screen;
 import com.sqlctx.util.I18n;
 
 import java.io.IOException;
@@ -173,7 +173,7 @@ final class RedisStats {
                     i.getOrDefault("connected_clients", "-") + " (" + i.getOrDefault("blocked_clients", "0") + ")",
                     hitRate(i), String.valueOf(keys(i)), i.getOrDefault("evicted_keys", "-")));
         }
-        out.addAll(LiveView.lines(DataViewTable.renderFit(List.of("node", I18n.t("redis.stats.role"), "ops/s", "kB/s in / out",
+        out.addAll(Screen.lines(DataViewTable.renderFit(List.of("node", I18n.t("redis.stats.role"), "ops/s", "kB/s in / out",
                 I18n.t("redis.stats.memory"), "frag", "clients (blocked)", "hit %", "keys", "evicted"), rows, width)));
         List<String> warnings = warnings(s);
         out.add(warnings.isEmpty() ? GREEN + "✓ " + I18n.t("redis.stats.ok") + RESET : "");

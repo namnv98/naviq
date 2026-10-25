@@ -1,7 +1,7 @@
 package com.sqlctx.kafka;
 
 import com.sqlctx.cli.view.DataViewTable;
-import com.sqlctx.shell.LiveView;
+import com.sqlctx.shell.Screen;
 import com.sqlctx.util.I18n;
 
 import org.apache.kafka.clients.admin.Admin;
@@ -55,13 +55,21 @@ final class KafkaStats {
                   long totalBytes, long usableBytes) {
     }
 
+    /** {@code leader} -1 = mất leader; {@code start}/{@code end} -1 = không lấy được offset. */
+    record Part(int partition, int leader, List<Integer> replicas, List<Integer> isr, long start, long end) {
+    }
+
     /** {@code endSum}: tổng offset cuối của mọi partition; {@code messages}: số message đang giữ (cuối - đầu). */
     record Topic(String name, boolean internal, int partitions, int replicationFactor, long endSum, long messages,
-                 int underReplicated, List<String> offline) {
+                 int underReplicated, List<String> offline, List<Part> parts) {
+    }
+
+    /** {@code committed} null = chưa commit (lag tính từ offset đầu); {@code consumer}: member đang được gán, "-" nếu không. */
+    record GroupPart(String topic, int partition, Long committed, long end, long lag, String consumer) {
     }
 
     /** {@code committedSum}: tổng offset đã commit - tăng bao nhiêu là group đã đọc bấy nhiêu message. */
-    record Group(String id, String state, int members, long lag, long committedSum) {
+    record Group(String id, String state, int members, long lag, long committedSum, List<GroupPart> parts) {
     }
 
     record Quorum(int leader, long epoch, long maxLag) {
@@ -106,8 +114,12 @@ final class KafkaStats {
             int under = 0;
             int rf = Integer.MAX_VALUE;
             List<String> offline = new ArrayList<>();
+            List<Part> parts = new ArrayList<>();
             for (TopicPartitionInfo p : d.partitions()) {
                 TopicPartition tp = new TopicPartition(d.name(), p.partition());
+                parts.add(new Part(p.partition(), p.leader() == null || p.leader().isEmpty() ? -1 : p.leader().id(),
+                        p.replicas().stream().map(Node::id).toList(), p.isr().stream().map(Node::id).toList(),
+                        earliest.getOrDefault(tp, -1L), latest.getOrDefault(tp, -1L)));
                 rf = Math.min(rf, p.replicas().size());
                 if (p.leader() == null || p.leader().isEmpty()) {
                     offline.add(tp.toString());
@@ -122,7 +134,7 @@ final class KafkaStats {
                 }
             }
             topics.add(new Topic(d.name(), d.isInternal(), d.partitions().size(), rf == Integer.MAX_VALUE ? 0 : rf, end, held,
-                    under, offline));
+                    under, offline, parts));
         }
 
         List<Broker> brokers = new ArrayList<>();
@@ -215,13 +227,16 @@ final class KafkaStats {
                     }
                 }
             });
+            Map<TopicPartition, String> owner = new HashMap<>();
             if (d != null) {
                 for (MemberDescription m : d.members()) {
                     parts.addAll(m.assignment().topicPartitions());
+                    m.assignment().topicPartitions().forEach(tp -> owner.put(tp, m.clientId() + " " + m.host()));
                 }
             }
             long lag = 0;
             long sum = 0;
+            List<GroupPart> detail = new ArrayList<>();
             for (TopicPartition tp : parts) {
                 Long end = latest.get(tp);
                 if (end == null) {
@@ -229,10 +244,14 @@ final class KafkaStats {
                 }
                 OffsetAndMetadata o = offsets.get(tp);
                 long pos = o != null ? o.offset() : earliest.getOrDefault(tp, end);
-                lag += Math.max(0, end - pos);
+                long partLag = Math.max(0, end - pos);
+                lag += partLag;
                 sum += o != null ? o.offset() : 0;
+                detail.add(new GroupPart(tp.topic(), tp.partition(), o != null ? o.offset() : null, end, partLag,
+                        owner.getOrDefault(tp, "-")));
             }
-            out.add(new Group(id, d == null ? "?" : d.state().toString(), d == null ? 0 : d.members().size(), lag, sum));
+            detail.sort(Comparator.comparing(GroupPart::topic).thenComparingInt(GroupPart::partition));
+            out.add(new Group(id, d == null ? "?" : d.state().toString(), d == null ? 0 : d.members().size(), lag, sum, detail));
         }
         return out;
     }
@@ -254,7 +273,7 @@ final class KafkaStats {
             brokerRows.add(List.of(String.valueOf(b.id()), b.host() + ":" + b.port(), b.rack() == null ? "" : b.rack(),
                     b.controller() ? "controller" : "", String.valueOf(b.leaders()), String.valueOf(b.replicas()), disk(b)));
         }
-        out.addAll(LiveView.lines(DataViewTable.renderFit(List.of("broker", "host", "rack", "", "leaders", "replicas",
+        out.addAll(Screen.lines(DataViewTable.renderFit(List.of("broker", "host", "rack", "", "leaders", "replicas",
                 I18n.t("kafka.stats.disk")), brokerRows, width)));
 
         int partitions = cur.topics().stream().mapToInt(Topic::partitions).sum();
@@ -275,7 +294,7 @@ final class KafkaStats {
                     rateText(t.endSum(), p == null ? null : p.endSum(), dt), String.valueOf(t.messages())));
         }
         if (!topicRows.isEmpty()) {
-            out.addAll(LiveView.lines(DataViewTable.renderFit(List.of("topic", "partitions", "RF", I18n.t("kafka.stats.produced"),
+            out.addAll(Screen.lines(DataViewTable.renderFit(List.of("topic", "partitions", "RF", I18n.t("kafka.stats.produced"),
                     "messages"), topicRows, width)));
         }
 
@@ -289,7 +308,7 @@ final class KafkaStats {
                     rateText(g.committedSum(), p == null ? null : p.committedSum(), dt)));
         }
         if (!groupRows.isEmpty()) {
-            out.addAll(LiveView.lines(DataViewTable.renderFit(List.of("group", "state", "members", "lag", "Δ lag",
+            out.addAll(Screen.lines(DataViewTable.renderFit(List.of("group", "state", "members", "lag", "Δ lag",
                     I18n.t("kafka.stats.consumed")), groupRows, width)));
         }
         if (cur.topics().size() - internal > TOP || cur.groups().size() > TOP) {
@@ -319,7 +338,12 @@ final class KafkaStats {
             return "-";
         }
         long used = b.totalBytes() - b.usableBytes();
-        return human(used) + " / " + human(b.totalBytes()) + " (" + Math.round(100.0 * used / b.totalBytes()) + "%)";
+        return diskBytes(b) + " (" + Math.round(100.0 * used / b.totalBytes()) + "%)";
+    }
+
+    /** "217.3 GB / 267.3 GB" (không có %: dashboard đã có thanh %). */
+    static String diskBytes(Broker b) {
+        return b.totalBytes() <= 0 ? "-" : human(b.totalBytes() - b.usableBytes()) + " / " + human(b.totalBytes());
     }
 
     private static String human(long bytes) {

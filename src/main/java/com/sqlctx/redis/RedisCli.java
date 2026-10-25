@@ -9,7 +9,7 @@ import com.sqlctx.datasource.ConnectionProfileStore;
 import com.sqlctx.redis.RespClient.Bulk;
 import com.sqlctx.redis.RespClient.RespError;
 import com.sqlctx.shell.CompletionMenu;
-import com.sqlctx.shell.LiveView;
+import com.sqlctx.shell.Dashboard;
 import com.sqlctx.shell.MenuItem;
 import com.sqlctx.shell.ShellReader;
 import com.sqlctx.shell.ShellStatusBar;
@@ -915,8 +915,8 @@ public final class RedisCli {
     // ===================================================================== \\stats
 
     /**
-     * Chỉ số của từng node, vẽ lại mỗi {@code arg} giây (mặc định 2) tới khi Ctrl+C; batch thì in 1 lần. Dùng kết nối
-     * riêng: Ctrl+C đóng kết nối chính (cách dừng chung của mọi lệnh), xong thì nối lại kết nối chính.
+     * Dashboard toàn màn hình (chu kỳ {@code arg} giây, mặc định 2) tới khi q/Esc/Ctrl+C; batch hoặc terminal không vẽ
+     * được toàn màn hình thì in 1 khung. Dùng kết nối riêng để không chen vào kết nối chính (có thể đang trong MULTI).
      */
     private boolean stats(String arg) {
         long seconds;
@@ -927,42 +927,20 @@ public final class RedisCli {
             return false;
         }
         try (RedisConnection c = RedisConnection.open(session.profile(), 5000)) {
-            if (batch) {
+            if (batch || !Dashboard.supported(terminal)) {
                 RedisStats.Sample s = RedisStats.sample(c);
                 printLines(RedisStats.frame(RedisStats.title(session.profile(), s, seconds, false), s, terminal.getWidth()));
                 return true;
             }
-            setStatus("STATS · " + I18n.t("common.ctrlcToStop"));
-            session.cancelled = false;
-            session.running = true;
-            try {
-                LiveView.run(terminal, seconds * 1000, () -> session.cancelled, () -> {
-                    RedisStats.Sample s = RedisStats.sample(c);
-                    return RedisStats.frame(RedisStats.title(session.profile(), s, seconds, true), s, terminal.getWidth());
-                });
-            } finally {
-                session.running = false;
+            if (Dashboard.show(terminal, new RedisDashboard(c, session.profile()), seconds * 1000)) {
+                terminal.writer().print("\u001b[H\u001b[2J");
+                statusBar.redraw();
             }
+            return true;
         } catch (IOException e) {
-            if (!session.cancelled) {
-                println(RED + "(error) " + e.getMessage() + RESET);
-                return false;
-            }
-        } catch (Exception e) {
-            if (!session.cancelled) {
-                println(RED + "ERROR: " + e.getMessage() + RESET);
-                return false;
-            }
+            println(RED + "(error) " + e.getMessage() + RESET);
+            return false;
         }
-        if (session.cancelled) {
-            try {
-                session.reconnect();
-            } catch (IOException e) {
-                reconnectAfter(I18n.t("common.connectionLost", e.getMessage()));
-            }
-        }
-        setStatus("idle");
-        return true;
     }
 
     // ===================================================================== \\o: xuất kết quả ra file
