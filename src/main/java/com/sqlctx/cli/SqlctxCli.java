@@ -80,7 +80,12 @@ public class SqlctxCli {
             contextArg = ConnectionProfileStore.getLastContextName().orElse(null);
         }
         if (contextArg != null) {
-            ContextManager.applyContext(contextArg);
+            try {
+                ContextManager.applyContext(contextArg);
+            } catch (RuntimeException e) {
+                System.err.println(RED + "ERROR: " + e.getMessage() + RESET);
+                System.exit(2);
+            }
             currentContextName = contextArg;
             ConnectionProfileStore.setLastContextName(contextArg);
         }

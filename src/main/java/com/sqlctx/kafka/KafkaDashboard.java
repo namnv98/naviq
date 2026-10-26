@@ -26,6 +26,7 @@ final class KafkaDashboard implements Dashboard.View {
     static final int HISTORY = 120;
     private static final int TOPICS = 0;
     private static final int GROUPS = 1;
+    private static final int WARNINGS = 2;
 
     private final Supplier<Admin> admin;
     private final String context;
@@ -56,7 +57,12 @@ final class KafkaDashboard implements Dashboard.View {
 
     @Override
     public int panels() {
-        return 2;
+        return 3;
+    }
+
+    @Override
+    public boolean hasDetail(int panel) {
+        return panel != WARNINGS;
     }
 
     @Override
@@ -65,7 +71,8 @@ final class KafkaDashboard implements Dashboard.View {
         if (cur == null) {
             return 0;
         }
-        return panel == TOPICS ? topics(cur, previous()).size() : cur.groups().size();
+        return panel == TOPICS ? topics(cur, previous()).size() : panel == GROUPS ? cur.groups().size()
+                : KafkaStats.warnings(previous(), cur).size();
     }
 
     private KafkaStats.Sample current() {
@@ -114,21 +121,76 @@ final class KafkaDashboard implements Dashboard.View {
         return out;
     }
 
-    /** msg/s mọi group đã đọc (tổng offset commit tăng thêm). */
+    /** Consumer mặc định commit 5 giây 1 lần. */
+    private static final long COMMIT_WINDOW_MS = 5000;
+
+    /**
+     * msg/s mọi group đã đọc. Offset commit chỉ nhích theo đợt (mặc định 5 giây 1 lần) nên chênh lệch giữa 2 mẫu liên
+     * tiếp lúc 0 lúc gấp đôi; mỗi group tính tốc độ giữa 2 lần commit gần nhất thấy được và giữ nguyên tới lần commit
+     * sau (chưa thấy đủ 2 lần thì chưa tính). Quá
+     * 2 nhịp commit (tối thiểu {@link #COMMIT_WINDOW_MS}) không thấy commit mới thì coi là đã dừng đọc.
+     */
     static List<Double> consumeSeries(List<KafkaStats.Sample> h) {
-        List<Double> out = new ArrayList<>();
+        return readRates(h).stream().map(m -> m.values().stream().mapToDouble(Double::doubleValue).sum()).toList();
+    }
+
+    /** msg/s đọc của từng group ở mẫu mới nhất (cùng cách tính với {@link #consumeSeries}); chưa tính được thì không có. */
+    static Map<String, Double> lastReadRates(List<KafkaStats.Sample> h) {
+        List<Map<String, Double>> all = readRates(h);
+        return all.isEmpty() ? Map.of() : all.get(all.size() - 1);
+    }
+
+    /** Mỗi mẫu (trừ mẫu đầu): group -> msg/s đọc (xem {@link #consumeSeries}). */
+    private static List<Map<String, Double>> readRates(List<KafkaStats.Sample> h) {
+        List<Map<String, Double>> out = new ArrayList<>();
+        Map<String, Integer> lastChange = new HashMap<>();
+        Map<String, Integer> prevChange = new HashMap<>();
+        Map<String, Integer> firstSeen = new HashMap<>();
         for (int i = 1; i < h.size(); i++) {
-            Map<String, Long> before = new HashMap<>();
-            h.get(i - 1).groups().forEach(g -> before.put(g.id(), g.committedSum()));
-            double sum = 0;
+            Map<String, Double> rates = new HashMap<>();
             for (KafkaStats.Group g : h.get(i).groups()) {
-                if (before.containsKey(g.id())) {
-                    sum += Math.max(0, g.committedSum() - before.get(g.id()));
+                Long before = committedOf(h.get(i - 1), g.id());
+                if (before == null) {
+                    lastChange.remove(g.id());
+                    prevChange.remove(g.id());
+                    firstSeen.put(g.id(), i);
+                    continue;
                 }
+                firstSeen.putIfAbsent(g.id(), i - 1);
+                if (g.committedSum() != before) {
+                    // lần commit đầu tiên thấy được chưa biết lần trước nó ở đâu: chưa tính tốc độ
+                    if (lastChange.containsKey(g.id())) {
+                        prevChange.put(g.id(), lastChange.get(g.id()));
+                    }
+                    lastChange.put(g.id(), i);
+                }
+                Integer j = prevChange.get(g.id());
+                if (j == null) {
+                    // chưa thấy đủ 2 lần commit mà đã quá 2 nhịp commit không có commit mới: coi như không đọc
+                    int since = lastChange.getOrDefault(g.id(), firstSeen.get(g.id()));
+                    if (h.get(i).at() - h.get(since).at() > COMMIT_WINDOW_MS * 2) {
+                        rates.put(g.id(), 0.0);
+                    }
+                    continue;
+                }
+                KafkaStats.Sample from = h.get(j);
+                KafkaStats.Sample to = h.get(lastChange.get(g.id()));
+                long span = to.at() - from.at();
+                rates.put(g.id(), h.get(i).at() - to.at() > Math.max(COMMIT_WINDOW_MS, span) * 2 ? 0
+                        : Math.max(0, committedOf(to, g.id()) - committedOf(from, g.id())) / dt(from, to));
             }
-            out.add(sum / dt(h.get(i - 1), h.get(i)));
+            out.add(rates);
         }
         return out;
+    }
+
+    private static Long committedOf(KafkaStats.Sample s, String group) {
+        return s.groups().stream().filter(g -> g.id().equals(group)).map(KafkaStats.Group::committedSum).findFirst().orElse(null);
+    }
+
+    /** Tổng lag mọi group qua các mẫu. */
+    static List<Double> lagSeries(List<KafkaStats.Sample> h) {
+        return h.stream().map(s -> (double) s.groups().stream().mapToLong(KafkaStats.Group::lag).sum()).toList();
     }
 
     static List<Double> topicSeries(List<KafkaStats.Sample> h, String topic) {
@@ -205,9 +267,9 @@ final class KafkaDashboard implements Dashboard.View {
         double disk = fullest == null ? 0 : diskUsed(fullest);
         List<Screen.Tile> tiles = new ArrayList<>(List.of(
                 new Screen.Tile(I18n.t("stats.kafka.write") + " msg/s", Screen.GREEN + rate(produce),
-                        I18n.t("stats.peak", Screen.compact(peak(produce)))),
-                new Screen.Tile(I18n.t("stats.kafka.read") + " msg/s", "\u001b[38;5;75m" + rate(consume),
-                        I18n.t("stats.peak", Screen.compact(peak(consume)))),
+                        I18n.t("stats.peak", Screen.compact(peak(produce))), produce, Screen.GREEN),
+                new Screen.Tile(I18n.t("stats.kafka.read") + " msg/s", READ + rate(consume),
+                        I18n.t("stats.peak", Screen.compact(peak(consume))), consume, READ),
                 new Screen.Tile(I18n.t("stats.kafka.totalLag"), (lag == 0 ? Screen.GREEN : lagBefore != null && lag > lagBefore
                         ? Screen.YELLOW : "\u001b[38;5;252m") + Screen.compact(lag),
                         lagBefore == null ? I18n.t("stats.kafka.groups", cur.groups().size()) : lag > lagBefore
@@ -225,18 +287,27 @@ final class KafkaDashboard implements Dashboard.View {
         out.addAll(Screen.tiles(tiles, width));
 
         List<String> warnings = KafkaStats.warnings(prev, cur);
-        int warnLines = Math.min(4, Math.max(1, warnings.size()));
-        int fixed = out.size() + (warnLines + 2) + 1;
-        boolean charts = height - fixed >= 6 + 8; // chừa ít nhất 8 dòng cho bảng
-        if (charts) {
+        int warnLines = Dashboard.warningLines(warnings.size(), height);
+        int avail = height - out.size() - (warnLines + 2) - 1;
+        int topicCount = topics(cur, prev).size();
+        int tableNeed = state.detail ? avail : width >= 110 ? Math.max(topicCount, cur.groups().size()) + 3
+                : topicCount + cur.groups().size() + 6;
+        int chart = Dashboard.chartHeight(avail, tableNeed);
+        if (chart > 0) {
+            int top = chart >= Dashboard.CHART_ROWS_AT ? chart / 2 : chart;
             int half = width / 2;
-            List<String> w = Screen.box(I18n.t("stats.kafka.write") + " msg/s · " + Screen.compact(last(produce)),
-                    Screen.area(produce, half - 4, 4, Screen.GREEN), half, 6, false);
-            List<String> r = Screen.box(I18n.t("stats.kafka.read") + " msg/s · " + Screen.compact(last(consume)),
-                    Screen.area(consume, width - half - 4, 4, "\u001b[38;5;75m"), width - half, 6, false);
+            List<String> w = Screen.box(chartTitle(I18n.t("stats.kafka.write") + " msg/s", produce, Screen.GREEN),
+                    Screen.area(produce, half - 4, top - 2, Screen.GREEN_RAMP), half, top, false);
+            List<String> r = Screen.box(chartTitle(I18n.t("stats.kafka.read") + " msg/s", consume, READ),
+                    Screen.area(consume, width - half - 4, top - 2, Screen.BLUE_RAMP), width - half, top, false);
             out.addAll(Screen.beside(w, half, r));
+            if (top < chart) {
+                List<Double> lagHistory = lagSeries(h);
+                out.addAll(Screen.box(chartTitle(I18n.t("stats.kafka.totalLag"), lagHistory, Screen.YELLOW),
+                        Screen.area(lagHistory, width - 4, chart - top - 2, Screen.ORANGE_RAMP), width, chart - top, false));
+            }
         }
-        int panelHeight = Math.max(4, height - out.size() - (warnLines + 2) - 1);
+        int panelHeight = Math.max(4, avail - chart);
 
         if (state.detail) {
             out.addAll(detail(cur, prev, state, width, panelHeight));
@@ -252,23 +323,20 @@ final class KafkaDashboard implements Dashboard.View {
             List<Column> topicCols = List.of(new Column("topic", 'l', 8), new Column("p", 'r', 2), new Column("RF", 'r', 2),
                     new Column(I18n.t("stats.trend"), 'l', 10), new Column("msg/s", 'r', 6), new Column("messages", 'r', 8));
             Map<String, Long> lagPrev = new HashMap<>();
-            Map<String, Long> readPrev = new HashMap<>();
             if (prev != null) {
-                prev.groups().forEach(g -> {
-                    lagPrev.put(g.id(), g.lag());
-                    readPrev.put(g.id(), g.committedSum());
-                });
+                prev.groups().forEach(g -> lagPrev.put(g.id(), g.lag()));
             }
+            Map<String, Double> readRate = lastReadRates(h);
             List<List<String>> groupRows = new ArrayList<>();
             for (KafkaStats.Group g : groups(cur)) {
                 Long before = lagPrev.get(g.id());
                 String trend = before == null ? "" : g.lag() > before ? Screen.YELLOW + "↑ +" + Screen.compact(g.lag() - before)
                         : g.lag() < before ? Screen.GREEN + "↓ " + Screen.compact(before - g.lag()) : Screen.DIM + "=";
-                Long read = readPrev.get(g.id());
+                Double read = readRate.get(g.id());
                 String lagColor = g.lag() == 0 ? Screen.GREEN : g.members() == 0 || before != null && g.lag() > before ? Screen.YELLOW : "";
                 groupRows.add(List.of(g.id(), stateColor(g.state()) + g.state(), String.valueOf(g.members()),
                         lagColor + Screen.compact(g.lag()), trend,
-                        read == null ? "…" : Screen.compact(Math.max(0, g.committedSum() - read) / dt(prev, cur))));
+                        read == null ? "…" : Screen.compact(Math.round(read * 10) / 10.0)));
             }
             List<Column> groupCols = List.of(new Column("group", 'l', 8), new Column("state", 'l', 5), new Column("mem", 'r', 3),
                     new Column("lag", 'r', 5), new Column("Δ", 'l', 6), new Column(I18n.t("stats.kafka.readShort"), 'r', 6));
@@ -290,9 +358,19 @@ final class KafkaDashboard implements Dashboard.View {
             }
         }
 
-        out.addAll(Dashboard.warningsBox(warnings, warnLines, I18n.t("kafka.stats.ok"), width));
+        out.addAll(Dashboard.warningsBox(warnings, warnLines, I18n.t("kafka.stats.ok"), width, state.selected[WARNINGS],
+                state.panel == WARNINGS));
         out.add(Dashboard.footer(I18n.t(state.detail ? "stats.keysDetail" : "stats.keys"), width));
         return out.subList(0, Math.min(out.size(), height));
+    }
+
+    private static final String READ = "\u001b[38;5;75m";
+
+    /** "Ghi msg/s  412 · tb 380" - giá trị mới nhất tô màu, trung bình mờ. */
+    private static String chartTitle(String name, List<Double> series, String color) {
+        double avg = series.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        return name + "  " + color + "\u001b[1m" + rate(series) + Screen.RESET + Screen.DIM + " · " + I18n.t("stats.avg")
+                + " " + Screen.compact(Math.round(avg * 10) / 10.0) + Screen.RESET;
     }
 
     private static String stateColor(String state) {

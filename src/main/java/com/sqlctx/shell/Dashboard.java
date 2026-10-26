@@ -45,6 +45,11 @@ public final class Dashboard {
 
         /** Số dòng của bảng {@code panel} (giới hạn ↑↓). */
         int rows(int panel);
+
+        /** Enter ở bảng {@code panel} có mở chi tiết không (ô cảnh báo thì không, chỉ cuộn). */
+        default boolean hasDetail(int panel) {
+            return true;
+        }
     }
 
     /** Terminal "dumb" (không có điều khiển con trỏ) hoặc không biết kích thước thì không vẽ toàn màn hình được. */
@@ -142,7 +147,7 @@ public final class Dashboard {
                         yield false;
                     }
                     case "enter" -> {
-                        state.detail = !state.detail && view.rows(state.panel) > 0;
+                        state.detail = !state.detail && view.hasDetail(state.panel) && view.rows(state.panel) > 0;
                         synchronized (wake) {
                             wake.notifyAll(); // chi tiết cần dữ liệu riêng (vd INFO commandstats): lấy ngay
                         }
@@ -248,19 +253,54 @@ public final class Dashboard {
         return chips + "\u001b[1m" + clock + Screen.RESET + Screen.DIM + " · " + every + Screen.RESET;
     }
 
-    /** Ô cảnh báo: viền đỏ nếu có lỗi đỏ, vàng nếu chỉ có cảnh báo, xanh nếu ổn. */
-    public static List<String> warningsBox(List<String> warnings, int lines, String ok, int width) {
+    /**
+     * Chiều cao ô biểu đồ (0 = không vẽ) khi còn {@code avail} dòng cho biểu đồ + bảng và bảng cần {@code tableNeed}
+     * dòng (kể cả viền): bảng ít dòng thì biểu đồ cao lên (tới 2/3 chỗ trống, đủ cao thì nơi gọi chia thành 2 hàng biểu
+     * đồ - xem {@link #CHART_ROWS_AT}), bảng dài thì biểu đồ giữ tối thiểu 6 dòng, không đủ chỗ cho bảng thì bỏ biểu đồ.
+     */
+    public static int chartHeight(int avail, int tableNeed) {
+        int tableMin = Math.max(5, Math.min(tableNeed, 10));
+        int chart = Math.min(Math.max(6, avail * 2 / 3), avail - Math.max(tableNeed, tableMin));
+        if (chart >= 6) {
+            return chart;
+        }
+        return avail - tableMin >= 6 ? 6 : 0;
+    }
+
+    /** Từ chiều cao này ({@link #chartHeight}) trở lên thì vẽ 2 hàng biểu đồ thay vì 1 hàng cao. */
+    public static final int CHART_ROWS_AT = 16;
+
+    /** Số dòng nội dung của ô cảnh báo: vừa đủ cho mọi cảnh báo, tối đa 4 (màn cao từ 40 dòng: 6), ít nhất 1. */
+    public static int warningLines(int count, int height) {
+        return Math.max(1, Math.min(count, height >= 40 ? 6 : 4));
+    }
+
+    private static String title(List<String> warnings) {
+        String color = warnings.stream().anyMatch(w -> w.contains("✖")) ? Screen.RED : warnings.isEmpty() ? Screen.GREEN : Screen.YELLOW;
+        return color + "● " + Screen.RESET + com.sqlctx.util.I18n.t("stats.warnings") + Screen.DIM + " " + warnings.size();
+    }
+
+    /**
+     * Ô cảnh báo cao {@code lines} dòng nội dung, là 1 bảng chọn được như các bảng khác: {@code focused} (Tab tới) thì ↑↓
+     * cuộn, dòng {@code selected} được tô và luôn hiện ra; nhiều hơn {@code lines} cảnh báo thì tiêu đề ghi đang xem
+     * dòng nào ("1–4/7").
+     */
+    public static List<String> warningsBox(List<String> warnings, int lines, String ok, int width, int selected, boolean focused) {
         List<String> body = new java.util.ArrayList<>();
+        int first = 0;
         if (warnings.isEmpty()) {
             body.add(Screen.GREEN + "✓ " + ok + Screen.RESET);
         } else {
-            body.addAll(warnings.subList(0, Math.min(lines, warnings.size())));
-            if (warnings.size() > lines) {
-                body.set(lines - 1, Screen.DIM + com.sqlctx.util.I18n.t("stats.moreWarnings", warnings.size() - lines + 1) + Screen.RESET);
+            int sel = Math.max(0, Math.min(selected, warnings.size() - 1));
+            first = sel < lines ? 0 : sel - lines + 1;
+            for (int i = first; i < Math.min(warnings.size(), first + lines); i++) {
+                body.add(focused && i == sel
+                        ? Screen.SELECTED + Screen.plain(Screen.fit(warnings.get(i), width - 4)) + Screen.RESET
+                        : warnings.get(i));
             }
         }
-        String color = warnings.stream().anyMatch(w -> w.contains("✖")) ? Screen.RED : warnings.isEmpty() ? Screen.GREEN : Screen.YELLOW;
-        String title = color + "● " + Screen.RESET + com.sqlctx.util.I18n.t("stats.warnings") + Screen.DIM + " " + warnings.size();
-        return Screen.box(title, body, width, lines + 2, false);
+        String range = warnings.size() > lines
+                ? Screen.DIM + " · " + (first + 1) + "–" + Math.min(warnings.size(), first + lines) + "/" + warnings.size() : "";
+        return Screen.box(title(warnings) + range, body, width, lines + 2, focused);
     }
 }

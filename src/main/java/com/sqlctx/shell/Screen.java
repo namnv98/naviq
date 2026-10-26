@@ -133,8 +133,11 @@ public final class Screen {
 
     // ------------------------------------------------------------------ ô số liệu (KPI)
 
-    /** 1 ô số liệu lớn: nhãn, giá trị (đã tô màu theo mức), dòng phụ. */
-    public record Tile(String label, String value, String sub) {
+    /** 1 ô số liệu lớn: nhãn, giá trị (đã tô màu theo mức), dòng phụ; {@code trend} (có thể null): đường xu hướng bên phải giá trị. */
+    public record Tile(String label, String value, String sub, List<Double> trend, String trendColor) {
+        public Tile(String label, String value, String sub) {
+            this(label, value, sub, null, null);
+        }
     }
 
     /** Hàng ô số liệu chia đều bề ngang, mỗi ô 5 dòng (viền + nhãn + giá trị + dòng phụ + viền). */
@@ -146,7 +149,12 @@ public final class Screen {
             int w = i == n - 1 ? width - used : width / n;
             used += w;
             Tile t = tiles.get(i);
-            List<String> box = box(t.label(), List.of("\u001b[1m" + t.value(), DIM + t.sub()), w, 4, false);
+            String value = "\u001b[1m" + t.value();
+            int sparkWidth = Math.min(16, (w - 4) / 2);
+            if (t.trend() != null && w - 4 - width(value) >= sparkWidth + 2) {
+                value = fit(value, w - 4 - sparkWidth) + spark(t.trend(), sparkWidth, t.trendColor());
+            }
+            List<String> box = box(t.label(), List.of(value, DIM + t.sub()), w, 4, false);
             for (int r = 0; r < 4; r++) {
                 out.set(r, out.get(r) + box.get(r));
             }
@@ -159,50 +167,78 @@ public final class Screen {
 
     private static final char[] EIGHTHS = {' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'};
 
+    /** Dải màu của biểu đồ vùng, từ đáy (đậm) lên đỉnh (sáng). */
+    public static final int[] GREEN_RAMP = {22, 28, 34, 71, 77, 114, 120, 157};
+    public static final int[] BLUE_RAMP = {24, 25, 26, 32, 33, 39, 75, 117};
+    public static final int[] ORANGE_RAMP = {94, 130, 136, 172, 178, 214, 220, 228};
+    public static final int[] PURPLE_RAMP = {54, 55, 56, 92, 98, 135, 141, 183};
+
     /**
-     * Biểu đồ vùng cao {@code height} dòng, mỗi cột 1 mẫu (mẫu mới nhất ở bên phải), độ cao chia 1/8 ô cho mịn; nhãn
-     * giá trị lớn nhất ở góc trên trái. Chưa đủ mẫu thì phần bên trái để trống.
+     * Biểu đồ vùng cao {@code height} dòng (kể cả trục): trục Y bên trái ghi giá trị lớn nhất, giữa và 0, có đường lưới mờ;
+     * mỗi cột 1 mẫu (mẫu mới nhất ở bên phải), độ cao chia 1/8 ô cho mịn, màu chuyển dần theo {@code ramp} từ đáy lên.
+     * Chưa đủ mẫu thì phần bên trái để trống.
      */
-    public static List<String> area(List<Double> values, int width, int height, String color) {
-        List<Double> tail = values.subList(Math.max(0, values.size() - width), values.size());
-        double max = tail.stream().mapToDouble(Double::doubleValue).max().orElse(0);
-        int offset = width - tail.size();
+    public static List<String> area(List<Double> values, int width, int height, int[] ramp) {
+        return area(values, width, height, ramp, Screen::compact);
+    }
+
+    /** {@code label}: định dạng số trên trục Y (vd byte). */
+    public static List<String> area(List<Double> values, int width, int height, int[] ramp,
+                                    java.util.function.DoubleFunction<String> label) {
+        double max = values.subList(Math.max(0, values.size() - width), values.size()).stream()
+                .mapToDouble(Double::doubleValue).max().orElse(0);
+        int mid = height >= 5 ? height / 2 : -1;
+        String[] labels = new String[height];
+        labels[0] = label.apply(max);
+        if (mid > 0) {
+            labels[mid] = label.apply(max * (height - 1 - mid) / (height - 1));
+        }
+        labels[height - 1] = "0";
+        int axis = 0;
+        for (String l : labels) {
+            axis = Math.max(axis, l == null ? 0 : l.length());
+        }
+        int plot = width - axis - 2;
+        List<Double> tail = values.subList(Math.max(0, values.size() - plot), values.size());
+        int offset = plot - tail.size();
         List<String> out = new ArrayList<>();
         for (int row = 0; row < height; row++) {
             int levelBelow = (height - 1 - row) * 8; // số 1/8 ô nằm dưới dòng này
-            StringBuilder sb = new StringBuilder(color);
-            for (int x = 0; x < width; x++) {
+            boolean grid = labels[row] != null && row != height - 1;
+            String color = "\u001b[38;5;" + ramp[(height - 1 - row) * (ramp.length - 1) / Math.max(1, height - 1)] + "m";
+            StringBuilder sb = new StringBuilder(DIM).append(labels[row] == null ? " ".repeat(axis) : right(labels[row], axis))
+                    .append(" ").append(BORDER).append(labels[row] == null ? "│" : "┤");
+            String last = BORDER;
+            for (int x = 0; x < plot; x++) {
+                String cell;
+                String cellColor;
                 if (x < offset) {
-                    sb.append(row == height - 1 ? BORDER + "·" + color : " ");
-                    continue;
+                    cell = grid && x % 2 == 0 ? "·" : " ";
+                    cellColor = BORDER;
+                } else {
+                    double v = tail.get(x - offset);
+                    int level = max <= 0 ? 0 : (int) Math.round(v / max * height * 8);
+                    int part = Math.max(0, Math.min(8, level - levelBelow));
+                    if (row == height - 1 && level == 0) {
+                        cell = "▁"; // đường 0: thấy được trục
+                        cellColor = BORDER;
+                    } else if (part == 0) {
+                        cell = grid && x % 2 == 0 ? "·" : " ";
+                        cellColor = BORDER;
+                    } else {
+                        cell = String.valueOf(EIGHTHS[part]);
+                        cellColor = color;
+                    }
                 }
-                double v = tail.get(x - offset);
-                int level = max <= 0 ? 0 : (int) Math.round(v / max * height * 8);
-                if (row == height - 1 && level == 0) {
-                    sb.append(BORDER).append('▁').append(color); // đường 0: thấy được trục
-                    continue;
+                if (!cellColor.equals(last)) {
+                    sb.append(cellColor);
+                    last = cellColor;
                 }
-                sb.append(EIGHTHS[Math.max(0, Math.min(8, level - levelBelow))]);
+                sb.append(cell);
             }
             out.add(sb.append(RESET).toString());
         }
-        String label = DIM + "▲ " + compact(max) + RESET;
-        if (!out.isEmpty() && width > width(label) + 2) {
-            out.set(0, label + overlayRest(out.get(0), width(label), color));
-        }
         return out;
-    }
-
-    /** Phần còn lại của 1 dòng biểu đồ sau {@code skip} ô đầu (đè nhãn lên góc trái). */
-    private static String overlayRest(String line, int skip, String color) {
-        String p = plain(line);
-        int cut = 0;
-        int w = 0;
-        while (cut < p.length() && w < skip) {
-            w += Math.max(0, WCWidth.wcwidth(p.codePointAt(cut)));
-            cut += Character.charCount(p.codePointAt(cut));
-        }
-        return color + p.substring(cut) + RESET;
     }
 
     // ------------------------------------------------------------------ màu theo mức
@@ -273,16 +309,46 @@ public final class Screen {
     /** Khối 1/8 theo chiều ngang (trái sang phải). */
     private static final char[] PARTIAL = {' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'};
 
-    private static final char[] SPARK = {'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'};
+    /** Bit của chấm braille theo dòng (0 = trên cùng): cột trái, cột phải. */
+    private static final int[] DOT_LEFT = {0x01, 0x02, 0x04, 0x40};
+    private static final int[] DOT_RIGHT = {0x08, 0x10, 0x20, 0x80};
 
-    /** {@code width} giá trị cuối, cao theo giá trị lớn nhất trong khoảng đó (toàn 0 thì vạch thấp nhất). */
+    /**
+     * Đường xu hướng mảnh bằng chấm braille, mỗi ô 2 mẫu, 4 mức (0 nằm sát đáy, khác 0 luôn nhích lên 1 mức), cao theo
+     * giá trị lớn nhất trong {@code 2 * width} mẫu cuối. Chưa đủ mẫu thì phần bên trái là chấm mờ ở đáy.
+     */
     public static String spark(List<Double> values, int width) {
-        List<Double> tail = values.subList(Math.max(0, values.size() - width), values.size());
+        return spark(values, width, GREEN);
+    }
+
+    public static String spark(List<Double> values, int width, String color) {
+        int n = width * 2;
+        List<Double> tail = values.subList(Math.max(0, values.size() - n), values.size());
         double max = tail.stream().mapToDouble(Double::doubleValue).max().orElse(0);
-        StringBuilder sb = new StringBuilder(BORDER);
-        sb.append(String.valueOf(SPARK[0]).repeat(width - tail.size())).append(GREEN); // chưa đủ mẫu: vạch mờ
-        for (double v : tail) {
-            sb.append(max <= 0 ? SPARK[0] : SPARK[(int) Math.round(v / max * (SPARK.length - 1))]);
+        int offset = n - tail.size();
+        StringBuilder sb = new StringBuilder();
+        String last = "";
+        for (int c = 0; c < width; c++) {
+            int bits = 0;
+            boolean empty = true;
+            for (int k = 0; k < 2; k++) {
+                int i = c * 2 + k - offset;
+                int row;
+                if (i < 0) {
+                    row = 3;
+                } else {
+                    empty = false;
+                    double v = tail.get(i);
+                    row = v <= 0 || max <= 0 ? 3 : 2 - (int) Math.round(v / max * 2);
+                }
+                bits |= (k == 0 ? DOT_LEFT : DOT_RIGHT)[row];
+            }
+            String col = empty ? BORDER : color;
+            if (!col.equals(last)) {
+                sb.append(col);
+                last = col;
+            }
+            sb.appendCodePoint(0x2800 + bits);
         }
         return sb.append(RESET).toString();
     }
@@ -337,19 +403,29 @@ public final class Screen {
             w[widest]--;
             total--;
         }
+        // còn dư chỗ: cột đầu (tên) thêm vài ô, rồi nới khoảng cách giữa các cột (tối đa 4 ô) - số liệu không bị dạt hết
+        // sang mép phải; phần còn dư nữa để trống bên phải
+        int gap = 1;
         if (total < width && n > 0) {
-            w[0] += width - total; // cột đầu (tên) lấy phần dư
+            int extra = width - total;
+            int first = n == 1 ? extra : Math.min(extra, 4);
+            w[0] += first;
+            extra -= first;
+            if (n > 1) {
+                gap += Math.min(3, extra / (n - 1));
+            }
         }
+        String sep = " ".repeat(gap);
         List<String> out = new ArrayList<>();
         StringBuilder head = new StringBuilder();
         for (int c = 0; c < n; c++) {
-            head.append(c == 0 ? "" : " ").append(HEADER)
+            head.append(c == 0 ? "" : sep).append(HEADER)
                     .append(cols.get(c).align() == 'r' ? right(cols.get(c).header(), w[c]) : fit(cols.get(c).header(), w[c]));
         }
         out.add(head.toString());
         int visible = Math.max(0, height - 1);
         int first = selected < visible ? 0 : selected - visible + 1;
-        int tableWidth = n - 1;
+        int tableWidth = (n - 1) * gap;
         for (int x : w) {
             tableWidth += x;
         }
@@ -360,7 +436,7 @@ public final class Screen {
                 // không có RESET giữa dòng nên vệt tô liền, không đứt ở khoảng trắng giữa các cột
                 for (int c = 0; c < n; c++) {
                     String cell = plain(rows.get(i).get(c));
-                    line.append(c == 0 ? "" : " ").append(plain(cols.get(c).align() == 'r' ? right(cell, w[c]) : fit(cell, w[c])));
+                    line.append(c == 0 ? "" : sep).append(plain(cols.get(c).align() == 'r' ? right(cell, w[c]) : fit(cell, w[c])));
                 }
                 int pad = Math.max(0, width - width(line.toString()));
                 out.add((focused ? SELECTED : SELECTED_DIM) + line + " ".repeat(pad) + RESET);
@@ -370,7 +446,7 @@ public final class Screen {
                 String cell = rows.get(i).get(c);
                 boolean num = cols.get(c).align() == 'r';
                 String colored = num && cell.matches("[-+]?[0-9.,]+[kMG%]?") ? NUMBER + cell : cell;
-                line.append(c == 0 ? "" : " ").append(num ? right(colored, w[c]) : fit(colored, w[c]));
+                line.append(c == 0 ? "" : sep).append(num ? right(colored, w[c]) : fit(colored, w[c]));
             }
             out.add(line + " ".repeat(Math.max(0, width - tableWidth)) + RESET);
         }

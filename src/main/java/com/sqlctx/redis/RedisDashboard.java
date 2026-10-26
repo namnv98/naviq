@@ -21,6 +21,8 @@ import java.util.Map;
 final class RedisDashboard implements Dashboard.View {
 
     static final int HISTORY = 120;
+    private static final int NODES = 0;
+    private static final int WARNINGS = 1;
 
     private final RedisConnection connection;
     private final RedisProfile profile;
@@ -70,13 +72,21 @@ final class RedisDashboard implements Dashboard.View {
 
     @Override
     public int panels() {
-        return 1;
+        return 2;
+    }
+
+    @Override
+    public boolean hasDetail(int panel) {
+        return panel == NODES;
     }
 
     @Override
     public int rows(int panel) {
         synchronized (history) {
-            return history.isEmpty() ? 0 : history.peekLast().nodes().size();
+            if (history.isEmpty()) {
+                return 0;
+            }
+            return panel == NODES ? history.peekLast().nodes().size() : RedisStats.warnings(history.peekLast()).size();
         }
     }
 
@@ -146,9 +156,11 @@ final class RedisDashboard implements Dashboard.View {
         long masters = cur.nodes().stream().filter(RedisStats.Node::master).count();
         List<Screen.Tile> tiles = new ArrayList<>(List.of(
                 new Screen.Tile("ops/s", Screen.GREEN + Screen.compact(ops.isEmpty() ? 0 : ops.get(ops.size() - 1)),
-                        I18n.t("stats.peak", Screen.compact(ops.stream().mapToDouble(Double::doubleValue).max().orElse(0)))),
+                        I18n.t("stats.peak", Screen.compact(ops.stream().mapToDouble(Double::doubleValue).max().orElse(0))),
+                        ops, Screen.GREEN),
                 new Screen.Tile(I18n.t("stats.redis.memory"), (allLimited ? Screen.level(used / max, 0.8, 0.9) : "\u001b[38;5;252m")
-                        + bytes(used), allLimited ? Math.round(100 * used / max) + "% maxmemory" : Screen.YELLOW + I18n.t("stats.redis.noLimit")),
+                        + bytes(used), allLimited ? Math.round(100 * used / max) + "% maxmemory" : Screen.YELLOW + I18n.t("stats.redis.noLimit"),
+                        memorySeries(h), "\u001b[38;5;75m"),
                 new Screen.Tile("Clients", "\u001b[38;5;252m" + clients, (blocked > 0 ? Screen.YELLOW : "") + "blocked " + blocked),
                 new Screen.Tile("Hit", hit < 0 ? Screen.DIM + "-" : Screen.level(100 - hit, 20, 50) + String.format("%.1f%%", hit),
                         Screen.compact(hits) + " hit · " + Screen.compact(misses) + " miss"),
@@ -160,13 +172,28 @@ final class RedisDashboard implements Dashboard.View {
         out.addAll(Screen.tiles(tiles, width));
 
         List<String> warnings = RedisStats.warnings(cur);
-        int warnLines = Math.min(4, Math.max(1, warnings.size()));
-        int fixed = out.size() + (warnLines + 2) + 1;
-        if (height - fixed >= 6 + 6) {
-            out.addAll(Screen.box("ops/s · " + I18n.t("stats.redis.nodes", cur.nodes().size(), masters, cur.nodes().size() - masters),
-                    Screen.area(ops, width - 4, 4, Screen.GREEN), width, 6, false));
+        int warnLines = Dashboard.warningLines(warnings.size(), height);
+        int avail = height - out.size() - (warnLines + 2) - 1;
+        int chart = Dashboard.chartHeight(avail, state.detail ? avail : cur.nodes().size() + 3);
+        if (chart > 0) {
+            int top = chart >= Dashboard.CHART_ROWS_AT ? chart / 2 : chart;
+            double avg = ops.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+            out.addAll(Screen.box("ops/s  " + Screen.GREEN + "\u001b[1m" + Screen.compact(ops.isEmpty() ? 0 : ops.get(ops.size() - 1))
+                    + Screen.RESET + Screen.DIM + " · " + I18n.t("stats.avg") + " " + Screen.compact(Math.round(avg))
+                    + " · " + I18n.t("stats.redis.nodes", cur.nodes().size(), masters, cur.nodes().size() - masters) + Screen.RESET,
+                    Screen.area(ops, width - 4, top - 2, Screen.GREEN_RAMP), width, top, false));
+            if (top < chart) {
+                int half = width / 2;
+                List<Double> clientHistory = h.stream().map(s -> s.nodes().stream().filter(n -> n.error() == null)
+                        .mapToDouble(n -> num(n.info(), "connected_clients")).sum()).toList();
+                List<String> m = Screen.box(I18n.t("stats.redis.memory") + "  \u001b[38;5;75m\u001b[1m" + bytes(used) + Screen.RESET,
+                        Screen.area(memorySeries(h), half - 4, chart - top - 2, Screen.BLUE_RAMP, RedisDashboard::bytes), half, chart - top, false);
+                List<String> c = Screen.box("Clients  \u001b[38;5;141m\u001b[1m" + clients + Screen.RESET,
+                        Screen.area(clientHistory, width - half - 4, chart - top - 2, Screen.PURPLE_RAMP), width - half, chart - top, false);
+                out.addAll(Screen.beside(m, half, c));
+            }
         }
-        int panelHeight = Math.max(4, height - out.size() - (warnLines + 2) - 1);
+        int panelHeight = Math.max(4, avail - chart);
         if (state.detail) {
             out.addAll(detail(cur, state, width, panelHeight));
         } else {
@@ -206,11 +233,18 @@ final class RedisDashboard implements Dashboard.View {
                 }
             }
             out.addAll(Screen.box("Node " + Screen.DIM + rows.size(), Screen.table(cols, rows, width - 4, panelHeight - 2,
-                    state.selected[0], true), width, panelHeight, true));
+                    state.selected[NODES], state.panel == NODES), width, panelHeight, state.panel == NODES));
         }
-        out.addAll(Dashboard.warningsBox(warnings, warnLines, I18n.t("redis.stats.ok"), width));
-        out.add(Dashboard.footer(I18n.t(state.detail ? "stats.keysDetail" : "stats.keysOnePanel"), width));
+        out.addAll(Dashboard.warningsBox(warnings, warnLines, I18n.t("redis.stats.ok"), width, state.selected[WARNINGS],
+                state.panel == WARNINGS));
+        out.add(Dashboard.footer(I18n.t(state.detail ? "stats.keysDetail" : "stats.keys"), width));
         return out.subList(0, Math.min(out.size(), height));
+    }
+
+    /** Tổng used_memory của các node sống qua các mẫu. */
+    private static List<Double> memorySeries(List<RedisStats.Sample> h) {
+        return h.stream().map(s -> s.nodes().stream().filter(n -> n.error() == null)
+                .mapToDouble(n -> num(n.info(), "used_memory")).sum()).toList();
     }
 
     private static String bytes(double b) {
