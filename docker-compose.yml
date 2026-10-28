@@ -64,7 +64,8 @@ services:
       timeout: 5s
       retries: 10
 
-  # Redis Cluster 3 master trong 1 container (chỉ chạy khi gọi: docker compose --profile redis-cluster up -d).
+  # Redis Cluster 3 master (7001-7003) + 3 replica (7004-7006) trong 1 container (chỉ chạy khi gọi:
+  # docker compose --profile redis-cluster up -d).
   # Node tự báo địa chỉ 127.0.0.1:700x và cổng ngoài = cổng trong, nên MOVED/ASK từ máy host nối thẳng được.
   # sqlctx --dialect=redis --host=127.0.0.1 --port=7001 --password=Redis123
   redis-cluster:
@@ -75,17 +76,21 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - |
-        for p in 7001 7002 7003; do
+        for p in 7001 7002 7003 7004 7005 7006; do
           redis-server --port $$p --cluster-enabled yes --cluster-config-file /tmp/nodes-$$p.conf \
             --cluster-announce-ip 127.0.0.1 --requirepass Redis123 --masterauth Redis123 --daemonize yes
         done
         sleep 1
-        redis-cli -a Redis123 --no-auth-warning --cluster create 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 --cluster-yes
+        redis-cli -a Redis123 --no-auth-warning --cluster create 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 \
+          127.0.0.1:7004 127.0.0.1:7005 127.0.0.1:7006 --cluster-replicas 1 --cluster-yes
         exec tail -f /dev/null
     ports:
       - "7001:7001"
       - "7002:7002"
       - "7003:7003"
+      - "7004:7004"
+      - "7005:7005"
+      - "7006:7006"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -p 7001 -a Redis123 --no-auth-warning cluster info | grep -q cluster_state:ok"]
       interval: 5s

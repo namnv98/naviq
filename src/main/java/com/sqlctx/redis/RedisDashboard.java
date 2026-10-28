@@ -27,8 +27,14 @@ final class RedisDashboard implements Dashboard.View {
     private final RedisConnection connection;
     private final RedisProfile profile;
     private final Deque<RedisStats.Sample> history = new ArrayDeque<>();
-    private volatile Map<String, String> commandStats = Map.of();
-    private volatile String commandStatsOf;
+    private volatile Detail detail;
+
+    /**
+     * Số liệu chỉ lấy khi đang xem chi tiết 1 node: INFO commandstats lần này và lần trước (cùng node - để tính lệnh tốn
+     * thời gian trong khoảng giữa 2 lần thay vì từ lúc khởi động), LATENCY LATEST.
+     */
+    record Detail(String address, long at, Map<String, String> commands, long beforeAt, Map<String, String> before, Object latency) {
+    }
 
     RedisDashboard(RedisConnection connection, RedisProfile profile) {
         this.connection = connection;
@@ -46,19 +52,26 @@ final class RedisDashboard implements Dashboard.View {
         }
         if (state.detail && !s.nodes().isEmpty()) {
             RedisStats.Node n = s.nodes().get(Math.min(state.selected[0], s.nodes().size() - 1));
-            Object reply = connection.cluster() ? connection.callOn(n.address(), "INFO", "commandstats")
-                    : n.address().equals(connection.address()) ? connection.call("INFO", "commandstats") : direct(n.address());
-            commandStats = reply instanceof RespClient.Bulk b ? RedisStats.parseInfo(b.utf8()) : Map.of();
-            commandStatsOf = n.address();
+            Object reply = callOn(n.address(), "INFO", "commandstats");
+            Map<String, String> commands = reply instanceof RespClient.Bulk b ? RedisStats.parseInfo(b.utf8()) : Map.of();
+            Detail last = detail;
+            boolean same = last != null && last.address().equals(n.address()) && !last.commands().isEmpty();
+            detail = new Detail(n.address(), s.at(), commands, same ? last.at() : 0, same ? last.commands() : null,
+                    callOn(n.address(), "LATENCY", "LATEST"));
         }
     }
 
+    private Object callOn(String address, String... args) throws IOException {
+        return connection.cluster() ? connection.callOn(address, args)
+                : address.equals(connection.address()) ? connection.call(args) : direct(address, args);
+    }
+
     /** Replica của server đơn/sentinel: không nằm trong RedisConnection, nối riêng 1 lần. */
-    private Object direct(String address) {
+    private Object direct(String address, String... args) {
         int colon = address.lastIndexOf(':');
         try (RespClient c = RespClient.connect(connection.profile().at(address.substring(0, colon),
                 Integer.parseInt(address.substring(colon + 1))), 2000)) {
-            return c.call("INFO", "commandstats");
+            return c.call(args);
         } catch (IOException | RuntimeException e) {
             return null;
         }
@@ -86,7 +99,7 @@ final class RedisDashboard implements Dashboard.View {
             if (history.isEmpty()) {
                 return 0;
             }
-            return panel == NODES ? history.peekLast().nodes().size() : RedisStats.warnings(history.peekLast()).size();
+            return panel == NODES ? history.peekLast().nodes().size() : RedisStats.warnings(new ArrayList<>(history)).size();
         }
     }
 
@@ -146,13 +159,15 @@ final class RedisDashboard implements Dashboard.View {
         double used = live.stream().mapToDouble(n -> num(n.info(), "used_memory")).sum();
         double max = live.stream().mapToDouble(n -> num(n.info(), "maxmemory")).sum();
         boolean allLimited = !live.isEmpty() && live.stream().allMatch(n -> num(n.info(), "maxmemory") > 0);
-        double hits = live.stream().mapToDouble(n -> num(n.info(), "keyspace_hits")).sum();
-        double misses = live.stream().mapToDouble(n -> num(n.info(), "keyspace_misses")).sum();
-        double hit = hits + misses == 0 ? -1 : 100 * hits / (hits + misses);
+        RedisTrend trend = new RedisTrend(h);
+        Double hit = trend.hitRate(null, RedisTrend.WINDOW_MS);
+        RedisTrend.Delta hits = trend.total("keyspace_hits", RedisTrend.WINDOW_MS);
+        RedisTrend.Delta misses = trend.total("keyspace_misses", RedisTrend.WINDOW_MS);
+        RedisTrend.Delta evicted = trend.total("evicted_keys", RedisTrend.WINDOW_MS);
+        RedisTrend.Delta expired = trend.total("expired_keys", RedisTrend.WINDOW_MS);
         long keys = cur.nodes().stream().filter(RedisStats.Node::master).mapToLong(n -> RedisStats.keys(n.info())).sum();
         long clients = live.stream().mapToLong(n -> (long) num(n.info(), "connected_clients")).sum();
         long blocked = live.stream().mapToLong(n -> (long) num(n.info(), "blocked_clients")).sum();
-        long evicted = live.stream().mapToLong(n -> (long) num(n.info(), "evicted_keys")).sum();
         long masters = cur.nodes().stream().filter(RedisStats.Node::master).count();
         List<Screen.Tile> tiles = new ArrayList<>(List.of(
                 new Screen.Tile("ops/s", Screen.GREEN + Screen.compact(ops.isEmpty() ? 0 : ops.get(ops.size() - 1)),
@@ -162,16 +177,18 @@ final class RedisDashboard implements Dashboard.View {
                         + bytes(used), allLimited ? Math.round(100 * used / max) + "% maxmemory" : Screen.YELLOW + I18n.t("stats.redis.noLimit"),
                         memorySeries(h), "\u001b[38;5;75m"),
                 new Screen.Tile("Clients", "\u001b[38;5;252m" + clients, (blocked > 0 ? Screen.YELLOW : "") + "blocked " + blocked),
-                new Screen.Tile("Hit", hit < 0 ? Screen.DIM + "-" : Screen.level(100 - hit, 20, 50) + String.format("%.1f%%", hit),
-                        Screen.compact(hits) + " hit · " + Screen.compact(misses) + " miss"),
+                new Screen.Tile("Hit", hit == null ? Screen.DIM + "…" : hit.isNaN() ? Screen.DIM + "-"
+                        : Screen.level(100 - hit, 20, 50) + String.format("%.1f%%", hit),
+                        hits == null || misses == null ? "-" : perSecond(hits) + " hit/s · " + perSecond(misses) + " miss/s"),
                 new Screen.Tile(I18n.t("stats.redis.keys"), "\u001b[38;5;252m" + Screen.compact(keys),
-                        (evicted > 0 ? Screen.YELLOW : "") + "evicted " + Screen.compact(evicted))));
+                        evicted == null ? "-" : (evicted.value() > 0 ? Screen.YELLOW : "") + "evicted " + perSecond(evicted) + "/s"
+                                + Screen.DIM + " · expired " + (expired == null ? "-" : perSecond(expired)) + "/s")));
         if (width < 90) {
             tiles.remove(4);
         }
         out.addAll(Screen.tiles(tiles, width));
 
-        List<String> warnings = RedisStats.warnings(cur);
+        List<String> warnings = RedisStats.warnings(h);
         int warnLines = Dashboard.warningLines(warnings.size(), height);
         int avail = height - out.size() - (warnLines + 2) - 1;
         int chart = Dashboard.chartHeight(avail, state.detail ? avail : cur.nodes().size() + 3);
@@ -195,7 +212,7 @@ final class RedisDashboard implements Dashboard.View {
         }
         int panelHeight = Math.max(4, avail - chart);
         if (state.detail) {
-            out.addAll(detail(cur, state, width, panelHeight));
+            out.addAll(detail(cur, trend, state, width, panelHeight));
         } else {
             List<List<String>> rows = new ArrayList<>();
             for (RedisStats.Node n : cur.nodes()) {
@@ -203,27 +220,37 @@ final class RedisDashboard implements Dashboard.View {
                 String role = n.master() ? Screen.FOCUS + "master" + Screen.RESET + (n.replicas() >= 0 ? Screen.DIM + " +" + n.replicas() : "")
                         : Screen.DIM + "replica";
                 if (n.error() != null) {
-                    rows.add(List.of(n.address(), role, "", Screen.RED + "✖ down", "-", "-", "-", "-", "-", "-"));
+                    rows.add(List.of(n.address(), role, "", Screen.RED + "✖ down", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"));
                     continue;
                 }
                 double nodeMax = num(i, "maxmemory");
                 // thanh chỉ có nghĩa khi có maxmemory; không đặt thì so với RAM máy gần như luôn rỗng
                 String mem = (nodeMax > 0 ? Screen.bar(num(i, "used_memory") / nodeMax, 6, 0.8, 0.9) + " " : "")
                         + i.getOrDefault("used_memory_human", "-");
+                Double cpu = trend.cpu(n.address());
+                RedisTrend.Delta nodeEvicted = trend.delta(n.address(), "evicted_keys", RedisTrend.WINDOW_MS);
                 rows.add(List.of(n.address(), role, Screen.spark(opsSeries(h, n.address()), 10),
-                        Screen.compact(num(i, "instantaneous_ops_per_sec")), mem,
+                        Screen.compact(num(i, "instantaneous_ops_per_sec")),
+                        cpu == null ? "…" : (cpu >= 80 ? Screen.YELLOW : "") + Math.round(cpu) + "%", mem,
                         (num(i, "mem_fragmentation_ratio") > 1.5 && num(i, "used_memory") > 100L * 1024 * 1024 ? Screen.YELLOW : "")
                                 + i.getOrDefault("mem_fragmentation_ratio", "-"),
-                        i.getOrDefault("connected_clients", "-"), RedisStats.hitRate(i), Screen.compact(RedisStats.keys(i)),
-                        (num(i, "evicted_keys") > 0 ? Screen.YELLOW : "") + Screen.compact(num(i, "evicted_keys"))));
+                        i.getOrDefault("connected_clients", "-"), RedisStats.hitText(trend.hitRate(n.address(), RedisTrend.WINDOW_MS), i),
+                        Screen.compact(RedisStats.keys(i)),
+                        nodeEvicted == null ? "…" : (nodeEvicted.value() > 0 ? Screen.YELLOW : "") + perSecond(nodeEvicted),
+                        kbps(num(i, "instantaneous_input_kbps")) + "/" + kbps(num(i, "instantaneous_output_kbps")),
+                        replLag(cur, n), clockText(trend, n.address())));
             }
             List<Column> cols = new ArrayList<>(List.of(new Column("node", 'l', 10),
                     new Column(I18n.t("redis.stats.role"), 'l', 7), new Column(I18n.t("stats.trend"), 'l', 10),
-                    new Column("ops/s", 'r', 5), new Column(I18n.t("stats.redis.memory"), 'l', 12), new Column("frag", 'r', 4),
-                    new Column("clients", 'r', 7), new Column("hit %", 'r', 5), new Column("keys", 'r', 4),
-                    new Column("evicted", 'r', 7)));
-            if (width < 110) { // màn hẹp: bỏ cột ít cần (xu hướng, frag, evicted) để địa chỉ node không bị co mất chữ
-                for (int c : new int[]{9, 5, 2}) {
+                    new Column("ops/s", 'r', 5), new Column("cpu", 'r', 4), new Column(I18n.t("stats.redis.memory"), 'l', 12),
+                    new Column("frag", 'r', 4), new Column("clients", 'r', 7), new Column("hit %", 'r', 5), new Column("keys", 'r', 4),
+                    new Column("evicted/s", 'r', 9), new Column("net kB/s", 'r', 8), new Column("repl lag", 'r', 8),
+                    new Column(I18n.t("stats.redis.clock"), 'r', 7)));
+            // màn hẹp: bỏ cột ít cần để địa chỉ node không bị co mất chữ
+            List<String> drop = width < 110 ? List.of(I18n.t("stats.trend"), "cpu", "frag", "evicted/s", "net kB/s", I18n.t("stats.redis.clock"))
+                    : width < 150 ? List.of("net kB/s", I18n.t("stats.redis.clock")) : List.of();
+            for (int c = cols.size() - 1; c >= 0; c--) {
+                if (drop.contains(cols.get(c).header())) {
                     cols.remove(c);
                     for (int r = 0; r < rows.size(); r++) {
                         List<String> row = new ArrayList<>(rows.get(r));
@@ -241,6 +268,44 @@ final class RedisDashboard implements Dashboard.View {
         return out.subList(0, Math.min(out.size(), height));
     }
 
+    private static String perSecond(RedisTrend.Delta d) {
+        return Screen.compact(Math.round(d.perSecond() * 10) / 10.0);
+    }
+
+    private static String kbps(double v) {
+        return Screen.compact(Math.round(v * 10) / 10.0);
+    }
+
+    /** Đồng hồ node lệch bao nhiêu so với máy này: mờ khi khớp, vàng quá 2s, đỏ khi vừa nhảy; "-" nếu Redis &lt; 7. */
+    private static String clockText(RedisTrend trend, String address) {
+        Long jump = trend.clockJumpMs(address, RedisTrend.WINDOW_MS);
+        Long skew = trend.skewMs(address);
+        if (jump != null) {
+            return Screen.RED + "↯ " + RedisStats.signed(jump);
+        }
+        if (skew == null) {
+            return Screen.DIM + "-";
+        }
+        return (Math.abs(skew) >= RedisTrend.SKEW_MS ? Screen.YELLOW : Screen.DIM) + RedisStats.signed(skew);
+    }
+
+    /** Replica chậm hơn master bao nhiêu byte (vàng từ 1 MB), kèm số giây chưa ack nếu đáng kể; master: "-". */
+    private static String replLag(RedisStats.Sample cur, RedisStats.Node n) {
+        if (n.master()) {
+            return Screen.DIM + "-";
+        }
+        if ("down".equals(n.info().get("master_link_status"))) {
+            return Screen.RED + "✖ link";
+        }
+        RedisStats.ReplLag lag = RedisStats.replicaLag(cur, n);
+        if (lag == null) {
+            return Screen.DIM + "?";
+        }
+        String text = (lag.bytes() >= RedisStats.REPLICA_BEHIND_BYTES ? Screen.YELLOW : "") + RedisStats.bytes(lag.bytes());
+        return lag.ackSeconds() >= 2 ? text + (lag.ackSeconds() >= RedisStats.REPLICA_ACK_S ? Screen.YELLOW : Screen.DIM)
+                + " " + lag.ackSeconds() + "s" : text;
+    }
+
     /** Tổng used_memory của các node sống qua các mẫu. */
     private static List<Double> memorySeries(List<RedisStats.Sample> h) {
         return h.stream().map(s -> s.nodes().stream().filter(n -> n.error() == null)
@@ -248,16 +313,10 @@ final class RedisDashboard implements Dashboard.View {
     }
 
     private static String bytes(double b) {
-        String[] units = {"B", "KB", "MB", "GB", "TB"};
-        int u = 0;
-        while (b >= 1024 && u < units.length - 1) {
-            b /= 1024;
-            u++;
-        }
-        return u == 0 ? String.format("%.0f B", b) : String.format("%.1f %s", b, units[u]);
+        return RedisStats.bytes(b);
     }
 
-    private List<String> detail(RedisStats.Sample cur, Dashboard.State state, int width, int height) {
+    private List<String> detail(RedisStats.Sample cur, RedisTrend trend, Dashboard.State state, int width, int height) {
         if (cur.nodes().isEmpty()) {
             return Screen.box("", List.of(), width, height, true);
         }
@@ -267,7 +326,20 @@ final class RedisDashboard implements Dashboard.View {
         if (n.error() != null) {
             left.add(Screen.RED + n.error() + Screen.RESET);
         } else {
-            section(left, "Server", i, "redis_version", "redis_mode", "uptime_in_days", "tcp_port", "process_id");
+            section(left, "Server", i, "redis_version", "redis_mode", "tcp_port", "process_id");
+            left.add("  " + Screen.DIM + String.format("%-28s", "uptime") + Screen.RESET
+                    + Screen.duration((long) num(i, "uptime_in_seconds") * 1000));
+            if (i.containsKey("server_time_usec")) {
+                Long skew = trend.skewMs(n.address());
+                String time = java.time.Instant.ofEpochMilli((long) num(i, "server_time_usec") / 1000)
+                        .atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                left.add("  " + Screen.DIM + String.format("%-28s", I18n.t("stats.redis.serverTime")) + Screen.RESET + time
+                        + (skew == null ? "" : Screen.DIM + " (" + I18n.t("stats.redis.skew") + " " + Screen.RESET
+                        + (Math.abs(skew) >= RedisTrend.SKEW_MS ? Screen.YELLOW : "") + RedisStats.signed(skew) + Screen.RESET
+                        + Screen.DIM + " " + I18n.t("stats.redis.vsLocal") + ")" + Screen.RESET));
+                left.add("  " + Screen.DIM + " ".repeat(28) + I18n.t("stats.redis.clockNote") + Screen.RESET);
+                left.add("  " + Screen.DIM + " ".repeat(28) + I18n.t("stats.redis.clockNote2") + Screen.RESET);
+            }
             section(left, I18n.t("stats.redis.memory"), i, "used_memory_human", "used_memory_peak_human", "used_memory_rss_human",
                     "mem_fragmentation_ratio", "maxmemory_human", "maxmemory_policy");
             section(left, "Clients", i, "connected_clients", "blocked_clients", "maxclients", "rejected_connections");
@@ -282,41 +354,28 @@ final class RedisDashboard implements Dashboard.View {
             }
         }
         List<String> right = new ArrayList<>();
-        right.add(Screen.HEADER + I18n.t("stats.redis.topCommands") + Screen.RESET);
-        if (n.address().equals(commandStatsOf) && !commandStats.isEmpty()) {
-            record Cmd(String name, long calls, double usec, double perCall) {
-            }
-            List<Cmd> cmds = new ArrayList<>();
-            commandStats.forEach((k, v) -> {
-                if (k.startsWith("cmdstat_")) {
-                    long calls = 0;
-                    double usec = 0;
-                    double per = 0;
-                    for (String part : v.split(",")) {
-                        String[] kv = part.split("=", 2);
-                        if (kv.length == 2) {
-                            switch (kv[0]) {
-                                case "calls" -> calls = Long.parseLong(kv[1]);
-                                case "usec" -> usec = Double.parseDouble(kv[1]);
-                                case "usec_per_call" -> per = Double.parseDouble(kv[1]);
-                                default -> {
-                                }
-                            }
-                        }
-                    }
-                    cmds.add(new Cmd(k.substring(8).replace('|', ' '), calls, usec, per));
-                }
-            });
-            cmds.sort(Comparator.comparingDouble((Cmd c) -> -c.usec()));
-            List<List<String>> rows = new ArrayList<>();
-            for (Cmd c : cmds) {
-                rows.add(List.of(c.name(), Screen.compact(c.calls()), String.format("%.1f", c.perCall()),
-                        Screen.compact(c.usec() / 1000)));
-            }
-            right.addAll(Screen.table(List.of(new Column(I18n.t("stats.redis.command"), 'l', 8), new Column("calls", 'r', 5),
-                    new Column("µs/call", 'r', 7), new Column("ms", 'r', 4)), rows, Math.max(20, width / 2 - 4), height - 3, -1, false));
+        int rightWidth = width >= 100 ? width - width / 2 - 4 : width - 4;
+        Detail d = detail;
+        if (d != null && n.address().equals(d.address()) && !d.commands().isEmpty()) {
+            right.addAll(commands(d, rightWidth, Math.max(3, (height - 8) / 2)));
         } else {
+            right.add(Screen.HEADER + I18n.t("stats.redis.topCommands") + Screen.RESET);
             right.add(Screen.DIM + I18n.t("stats.loading") + Screen.RESET);
+        }
+        right.add("");
+        right.add(Screen.HEADER + I18n.t("stats.redis.slowlog") + Screen.RESET);
+        if (n.slowlog().isEmpty()) {
+            right.add(Screen.DIM + "  " + I18n.t("stats.redis.slowlogEmpty") + Screen.RESET);
+        }
+        java.time.format.DateTimeFormatter clock = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss");
+        for (RedisStats.Slow slow : n.slowlog()) {
+            String time = java.time.Instant.ofEpochSecond(slow.time()).atZone(java.time.ZoneId.systemDefault()).format(clock);
+            right.add("  " + Screen.DIM + time + Screen.RESET + "  " + (slow.micros() >= 100_000 ? Screen.YELLOW : "")
+                    + String.format("%8s", RedisStats.millis(slow.micros())) + Screen.RESET + "  " + slow.command());
+        }
+        if (d != null && n.address().equals(d.address())) {
+            right.add("");
+            right.addAll(latency(d.latency()));
         }
         String title = n.address() + " · " + (n.master() ? "master" : "replica");
         if (width >= 100) {
@@ -328,6 +387,81 @@ final class RedisDashboard implements Dashboard.View {
         all.add("");
         all.addAll(right);
         return Screen.box(title, all, width, height, true);
+    }
+
+    /** calls và usec của mỗi lệnh trong INFO commandstats ("cmdstat_get:calls=10,usec=52,usec_per_call=5.20,..."). */
+    static Map<String, double[]> commandTotals(Map<String, String> stats) {
+        Map<String, double[]> out = new java.util.TreeMap<>();
+        stats.forEach((k, v) -> {
+            if (k.startsWith("cmdstat_")) {
+                double[] cu = new double[2];
+                for (String part : v.split(",")) {
+                    String[] kv = part.split("=", 2);
+                    if (kv.length == 2 && (kv[0].equals("calls") || kv[0].equals("usec"))) {
+                        cu[kv[0].equals("calls") ? 0 : 1] = Double.parseDouble(kv[1]);
+                    }
+                }
+                out.put(k.substring(8).replace('|', ' '), cu);
+            }
+        });
+        return out;
+    }
+
+    /**
+     * Lệnh tốn thời gian nhất: có lần trước thì tính trong khoảng giữa 2 lần (calls/s, µs mỗi lệnh, ms server bận mỗi
+     * giây) - cho biết lệnh nào đang làm server bận lúc này; chưa có thì từ lúc server khởi động.
+     */
+    private static List<String> commands(Detail d, int width, int rows) {
+        record Cmd(String name, double calls, double usec) {
+        }
+        Map<String, double[]> now = commandTotals(d.commands());
+        Map<String, double[]> before = d.before() == null ? null : commandTotals(d.before());
+        double seconds = before == null ? 0 : Math.max(0.001, (d.at() - d.beforeAt()) / 1000.0);
+        List<Cmd> cmds = new ArrayList<>();
+        now.forEach((name, cu) -> {
+            double[] b = before == null ? null : before.getOrDefault(name, new double[2]);
+            double calls = b == null ? cu[0] : cu[0] - b[0];
+            double usec = b == null ? cu[1] : cu[1] - b[1];
+            if (calls > 0) {
+                cmds.add(new Cmd(name, calls, usec));
+            }
+        });
+        cmds.sort(Comparator.comparingDouble((Cmd c) -> -c.usec()));
+        List<String> out = new ArrayList<>();
+        out.add(Screen.HEADER + (before == null ? I18n.t("stats.redis.topCommands")
+                : I18n.t("stats.redis.topCommandsRecent", Screen.duration(d.at() - d.beforeAt()))) + Screen.RESET);
+        if (cmds.isEmpty()) {
+            out.add(Screen.DIM + "  " + I18n.t("stats.redis.noCommands", Screen.duration(d.at() - d.beforeAt())) + Screen.RESET);
+            return out;
+        }
+        List<List<String>> table = new ArrayList<>();
+        for (Cmd c : cmds) {
+            table.add(before == null
+                    ? List.of(c.name(), Screen.compact(c.calls()), String.format("%.1f", c.usec() / c.calls()), Screen.compact(Math.round(c.usec() / 1000)))
+                    : List.of(c.name(), Screen.compact(Math.round(c.calls() / seconds * 10) / 10.0), String.format("%.1f", c.usec() / c.calls()),
+                    String.format("%.1f", c.usec() / 1000 / seconds)));
+        }
+        out.addAll(Screen.table(List.of(new Column(I18n.t("stats.redis.command"), 'l', 8),
+                new Column(before == null ? "calls" : "calls/s", 'r', 5), new Column("µs/call", 'r', 7),
+                new Column(before == null ? "ms" : "ms/s", 'r', 4)), table, Math.max(20, width), rows + 1, -1, false));
+        return out;
+    }
+
+    /** LATENCY LATEST: [[sự kiện, giờ, ms lần gần nhất, ms lớn nhất], ...]; trống khi chưa bật latency-monitor-threshold. */
+    private static List<String> latency(Object reply) {
+        List<String> out = new ArrayList<>();
+        out.add(Screen.HEADER + "LATENCY LATEST" + Screen.RESET);
+        if (!(reply instanceof List<?> events) || events.isEmpty()) {
+            out.add(Screen.DIM + "  " + I18n.t("stats.redis.latencyOff") + Screen.RESET);
+            return out;
+        }
+        for (Object e : events) {
+            if (e instanceof List<?> f && f.size() >= 4) {
+                out.add("  " + String.format("%-22s", RedisSession.text(f.get(0))) + Screen.DIM + " latest " + Screen.RESET
+                        + f.get(2) + "ms" + Screen.DIM + " · max " + Screen.RESET + f.get(3) + "ms");
+            }
+        }
+        return out;
     }
 
     private static List<String> fitAll(List<String> lines, int w) {

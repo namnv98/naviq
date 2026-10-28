@@ -33,11 +33,11 @@ class RedisDashboardTest {
                 total_system_memory:17179869184
                 total_system_memory_human:16.00G
                 connected_clients:3
-                keyspace_hits:9
-                keyspace_misses:1
+                keyspace_hits:%d
+                keyspace_misses:%d
                 role:%s
                 db0:keys=10,expires=0,avg_ttl=0
-                """.formatted(ops, master ? "master" : "slave")), null);
+                """.formatted(ops, 9 + 9 * (ops / 100), 1 + ops / 100, master ? "master" : "slave")), null);
     }
 
     @Test
@@ -45,7 +45,7 @@ class RedisDashboardTest {
         RedisProfile p = new RedisProfile("dev", "127.0.0.1", 6379, null, null, 0, false, false, null, null);
         RedisDashboard d = new RedisDashboard(null, p);
         for (int i = 0; i < 3; i++) {
-            d.add(new RedisStats.Sample(List.of(node("10.0.0.1:6379", true, 100 * i), node("10.0.0.2:6379", false, 5),
+            d.add(new RedisStats.Sample(i * 2000L, List.of(node("10.0.0.1:6379", true, 100 * i), node("10.0.0.2:6379", false, 5),
                     new RedisStats.Node("10.0.0.3:6379", true, 0, java.util.Map.of(), "refused")), "ok", List.of()));
         }
         for (int width : new int[]{80, 140}) {

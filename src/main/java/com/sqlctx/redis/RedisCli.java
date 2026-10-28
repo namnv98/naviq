@@ -928,8 +928,11 @@ public final class RedisCli {
         }
         try (RedisConnection c = RedisConnection.open(session.profile(), 5000)) {
             if (batch || !Dashboard.supported(terminal)) {
+                // 2 mẫu cách nhau 1 chu kỳ: hit %, evict, lệnh chậm tính trong khoảng đó thay vì từ lúc server khởi động
+                RedisStats.Sample first = RedisStats.sample(c);
+                Thread.sleep(seconds * 1000);
                 RedisStats.Sample s = RedisStats.sample(c);
-                printLines(RedisStats.frame(RedisStats.title(session.profile(), s, seconds, false), s, terminal.getWidth()));
+                printLines(RedisStats.frame(RedisStats.title(session.profile(), s, seconds, false), List.of(first, s), terminal.getWidth()));
                 return true;
             }
             if (Dashboard.show(terminal, new RedisDashboard(c, session.profile()), seconds * 1000)) {
@@ -939,6 +942,9 @@ public final class RedisCli {
             return true;
         } catch (IOException e) {
             println(RED + "(error) " + e.getMessage() + RESET);
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             return false;
         }
     }

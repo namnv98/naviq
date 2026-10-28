@@ -359,6 +359,12 @@ final class KafkaStats {
 
     /** Đỏ (✖) = đang có sự cố; vàng (⚠) = nên xem lại. */
     static List<String> warnings(Sample prev, Sample cur) {
+        return warnings(prev == null ? List.of(cur) : List.of(prev, cur));
+    }
+
+    /** {@code history}: các mẫu theo thời gian, mẫu cuối là hiện tại - xu hướng lag của group xét qua cả lịch sử ({@link GroupTrend}). */
+    static List<String> warnings(List<Sample> history) {
+        Sample cur = history.get(history.size() - 1);
         List<String> red = new ArrayList<>();
         List<String> yellow = new ArrayList<>();
         if (cur.brokers().stream().noneMatch(Broker::controller) && cur.quorum() == null) {
@@ -392,13 +398,20 @@ final class KafkaStats {
         if (cur.quorum() != null && cur.quorum().maxLag() > 1000) {
             yellow.add(I18n.t("kafka.stats.quorumLag", cur.quorum().maxLag()));
         }
-        Map<String, Group> before = prev == null ? Map.of() : prev.groups().stream().collect(Collectors.toMap(Group::id, g -> g));
+        GroupTrend trend = new GroupTrend(history);
         for (Group g : cur.groups()) {
-            Group p = before.get(g.id());
-            if (g.lag() > 0 && g.members() == 0) {
+            if (g.lag() == 0) {
+                continue;
+            }
+            Long slow;
+            long stalled;
+            if (g.members() == 0) {
                 yellow.add(I18n.t("kafka.stats.lagNoConsumer", g.id(), g.lag()));
-            } else if (p != null && g.members() > 0 && g.lag() > p.lag()) {
-                yellow.add(I18n.t("kafka.stats.lagGrowing", g.id(), g.lag() - p.lag(), g.lag()));
+            } else if ((stalled = trend.stalledMs(g.id())) >= GroupTrend.STALL_MS) {
+                red.add(I18n.t("kafka.stats.stalled", g.id(), g.members(), Screen.duration(stalled), g.lag()));
+            } else if ((slow = trend.slowBy(g.id())) != null) {
+                yellow.add(I18n.t("kafka.stats.lagGrowing", g.id(), slow, trend.commits(g.id()).size(),
+                        Screen.duration(trend.commitSpanMs(g.id())), g.lag()));
             }
         }
         List<String> out = new ArrayList<>();

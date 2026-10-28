@@ -72,7 +72,7 @@ final class KafkaDashboard implements Dashboard.View {
             return 0;
         }
         return panel == TOPICS ? topics(cur, previous()).size() : panel == GROUPS ? cur.groups().size()
-                : KafkaStats.warnings(previous(), cur).size();
+                : KafkaStats.warnings(snapshot()).size();
     }
 
     private KafkaStats.Sample current() {
@@ -286,7 +286,7 @@ final class KafkaDashboard implements Dashboard.View {
         }
         out.addAll(Screen.tiles(tiles, width));
 
-        List<String> warnings = KafkaStats.warnings(prev, cur);
+        List<String> warnings = KafkaStats.warnings(h);
         int warnLines = Dashboard.warningLines(warnings.size(), height);
         int avail = height - out.size() - (warnLines + 2) - 1;
         int topicCount = topics(cur, prev).size();
@@ -327,19 +327,23 @@ final class KafkaDashboard implements Dashboard.View {
                 prev.groups().forEach(g -> lagPrev.put(g.id(), g.lag()));
             }
             Map<String, Double> readRate = lastReadRates(h);
+            GroupTrend trends = new GroupTrend(h);
             List<List<String>> groupRows = new ArrayList<>();
             for (KafkaStats.Group g : groups(cur)) {
                 Long before = lagPrev.get(g.id());
                 String trend = before == null ? "" : g.lag() > before ? Screen.YELLOW + "↑ +" + Screen.compact(g.lag() - before)
                         : g.lag() < before ? Screen.GREEN + "↓ " + Screen.compact(before - g.lag()) : Screen.DIM + "=";
                 Double read = readRate.get(g.id());
-                String lagColor = g.lag() == 0 ? Screen.GREEN : g.members() == 0 || before != null && g.lag() > before ? Screen.YELLOW : "";
+                String lagColor = g.lag() == 0 ? Screen.GREEN : g.members() > 0 && trends.stalledMs(g.id()) >= GroupTrend.STALL_MS
+                        ? Screen.RED : g.members() == 0 || trends.slowBy(g.id()) != null ? Screen.YELLOW : "";
                 groupRows.add(List.of(g.id(), stateColor(g.state()) + g.state(), String.valueOf(g.members()),
                         lagColor + Screen.compact(g.lag()), trend,
-                        read == null ? "…" : Screen.compact(Math.round(read * 10) / 10.0)));
+                        read == null ? "…" : Screen.compact(Math.round(read * 10) / 10.0),
+                        behindText(trends.timeLag(g.id())), etaText(trends.eta(g.id()))));
             }
             List<Column> groupCols = List.of(new Column("group", 'l', 8), new Column("state", 'l', 5), new Column("mem", 'r', 3),
-                    new Column("lag", 'r', 5), new Column("Δ", 'l', 6), new Column(I18n.t("stats.kafka.readShort"), 'r', 6));
+                    new Column("lag", 'r', 5), new Column("Δ", 'l', 6), new Column(I18n.t("stats.kafka.readShort"), 'r', 6),
+                    new Column(I18n.t("stats.kafka.behind"), 'r', 5), new Column("ETA", 'r', 5));
             String topicTitle = "Topic " + Screen.DIM + topics.size() + " (+" + internal + " " + I18n.t("stats.kafka.internal") + ")";
             String groupTitle = "Consumer group " + Screen.DIM + groupRows.size();
             if (width >= 110) {
@@ -371,6 +375,32 @@ final class KafkaDashboard implements Dashboard.View {
         double avg = series.stream().mapToDouble(Double::doubleValue).average().orElse(0);
         return name + "  " + color + "\u001b[1m" + rate(series) + Screen.RESET + Screen.DIM + " · " + I18n.t("stats.avg")
                 + " " + Screen.compact(Math.round(avg * 10) / 10.0) + Screen.RESET;
+    }
+
+    /** Group chậm bao lâu: vàng từ 1 phút, đỏ từ 10 phút; thêm dấu lớn hơn khi lịch sử chưa đủ dài để thấy hết. */
+    private static String behindText(GroupTrend.TimeLag lag) {
+        if (lag == null || lag.atLeast() && lag.ms() < 1000) {
+            return "…";
+        }
+        String color = lag.ms() >= 600_000 ? Screen.RED : lag.ms() >= 60_000 ? Screen.YELLOW : lag.ms() == 0 ? Screen.GREEN : "";
+        return color + (lag.atLeast() ? ">" : "") + Screen.duration(lag.ms());
+    }
+
+    /** Thời gian đuổi kịp: "-" đã hết lag, "=" đọc kịp tốc độ ghi (lag giữ quanh 1 mức), "∞" lag không giảm. */
+    private static String etaText(Double eta) {
+        if (eta == null) {
+            return "…";
+        }
+        if (eta == 0) {
+            return Screen.DIM + "-";
+        }
+        if (eta.isNaN()) {
+            return Screen.DIM + "=";
+        }
+        if (eta.isInfinite()) {
+            return Screen.YELLOW + "∞";
+        }
+        return Screen.duration(Math.round(eta * 1000));
     }
 
     private static String stateColor(String state) {

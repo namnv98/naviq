@@ -354,6 +354,21 @@ public final class Screen {
     }
 
     /** 19920 -> "19.9k", 1.2e6 -> "1.2M". */
+    /** "45s", "3m05s", "2h05m", "3d04h". */
+    public static String duration(long ms) {
+        long s = Math.max(0, ms / 1000);
+        if (s < 60) {
+            return s + "s";
+        }
+        if (s < 3600) {
+            return String.format("%dm%02ds", s / 60, s % 60);
+        }
+        if (s < 86400) {
+            return String.format("%dh%02dm", s / 3600, s % 3600 / 60);
+        }
+        return String.format("%dd%02dh", s / 86400, s % 86400 / 3600);
+    }
+
     public static String compact(double v) {
         if (v >= 1e9) {
             return String.format("%.1fG", v / 1e9);
