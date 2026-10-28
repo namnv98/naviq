@@ -223,3 +223,11 @@ về offset đầu (mặc định)	to the earliest offset (default)
 CSV topic,partition,offset	CSV topic,partition,offset
 chỉ xem trước, không đổi gì	preview only, change nothing
 đá các member đang chạy ra khỏi group trước khi đặt lại	remove running members from the group before resetting
+xoá segment cũ theo retention.ms / retention.bytes	delete old segments by retention.ms / retention.bytes
+chỉ giữ message mới nhất của mỗi key	keep only the latest message of each key
+compact và vẫn xoá theo retention	compact and still delete by retention
+giữ nguyên nén của producer	keep the producer's compression
+không nén	no compression
+giờ producer đặt cho message	time set by the producer
+giờ broker ghi message	time the broker appended the message
+mọi replica	all replicas

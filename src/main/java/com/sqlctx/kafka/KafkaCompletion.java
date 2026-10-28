@@ -21,6 +21,10 @@ public final class KafkaCompletion {
     private KafkaCompletion() {
     }
 
+    /** {@code bool}: config kiểu BOOLEAN; {@code defaultValue}: giá trị topic/broker mới sẽ nhận (null nếu không biết). */
+    public record ConfigMeta(boolean bool, String defaultValue) {
+    }
+
     /** Dữ liệu thật - KafkaSession cài, có cache vì gọi ở mỗi phím gõ. */
     public interface Source {
         List<String> topics();
@@ -35,6 +39,11 @@ public final class KafkaCompletion {
 
         /** {@code entityType}: topics hoặc brokers. */
         List<String> configNames(String entityType);
+
+        /** Kiểu và giá trị mặc định của 1 config (null nếu không biết) - để gợi ý giá trị sau "tên=". */
+        default ConfigMeta config(String entityType, String name) {
+            return null;
+        }
 
         List<String> subjects();
 
@@ -142,16 +151,15 @@ public final class KafkaCompletion {
                     add(items, source.brokers(), word, "broker");
                 }
             }
-            case "topicConfig" -> keyValue(items, source.configNames("topics"), word);
+            case "topicConfig" -> keyValue(items, source, "topics", word, false);
             case "configList", "configNames" -> {
                 String type = p.has("--broker") || p.has("--broker-defaults") ? "brokers"
                         : p.has("--topic") ? "topics" : p.get("--entity-type");
                 if ("topics".equals(type) || "brokers".equals(type)) {
-                    List<String> names = source.configNames(type);
                     if (kind.equals("configList")) {
-                        keyValue(items, names, word);
+                        keyValue(items, source, type, word, true);
                     } else {
-                        listOf(items, names, word, "config");
+                        listOf(items, source.configNames(type), word, "config");
                     }
                 }
             }
@@ -190,19 +198,64 @@ public final class KafkaCompletion {
         }
     }
 
-    /** "retention.ms=|" chưa gõ "=": gợi ý tên config kèm "=" để gõ tiếp giá trị. */
-    private static void keyValue(List<MenuItem> items, List<String> names, String word) {
-        int comma = word.lastIndexOf(',');
+    /**
+     * "retention.ms|": gợi ý tên config kèm "=" để gõ tiếp giá trị; "cleanup.policy=|": gợi ý giá trị - danh sách giá
+     * trị hợp lệ của config dạng liệt kê ({@link KafkaTools#CONFIG_VALUES}), true/false cho config BOOLEAN, và giá trị
+     * mặc định cluster đang áp dụng. {@code list}: nhiều config cách nhau dấu phẩy (kafka-configs --add-config), giá trị
+     * có dấu phẩy phải bọc [ ].
+     */
+    private static void keyValue(List<MenuItem> items, Source source, String entityType, String word, boolean list) {
+        int comma = list ? lastTopLevelComma(word) : -1;
         String part = word.substring(comma + 1);
-        if (part.contains("=")) {
+        String done = comma < 0 ? "" : word.substring(0, comma + 1);
+        int eq = part.indexOf('=');
+        if (eq < 0) {
+            for (String n : source.configNames(entityType)) {
+                if (n.startsWith(part)) {
+                    items.add(new MenuItem(done + n + "=", null, "config"));
+                }
+            }
             return;
         }
-        String done = comma < 0 ? "" : word.substring(0, comma + 1);
-        for (String n : names) {
-            if (n.startsWith(part)) {
-                items.add(new MenuItem(done + n + "=", null, "config"));
+        String name = part.substring(0, eq);
+        String typed = part.substring(eq + 1);
+        String prefix = done + name + "=";
+        ConfigMeta meta = source.config(entityType, name);
+        java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
+        for (String[] v : KafkaTools.CONFIG_VALUES.getOrDefault(name, List.of())) {
+            values.put(list && v[0].contains(",") ? "[" + v[0] + "]" : v[0], I18n.tr(v[1]));
+        }
+        if (meta != null && meta.bool()) {
+            values.putIfAbsent("true", null);
+            values.putIfAbsent("false", null);
+        }
+        if (meta != null && meta.defaultValue() != null && !meta.defaultValue().isEmpty()) {
+            String def = list && meta.defaultValue().contains(",") ? "[" + meta.defaultValue() + "]" : meta.defaultValue();
+            String note = I18n.t("kafka.configDefault");
+            values.merge(def, note, (old, n) -> old == null ? n : old + " · " + n);
+        }
+        values.forEach((v, help) -> {
+            if (v.toLowerCase(Locale.ROOT).startsWith(typed.toLowerCase(Locale.ROOT))) {
+                items.add(new MenuItem(prefix + v, help, "value"));
+            }
+        });
+    }
+
+    /** Dấu phẩy cuối cùng không nằm trong [ ] (giá trị dạng danh sách của kafka-configs). */
+    private static int lastTopLevelComma(String word) {
+        int depth = 0;
+        int last = -1;
+        for (int i = 0; i < word.length(); i++) {
+            char c = word.charAt(i);
+            if (c == '[') {
+                depth++;
+            } else if (c == ']') {
+                depth = Math.max(0, depth - 1);
+            } else if (c == ',' && depth == 0) {
+                last = i;
             }
         }
+        return last;
     }
 
     private static List<MenuItem> meta(String head, String word, Source source) {

@@ -98,4 +98,15 @@ class RedisCommandTreeTest {
         assertTrue(RedisCommandTree.compareVersions("7.10.0", "7.9.9") > 0);
         assertEquals(0, RedisCommandTree.compareVersions("7.0", "7.0.0"));
     }
+
+    @Test
+    void độPhứcTạpRútGọn() {
+        java.util.function.Function<String, String> shortOf = c -> new RedisCommandSpec("X", "generic", java.util.Set.of(), "X", "",
+                null, null, c).complexityShort();
+        assertEquals("O(1)", shortOf.apply("O(1)"));
+        assertEquals("O(1) · O(N)", shortOf.apply("O(1) for each element added, so O(N) to add N elements when the command is called with multiple arguments."));
+        assertEquals("O(log(N)+M)", shortOf.apply("O(log(N)+M) with N being the number of elements in the sorted set"));
+        assertEquals(null, shortOf.apply("Depends on subcommand."));
+        assertEquals(null, shortOf.apply(null));
+    }
 }

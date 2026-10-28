@@ -525,6 +525,30 @@ public final class KafkaTools {
                     "key.message=", "protobuf: message dùng cho key")));
 
     /** Cho test (I18nTest): mọi mô tả giá trị cố định đều phải có bản tiếng Anh. */
+    /**
+     * Giá trị hợp lệ của các config dạng liệt kê (theo validator của Kafka 3.9) - Admin API chỉ cho biết kiểu, không
+     * cho biết danh sách giá trị. Config của broker dùng tên có tiền tố log. cho cùng ý nghĩa.
+     */
+    static final Map<String, List<String[]>> CONFIG_VALUES;
+
+    static {
+        List<String[]> cleanup = List.of(new String[]{"delete", "xoá segment cũ theo retention.ms / retention.bytes"},
+                new String[]{"compact", "chỉ giữ message mới nhất của mỗi key"},
+                new String[]{"compact,delete", "compact và vẫn xoá theo retention"});
+        List<String[]> compression = List.of(new String[]{"producer", "giữ nguyên nén của producer"},
+                new String[]{"uncompressed", "không nén"}, new String[]{"zstd", null}, new String[]{"lz4", null},
+                new String[]{"snappy", null}, new String[]{"gzip", null});
+        List<String[]> timestamp = List.of(new String[]{"CreateTime", "giờ producer đặt cho message"},
+                new String[]{"LogAppendTime", "giờ broker ghi message"});
+        List<String[]> throttled = List.<String[]>of(new String[]{"*", "mọi replica"});
+        CONFIG_VALUES = Map.ofEntries(
+                Map.entry("cleanup.policy", cleanup), Map.entry("log.cleanup.policy", cleanup),
+                Map.entry("compression.type", compression),
+                Map.entry("message.timestamp.type", timestamp), Map.entry("log.message.timestamp.type", timestamp),
+                Map.entry("leader.replication.throttled.replicas", throttled),
+                Map.entry("follower.replication.throttled.replicas", throttled));
+    }
+
     public static final Map<String, List<String[]>> ENUMS_FOR_TEST = ENUMS;
 
     private static List<String[]> properties(String... pairs) {

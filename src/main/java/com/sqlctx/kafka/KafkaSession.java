@@ -188,6 +188,25 @@ final class KafkaSession implements AutoCloseable, KafkaCompletion.Source {
     /** Tên config của topic / broker (lấy từ 1 topic / broker có thật - danh sách đầy đủ kèm cả mặc định). */
     @Override
     public List<String> configNames(String entityType) {
+        return configEntries(entityType).stream().map(e -> e.split("\0", -1)[0]).toList();
+    }
+
+    @Override
+    public KafkaCompletion.ConfigMeta config(String entityType, String name) {
+        for (String e : configEntries(entityType)) {
+            String[] f = e.split("\0", -1);
+            if (f[0].equals(name)) {
+                return new KafkaCompletion.ConfigMeta("BOOLEAN".equals(f[1]), f[2].isEmpty() ? null : f[2]);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Config của 1 topic / broker có thật, mỗi mục "tên\0kiểu\0giá trị mặc định": mặc định chỉ lấy khi giá trị đó không
+     * phải do topic/broker này tự đặt (DEFAULT_CONFIG, mặc định động/tĩnh của broker) - đó là giá trị topic mới sẽ nhận.
+     */
+    private List<String> configEntries(String entityType) {
         return cached("configs\0" + entityType, () -> {
             try {
                 ConfigResource r;
@@ -202,12 +221,19 @@ final class KafkaSession implements AutoCloseable, KafkaCompletion.Source {
                     if (t.isEmpty()) {
                         return List.of();
                     }
-                    r = new ConfigResource(ConfigResource.Type.TOPIC, t.get(0));
+                    // topic nội bộ (__consumer_offsets, _schemas) tự đặt cleanup.policy, compression.type: lấy mẫu topic thường
+                    r = new ConfigResource(ConfigResource.Type.TOPIC, t.stream().filter(n -> !n.startsWith("_")).findFirst().orElse(t.get(0)));
                 }
-                TreeSet<String> out = new TreeSet<>();
-                admin().describeConfigs(List.of(r)).all().get(1500, TimeUnit.MILLISECONDS).get(r).entries()
-                        .forEach(e -> out.add(e.name()));
-                return List.copyOf(out);
+                java.util.TreeMap<String, String> out = new java.util.TreeMap<>();
+                admin().describeConfigs(List.of(r)).all().get(1500, TimeUnit.MILLISECONDS).get(r).entries().forEach(e -> {
+                    boolean inherited = switch (e.source()) {
+                        case DEFAULT_CONFIG, DYNAMIC_DEFAULT_BROKER_CONFIG, STATIC_BROKER_CONFIG -> true;
+                        default -> false;
+                    };
+                    String def = inherited && e.value() != null && !e.isSensitive() ? e.value() : "";
+                    out.put(e.name(), e.name() + "\0" + (e.type() == null ? "" : e.type().name()) + "\0" + def);
+                });
+                return List.copyOf(out.values());
             } catch (Exception e) {
                 return List.of();
             }

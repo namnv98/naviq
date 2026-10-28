@@ -51,8 +51,9 @@ public final class RedisCommandTree {
     }
 
     /** {@code name} viết hoa, lệnh con dạng "CONFIG GET"; {@code subcommands} theo tên lệnh con viết hoa ("GET"). */
+    /** {@code complexity}: độ phức tạp theo docs ("O(N) where N is ..."), null nếu docs không có. */
     public record Command(String name, String group, String summary, String deprecatedSince, String replacedBy,
-                          List<Arg> args, Map<String, Command> subcommands, Set<String> flags) {
+                          List<Arg> args, Map<String, Command> subcommands, Set<String> flags, String complexity) {
     }
 
     private final String source;
@@ -207,7 +208,7 @@ public final class RedisCommandTree {
             subs.put(e.getKey(), olderThan(e.getValue(), version));
         }
         return new Command(c.name(), c.group(), c.summary(), c.deprecatedSince(), c.replacedBy(),
-                olderArgs(c.args(), version, false), subs, c.flags());
+                olderArgs(c.args(), version, false), subs, c.flags(), c.complexity());
     }
 
     private static List<Arg> olderArgs(List<Arg> args, String version, boolean inOneOf) {
@@ -313,7 +314,8 @@ public final class RedisCommandTree {
             }
         }
         return new Command(name, str(doc, "group"), str(doc, "summary"), str(doc, "deprecated_since"),
-                str(doc, "replaced_by"), args(doc.get("arguments")), subs, flags.getOrDefault(name, Set.of()));
+                str(doc, "replaced_by"), args(doc.get("arguments")), subs, flags.getOrDefault(name, Set.of()),
+                str(doc, "complexity"));
     }
 
     private static List<Arg> args(JsonElement e) {

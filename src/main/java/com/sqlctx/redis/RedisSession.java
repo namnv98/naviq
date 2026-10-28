@@ -59,6 +59,7 @@ final class RedisSession implements RedisCompletion.Source {
     void dbChanged(int db) {
         profile = profile.withDb(db);
         closeMeta();
+        recentKeys.clear();
     }
 
     /** Sau Ctrl+C (socket bị đóng giữa lệnh) hoặc mất kết nối: nối lại cùng DB. Transaction đang dở coi như mất. */
@@ -125,6 +126,8 @@ final class RedisSession implements RedisCompletion.Source {
     }
 
     private final Map<String, KeyScan> keyScans = new ConcurrentHashMap<>();
+    /** Key vừa dùng/vừa thấy ở DB hiện tại - RedisCli cho học sau mỗi lệnh, gợi ý key đưa chúng lên đầu. */
+    final RecentKeys recentKeys = new RecentKeys();
 
     /**
      * Gợi ý gọi hàm này ở MỖI phím gõ (popup tự hiện): "u", "us", "use"... Đã quét trọn với 1 tiền tố ngắn hơn thì
@@ -132,6 +135,10 @@ final class RedisSession implements RedisCompletion.Source {
      */
     @Override
     public List<String> keys(String prefix, String type) {
+        return recentKeys.merge(prefix, type, scanKeys(prefix, type));
+    }
+
+    private List<String> scanKeys(String prefix, String type) {
         long now = System.currentTimeMillis();
         String t = String.valueOf(type);
         for (int len = prefix.length(); len >= 0; len--) {

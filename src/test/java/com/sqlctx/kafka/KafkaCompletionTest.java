@@ -40,6 +40,14 @@ class KafkaCompletionTest {
             return List.of("orders-value");
         }
 
+        public KafkaCompletion.ConfigMeta config(String entityType, String name) {
+            return switch (name) {
+                case "cleanup.policy" -> new KafkaCompletion.ConfigMeta(false, "delete");
+                case "preallocate" -> new KafkaCompletion.ConfigMeta(true, "false");
+                default -> null;
+            };
+        }
+
         public List<String> contexts() {
             return List.of("kafka-dev", "kafka-prod");
         }
@@ -117,5 +125,23 @@ class KafkaCompletionTest {
         assertEquals(List.of("--generate", "--execute", "--verify", "--cancel", "--list"),
                 values("kafka-reassign-partitions ").subList(0, 5));
         assertFalse(values("kafka-reassign-partitions --list ").contains("--reassignment-json-file"));
+    }
+
+    @Test
+    void giáTrịCủaConfigSauDấuBằng() {
+        assertEquals(List.of("cleanup.policy=delete", "cleanup.policy=compact", "cleanup.policy=compact,delete"),
+                values("kafka-topics --create --topic t --config cleanup.policy="));
+        assertEquals(List.of("cleanup.policy=compact", "cleanup.policy=compact,delete"),
+                values("kafka-topics --create --topic t --config cleanup.policy=co"));
+        // kafka-configs: nhiều config cách nhau dấu phẩy, giá trị có dấu phẩy phải bọc [ ]
+        assertEquals(List.of("a=1,cleanup.policy=[compact,delete]"),
+                values("kafka-configs --alter --topic t --add-config a=1,cleanup.policy=[c"));
+        assertEquals(List.of("x=[a,b],cleanup.policy="), values("kafka-configs --alter --topic t --add-config x=[a,b],clea"));
+        // BOOLEAN từ cluster: true/false, kèm mặc định
+        assertEquals(List.of("preallocate=true", "preallocate=false"),
+                values("kafka-topics --create --topic t --config preallocate="));
+        var help = KafkaCompletion.suggest("kafka-topics --create --topic t --config cleanup.policy=d", 57, SOURCE);
+        assertTrue(help.get(0).description().contains("mặc định của cluster"), help.get(0).description());
+        assertEquals(List.of("compression.type=zstd"), values("kafka-topics --create --topic t --config compression.type=zs"));
     }
 }

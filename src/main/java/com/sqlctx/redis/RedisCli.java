@@ -245,7 +245,8 @@ public final class RedisCli {
             if (inspection.error() != null) {
                 statusBar.setHint(inspection.error() + (spec != null ? "  ·  " + spec.syntax() : ""), true);
             } else if (spec != null) {
-                statusBar.setHint(spec.syntax() + "  —  " + spec.summary(), false);
+                String complexity = spec.complexityShort();
+                statusBar.setHint(spec.syntax() + "  —  " + spec.summary() + (complexity != null ? "  ·  " + complexity : ""), false);
             } else {
                 statusBar.setHint(null, false);
             }
@@ -396,6 +397,9 @@ public final class RedisCli {
         boolean ok = !(reply instanceof RespError);
         if (ok) {
             track(cmd, words, reply);
+            List<RedisSyntax.Role> roles = RedisSyntax.inspect(String.join(" ",
+                    words.stream().map(RedisCompletion::quoteIfNeeded).toList())).roles();
+            session.recentKeys.learn(words, roles, spec != null ? spec.keyType() : null, reply);
         }
         show(RedisReplyRenderer.render(words, reply), reply);
         if (!batch) {
@@ -665,6 +669,9 @@ public final class RedisCli {
         lines.add(TITLE + spec.syntax() + RESET);
         lines.add("  " + spec.summary());
         lines.add(DIM + I18n.t("redis.help.group", spec.group()) + (spec.flags().isEmpty() ? "" : " · " + String.join(", ", spec.flags())) + RESET);
+        if (spec.complexity() != null && !spec.complexity().isBlank()) {
+            lines.add(DIM + I18n.t("redis.help.complexity", spec.complexity()) + RESET);
+        }
         RedisCommandSpec.all().stream().filter(s -> s.name().startsWith(spec.name() + " "))
                 .forEach(s -> lines.add("  " + s.syntax() + DIM + " - " + s.summary() + RESET));
         return printLines(lines);

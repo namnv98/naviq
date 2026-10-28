@@ -31,7 +31,25 @@ import java.util.stream.Collectors;
  * chừng): tiếng Việt lấy commands.vi.tsv nếu có.
  */
 public record RedisCommandSpec(String name, String group, Set<String> flags, String syntax, String serverSummary,
-                               String deprecatedSince, String replacedBy) {
+                               String deprecatedSince, String replacedBy, String complexity) {
+
+    private static final java.util.regex.Pattern BIG_O = java.util.regex.Pattern.compile("O\\((?:[^()]|\\([^()]*\\))*\\)");
+
+    /**
+     * Độ phức tạp rút gọn cho dòng gợi ý: các ký hiệu O(...) trong docs ("O(1) for each element added, so O(N)..." ->
+     * "O(1) · O(N)"), không có thì null. Câu giải thích đầy đủ xem trong \h.
+     */
+    public String complexityShort() {
+        if (complexity == null || complexity.isBlank()) {
+            return null;
+        }
+        java.util.LinkedHashSet<String> found = new java.util.LinkedHashSet<>();
+        java.util.regex.Matcher m = BIG_O.matcher(complexity);
+        while (m.find() && found.size() < 3) {
+            found.add(m.group().replace(" ", ""));
+        }
+        return found.isEmpty() ? null : String.join(" · ", found);
+    }
 
     public String summary() {
         String base = I18n.vi() ? VIETNAMESE.getOrDefault(name, serverSummary) : serverSummary;
@@ -133,7 +151,7 @@ public record RedisCommandSpec(String name, String group, Set<String> flags, Str
                 : c.name() + " " + String.join(" | ", c.subcommands().keySet());
         String summary = c.summary() == null ? "" : c.summary();
         return new RedisCommandSpec(c.name(), c.group() == null ? "" : c.group(), Set.copyOf(flags), syntax, summary,
-                c.deprecatedSince(), c.replacedBy());
+                c.deprecatedSince(), c.replacedBy(), c.complexity());
     }
 
     /** Cú pháp hiển thị như trên redis.io: [tuỳ chọn], a | b, <nhóm bắt buộc>, [lặp ...]. */
