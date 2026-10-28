@@ -54,7 +54,7 @@ class RedisDashboardTest {
             List<String> screen = d.render(width, 30, st);
             screen.forEach(l -> assertTrue(Screen.width(l) <= width, width + ": " + l));
             String all = String.join("\n", screen).replaceAll("\u001b\\[[0-9;]*m", "");
-            for (String expected : List.of("REDIS", "● ok", "ops/s", "205", "no maxmemory", "90.0%", "10.0.0.2:6379", "replica",
+            for (String expected : List.of("REDIS", "● ok", "ops/s", "205", "0% of host RAM", "90.0%", "10.0.0.2:6379", "replica",
                     "✖ down", "cannot get INFO - refused", "maxmemory not set")) {
                 assertTrue(all.contains(expected), width + " thiếu " + expected + "\n" + all);
             }

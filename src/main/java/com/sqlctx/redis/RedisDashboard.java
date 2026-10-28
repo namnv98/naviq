@@ -174,7 +174,7 @@ final class RedisDashboard implements Dashboard.View {
                         I18n.t("stats.peak", Screen.compact(ops.stream().mapToDouble(Double::doubleValue).max().orElse(0))),
                         ops, Screen.GREEN),
                 new Screen.Tile(I18n.t("stats.redis.memory"), (allLimited ? Screen.level(used / max, 0.8, 0.9) : "\u001b[38;5;252m")
-                        + bytes(used), allLimited ? Math.round(100 * used / max) + "% maxmemory" : Screen.YELLOW + I18n.t("stats.redis.noLimit"),
+                        + bytes(used), allLimited ? Math.round(100 * used / max) + "% maxmemory" : hostShare(cur),
                         memorySeries(h), "\u001b[38;5;75m"),
                 new Screen.Tile("Clients", "\u001b[38;5;252m" + clients, (blocked > 0 ? Screen.YELLOW : "") + "blocked " + blocked),
                 new Screen.Tile("Hit", hit == null ? Screen.DIM + "…" : hit.isNaN() ? Screen.DIM + "-"
@@ -266,6 +266,20 @@ final class RedisDashboard implements Dashboard.View {
                 state.panel == WARNINGS));
         out.add(Dashboard.footer(I18n.t(state.detail ? "stats.keysDetail" : "stats.keys"), width));
         return out.subList(0, Math.min(out.size(), height));
+    }
+
+    /**
+     * Không phải node nào cũng có maxmemory: % RAM máy của máy dùng nhiều nhất (các node cùng máy cộng lại), vàng từ 25%,
+     * đỏ từ 50% như cảnh báo; không biết RAM máy thì chỉ nói không đặt maxmemory.
+     */
+    private static String hostShare(RedisStats.Sample cur) {
+        double worst = cur == null ? -1 : RedisStats.hostMemory(cur).stream().filter(m -> m.total() > 0 && !m.unbounded().isEmpty())
+                .mapToDouble(m -> (double) m.used() / m.total()).max().orElse(-1);
+        if (worst < 0) {
+            return Screen.YELLOW + I18n.t("stats.redis.noLimit");
+        }
+        return Screen.level(worst, RedisStats.MEMORY_HOST_RATIO / 2, RedisStats.MEMORY_HOST_RATIO)
+                + I18n.t("stats.redis.ofSystemPct", Math.round(100 * worst));
     }
 
     private static String perSecond(RedisTrend.Delta d) {

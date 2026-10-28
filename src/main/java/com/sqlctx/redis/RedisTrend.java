@@ -96,6 +96,36 @@ final class RedisTrend {
         return any ? new Delta(value, ms) : null;
     }
 
+    /**
+     * Tốc độ thay đổi (đơn vị/giây) của 1 giá trị tức thời như used_memory_rss: từ mẫu đầu tiên cách hiện tại ít nhất
+     * {@code windowMs} (hoặc mẫu cũ nhất cùng lần chạy) tới hiện tại - lên xuống ở giữa không cắt khoảng như bộ đếm.
+     * Null nếu khoảng quan sát ngắn hơn {@code minMs}.
+     */
+    Double gaugeRate(String address, String key, long windowMs, long minMs) {
+        int last = h.size() - 1;
+        RedisStats.Node cur = last < 0 ? null : node(last, address);
+        if (cur == null) {
+            return null;
+        }
+        long now = h.get(last).at();
+        int from = last;
+        for (int i = last - 1; i >= 0; i--) {
+            RedisStats.Node n = node(i, address);
+            if (n == null || !n.info().getOrDefault("run_id", "").equals(cur.info().getOrDefault("run_id", ""))) {
+                break;
+            }
+            from = i;
+            if (h.get(i).at() <= now - windowMs) {
+                break;
+            }
+        }
+        long ms = now - h.get(from).at();
+        if (ms < minMs) {
+            return null;
+        }
+        return (num(cur.info(), key) - num(node(from, address).info(), key)) * 1000 / ms;
+    }
+
     /** Hit % trong khoảng (null: chưa đủ mẫu; NaN: không có lần đọc key nào); {@code address} null = cả cụm. */
     Double hitRate(String address, long windowMs) {
         Delta hits = address == null ? total("keyspace_hits", windowMs) : delta(address, "keyspace_hits", windowMs);

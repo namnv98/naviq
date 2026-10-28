@@ -403,12 +403,80 @@ final class RedisStats {
         if (!noMax.isEmpty()) {
             yellow.add(I18n.t("redis.stats.noMaxmemory", String.join(", ", noMax)));
         }
+        for (HostMemory m : hostMemory(s)) {
+            if (m.total() <= 0) {
+                continue;
+            }
+            String pct = String.valueOf(Math.round(100.0 * m.used() / m.total()));
+            if (!m.unbounded().isEmpty()) {
+                double rate = m.unbounded().stream().mapToDouble(a -> {
+                    Double r = trend.gaugeRate(a, "used_memory_rss", RedisTrend.WINDOW_MS, MEMORY_RATE_MIN_MS);
+                    return r == null ? 0 : r;
+                }).sum();
+                long eta = rate > 0 ? Math.round(Math.max(0, m.total() - m.used()) / rate * 1000) : Long.MAX_VALUE;
+                if (eta <= MEMORY_ETA_MS) {
+                    red.add(I18n.t("redis.stats.memoryRunaway", m.host(), bytes(m.used()), bytes(m.total()), pct,
+                            bytes(rate), Screen.duration(eta)));
+                } else if (m.used() >= MEMORY_HOST_RATIO * m.total()) {
+                    red.add(I18n.t("redis.stats.memoryHost", m.host(), bytes(m.used()), bytes(m.total()), pct,
+                            String.join(", ", m.unbounded())));
+                }
+            } else if (m.maxSum() > m.total()) {
+                yellow.add(I18n.t("redis.stats.maxmemoryOverHost", m.host(), bytes(m.maxSum()), bytes(m.total())));
+            }
+        }
         if (!noReplica.isEmpty()) {
             yellow.add(I18n.t("redis.stats.noReplica", String.join(", ", noReplica)));
         }
         List<String> out = new ArrayList<>();
         red.forEach(w -> out.add(RED + "✖ " + w + RESET));
         yellow.forEach(w -> out.add(YELLOW + "⚠ " + w + RESET));
+        return out;
+    }
+
+    /** Các node Redis trên cùng 1 máy dùng quá tỉ lệ này RAM máy (mà có node không đặt maxmemory) thì báo đỏ. */
+    static final double MEMORY_HOST_RATIO = 0.5;
+    /** Với tốc độ tăng hiện tại sẽ chạm RAM máy trong ngần này thì báo đỏ. */
+    static final long MEMORY_ETA_MS = 30 * 60_000L;
+    /** Cần quan sát ít nhất ngần này mới tính tốc độ tăng bộ nhớ (tránh 1 lần nhảy lẻ). */
+    static final long MEMORY_RATE_MIN_MS = 10_000;
+
+    /**
+     * Bộ nhớ Redis trên 1 máy: các node sống cùng host và cùng total_system_memory (vd cluster 6 node trong 1 container)
+     * cộng lại - từng node dùng ít nhưng cộng lại vẫn có thể ăn hết RAM. {@code used}: used_memory_rss (RAM thật tiến
+     * trình chiếm, gồm phân mảnh), không có thì used_memory; {@code unbounded}: node không đặt maxmemory;
+     * {@code maxSum}: tổng maxmemory của các node có đặt.
+     */
+    record HostMemory(String host, long total, long used, List<String> unbounded, long maxSum) {
+    }
+
+    static List<HostMemory> hostMemory(Sample s) {
+        Map<String, List<Node>> groups = new java.util.LinkedHashMap<>();
+        for (Node n : s.nodes()) {
+            if (n.error() == null) {
+                String host = n.address().substring(0, Math.max(0, n.address().lastIndexOf(':')));
+                groups.computeIfAbsent(host + "\0" + n.info().getOrDefault("total_system_memory", "0"), k -> new ArrayList<>()).add(n);
+            }
+        }
+        List<HostMemory> out = new ArrayList<>();
+        for (List<Node> g : groups.values()) {
+            long used = 0;
+            long maxSum = 0;
+            List<String> unbounded = new ArrayList<>();
+            for (Node n : g) {
+                double rss = num(n.info(), "used_memory_rss");
+                used += (long) (rss > 0 ? rss : num(n.info(), "used_memory"));
+                double max = num(n.info(), "maxmemory");
+                if (max > 0) {
+                    maxSum += (long) max;
+                } else {
+                    unbounded.add(n.address());
+                }
+            }
+            String a = g.get(0).address();
+            out.add(new HostMemory(a.substring(0, Math.max(0, a.lastIndexOf(':'))), (long) num(g.get(0).info(), "total_system_memory"),
+                    used, unbounded, maxSum));
+        }
         return out;
     }
 

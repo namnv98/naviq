@@ -149,6 +149,39 @@ class RedisStatsTest {
         assertEquals("-3.0s", RedisStats.signed(-3000));
     }
 
+    private static final long GB = 1L << 30;
+
+    private static RedisStats.Node mem(String address, long rss, long max) {
+        return new RedisStats.Node(address, true, 1, info("run_id:" + address + "\nused_memory:" + rss + "\nused_memory_rss:" + rss
+                + "\nmaxmemory:" + max + "\ntotal_system_memory:" + 32 * GB + "\n"), null);
+    }
+
+    @Test
+    void bộNhớTheoRamMáy() {
+        // 3 node cùng máy, mỗi node 6 GB (19% RAM) - cộng lại 18 GB = 56%
+        var three = new RedisStats.Sample(0, List.of(mem("10.0.0.1:7001", 6 * GB, 0), mem("10.0.0.1:7002", 6 * GB, 0),
+                mem("10.0.0.1:7003", 6 * GB, 0)), null, List.of());
+        String all = String.join("\n", RedisStats.warnings(three));
+        assertTrue(all.contains("✖ host 10.0.0.1: Redis uses 18.0 GB / host RAM 32.0 GB (56%) without maxmemory: 10.0.0.1:7001, 10.0.0.1:7002, 10.0.0.1:7003"), all);
+        // cùng lượng đó nhưng ở 3 máy khác nhau: không máy nào quá 50%
+        var spread = new RedisStats.Sample(0, List.of(mem("10.0.0.1:7001", 6 * GB, 0), mem("10.0.0.2:7001", 6 * GB, 0),
+                mem("10.0.0.3:7001", 6 * GB, 0)), null, List.of());
+        assertFalse(String.join("\n", RedisStats.warnings(spread)).contains("host RAM"));
+        // 9 GB và tăng 40 MB/s: còn 23 GB, khoảng 9m49s nữa chạm RAM máy
+        List<RedisStats.Sample> growing = new java.util.ArrayList<>();
+        for (int i = 0; i <= 10; i++) {
+            long rss = 9 * GB - (10 - i) * 2 * 40L * 1024 * 1024;
+            growing.add(new RedisStats.Sample(i * 2000L, List.of(mem("127.0.0.1:7001", rss, 0)), null, List.of()));
+        }
+        String runaway = String.join("\n", RedisStats.warnings(growing));
+        assertTrue(runaway.contains("✖ host 127.0.0.1: Redis uses 9.0 GB / host RAM 32.0 GB (28%), growing 40.0 MB/s - hits host RAM in about 9m48s"), runaway);
+        assertFalse(String.join("\n", RedisStats.warnings(growing.subList(0, 4))).contains("growing"), "chưa đủ 10 giây quan sát");
+        // có maxmemory hết nhưng cộng lại vượt RAM máy
+        var over = new RedisStats.Sample(0, List.of(mem("10.0.0.1:7001", GB, 20 * GB), mem("10.0.0.1:7002", GB, 20 * GB)), null, List.of());
+        String o = String.join("\n", RedisStats.warnings(over));
+        assertTrue(o.contains("⚠ host 10.0.0.1: total maxmemory 40.0 GB exceeds host RAM 32.0 GB"), o);
+    }
+
     @Test
     void replicaChậmHơnMaster() {
         java.util.function.LongFunction<RedisStats.Sample> at = off -> new RedisStats.Sample(off * 1000, List.of(
