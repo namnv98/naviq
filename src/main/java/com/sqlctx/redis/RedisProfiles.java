@@ -1,6 +1,6 @@
 package com.sqlctx.redis;
 
-import com.sqlctx.datasource.ConnectionProfileStore;
+import com.sqlctx.context.ConnectionProfileStore;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

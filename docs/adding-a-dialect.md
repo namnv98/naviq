@@ -1,8 +1,8 @@
 # Thêm một DB mới
 
-Mọi thứ phụ thuộc DB nằm sau `dialect/DialectAdapter`: kết nối, tải schema, SQL của `\l \du \d`, banner, sửa text câu lệnh trước khi gửi, lexer tô màu, gợi ý. Phần còn lại của app chỉ gọi `DialectAdapters.of(dialect)`.
+Mọi thứ phụ thuộc DB nằm sau `sql/dialect/DialectAdapter`: kết nối, tải schema, SQL của `\l \du \d`, banner, sửa text câu lệnh trước khi gửi, lexer tô màu, gợi ý. Phần còn lại của app chỉ gọi `DialectAdapters.of(dialect)`.
 
-1. Thêm giá trị vào enum `schema/Dialect`.
+1. Thêm giá trị vào enum `sql/schema/Dialect`.
 2. Viết `XxxDataSource` (giữ connection, `get`/`reconnect`/`close`) và phần nạp schema trong `SchemaLoader`.
 3. Viết `XxxAdapter implements DialectAdapter`. Xem `PostgresAdapter` làm mẫu.
 4. Thêm một `case` trong `DialectAdapters.of`.

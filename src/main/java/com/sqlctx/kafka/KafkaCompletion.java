@@ -5,8 +5,8 @@ import com.sqlctx.util.I18n;
 import com.sqlctx.kafka.KafkaTools.Arity;
 import com.sqlctx.kafka.KafkaTools.Opt;
 import com.sqlctx.kafka.KafkaTools.Tool;
-import com.sqlctx.shell.CompletionMenu;
-import com.sqlctx.shell.MenuItem;
+import com.sqlctx.ui.CompletionMenu;
+import com.sqlctx.ui.MenuItem;
 
 import java.util.ArrayList;
 import java.util.List;

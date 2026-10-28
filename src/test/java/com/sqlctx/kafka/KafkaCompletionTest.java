@@ -1,6 +1,6 @@
 package com.sqlctx.kafka;
 
-import com.sqlctx.shell.MenuItem;
+import com.sqlctx.ui.MenuItem;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

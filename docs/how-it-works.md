@@ -1,12 +1,12 @@
 # Cách gợi ý hoạt động
 
-Hai tầng độc lập, kết quả ghép ở cuối. Tầng cú pháp cho biết *loại gì* hợp lệ tại con trỏ; tầng ngữ nghĩa cho biết *tên gì* đang có trong scope. Mã nằm ở `completion/`.
+Hai tầng độc lập, kết quả ghép ở cuối. Tầng cú pháp cho biết *loại gì* hợp lệ tại con trỏ; tầng ngữ nghĩa cho biết *tên gì* đang có trong scope. Mã nằm ở `sql/completion/`.
 
-## 1. Chuẩn bị đầu vào (`completion/input`)
+## 1. Chuẩn bị đầu vào (`sql/completion/input`)
 
 `CompletionInputPreparer` tách phần đang gõ dở (`prefix`) và biết có đang ở dạng `alias.` không (`dotMode`). Nếu con trỏ đang dính vào cuối một định danh thì tầng cú pháp dùng vị trí lùi 1 ký tự, để hỏi "ở đây có thể là gì" thay vì coi định danh dở là token đã gõ xong.
 
-## 2. Tầng cú pháp: đi trên ATN (`completion/syntactic`)
+## 2. Tầng cú pháp: đi trên ATN (`sql/completion/syntactic`)
 
 Lex câu gốc, không parse. Tìm token tại con trỏ (token caret). Sau đó `CompletionEngineBase` đi trên ATN của parser:
 
@@ -19,7 +19,7 @@ Lex câu gốc, không parse. Tìm token tại con trỏ (token caret). Sau đó
 
 Có sẵn biến thể `CompletionEngineWithFlowSet` dùng follow-set tính trước (`FollowSetsByState`) để cắt nhánh sớm; mặc định đang dùng `CompletionEngineDefault`. Chi tiết thuật toán: [syntactic.md](syntactic.md).
 
-## 3. Tầng ngữ nghĩa: dựng scope (`completion/semantic`)
+## 3. Tầng ngữ nghĩa: dựng scope (`sql/completion/semantic`)
 
 `CursorTokenPatcher` lex câu và, nếu con trỏ rơi vào khoảng trống giữa hai token, chèn một token giả (kiểu Identifier) vào *danh sách token* chứ không nối chuỗi ký tự. Nối chuỗi từng làm lexer dính placeholder vào định danh liền kề. Sau đó parse, và `ScopeBuilder` (một parse-tree listener) đi qua cây:
 
@@ -30,7 +30,7 @@ Có sẵn biến thể `CompletionEngineWithFlowSet` dùng follow-set tính trư
 
 Mọi callback đều phải chịu null/thiếu: lỗi ở đâu thì bỏ đúng chỗ đó, không làm hỏng phần scope đã dựng được. Ngoại lệ không lọt ra ngoài; bị ghi vào log file.
 
-## 4. Ghép và lọc (`completion/suggestion`)
+## 4. Ghép và lọc (`sql/completion/suggestion`)
 
 `PostgresSuggestionService` / `OracleSuggestionService` lấy tập rule khớp ở caret rồi chọn nguồn:
 
@@ -47,7 +47,7 @@ Mọi callback đều phải chịu null/thiếu: lỗi ở đâu thì bỏ đú
 
 Rồi loại nhiễu theo ngữ cảnh (`MatchedRuleResolver`): định danh đã đóng bằng khoảng trắng thì không gợi ý tiếp, `varchar(|)` không gợi ý kiểu mới, tên sequence/index không gợi ý tên bảng, partition bound không gợi ý cột, v.v.
 
-## 5. Xếp hạng (`completion/ranking`)
+## 5. Xếp hạng (`sql/completion/ranking`)
 
 `SuggestFilter` so sánh tuần tự, bậc sau chỉ xét khi bậc trước bằng nhau:
 
@@ -74,10 +74,10 @@ Gợi ý chạy ở mỗi phím gõ nên mỗi tầng có budget (`CompletionBud
 
 ## Dòng gợi ý và Language Server
 
-`InputHints` tính chữ ký hàm bao quanh con trỏ và lỗi cú pháp thật: đoạn đã gõ không còn là phần đầu của câu hợp lệ nào (engine cú pháp không tới được cuối), lỗi chỉ do câu chưa gõ xong thì không báo. REPL hiện nó ở dòng trên status bar và gạch chân token lỗi; `lsp/SqlLanguageServer` dùng cùng các phần đó cho completion, signatureHelp và diagnostics.
+`InputHints` tính chữ ký hàm bao quanh con trỏ và lỗi cú pháp thật: đoạn đã gõ không còn là phần đầu của câu hợp lệ nào (engine cú pháp không tới được cuối), lỗi chỉ do câu chưa gõ xong thì không báo. REPL hiện nó ở dòng trên status bar và gạch chân token lỗi; `sql/lsp/SqlLanguageServer` dùng cùng các phần đó cho completion, signatureHelp và diagnostics.
 
 ## Các phần còn lại
 
-- `cli/terminal`: menu gợi ý vẽ bằng escape code (`MenuCompleter`, `TerminalMenu`), tô màu bằng cùng lexer của dialect (`SqlHighlighter`).
-- `cli/view`: bảng kết quả (`DataViewTable`) tự cắt theo độ rộng terminal, tính độ rộng ký tự CJK/emoji đúng; status bar dưới cùng.
+- `sql/repl` và `ui`: menu gợi ý vẽ bằng escape code (`sql/repl/MenuCompleter` dùng `ui/TerminalMenu`), tô màu bằng cùng lexer của dialect (`sql/repl/SqlHighlighter`).
+- `ui`: bảng kết quả (`DataViewTable`) tự cắt theo độ rộng terminal, tính độ rộng ký tự CJK/emoji đúng; status bar dưới cùng.
 - `dialect`: `DialectAdapter` gom mọi thứ phụ thuộc DB (kết nối, SQL của `\l \du \d`, banner, lexer, gợi ý).

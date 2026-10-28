@@ -1,7 +1,7 @@
 # Tầng cú pháp hoạt động thế nào
 
 Tầng cú pháp trả lời câu hỏi: tại vị trí con trỏ, về mặt ngữ pháp được phép gõ token nào hoặc rule nào. Nó không parse
-câu SQL mà đi trực tiếp trên ATN (máy trạng thái ANTLR sinh ra từ grammar). Mã nằm ở `completion/syntactic/`. Bức tranh
+câu SQL mà đi trực tiếp trên ATN (máy trạng thái ANTLR sinh ra từ grammar). Mã nằm ở `sql/completion/syntactic/`. Bức tranh
 tổng thể cả hai tầng xem [how-it-works.md](how-it-works.md).
 
 ## ATN là gì
@@ -94,7 +94,7 @@ Với Oracle (`OracleSyntacticAnalyzer.analyze(sql, cursorOffset)`):
 Tầng suggestion (`OracleMatchedRuleResolver`, `PostgresMatchedRuleResolver`) dùng `rules` và `ruleEntryTokenIndex` để
 quyết định gợi ý tên bảng, tên cột…, còn `tokens` thành gợi ý từ khoá.
 
-| File (`completion/syntactic/engine/`) | Vai trò                                                   |
+| File (`sql/completion/syntactic/engine/`) | Vai trò                                                   |
 |---------------------------------------|-----------------------------------------------------------|
 | `CompletionEngineBase`                | Thuật toán chung: `enterRule`, `walkRuleBody`, cache      |
 | `CompletionEngineDefault`             | Chế độ đơn giản, luôn đi trong thân rule                  |

@@ -1,6 +1,6 @@
 package com.sqlctx.kafka;
 
-import com.sqlctx.shell.Screen;
+import com.sqlctx.ui.Screen;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

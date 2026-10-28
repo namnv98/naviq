@@ -1,7 +1,7 @@
 package com.sqlctx.redis;
 
-import com.sqlctx.cli.view.DataViewTable;
-import com.sqlctx.shell.Screen;
+import com.sqlctx.ui.DataViewTable;
+import com.sqlctx.ui.Screen;
 import com.sqlctx.util.I18n;
 
 import java.io.IOException;

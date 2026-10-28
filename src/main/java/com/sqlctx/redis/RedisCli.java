@@ -2,17 +2,17 @@ package com.sqlctx.redis;
 
 import com.sqlctx.util.I18n;
 
-import com.sqlctx.cli.command.ResultExporter;
-import com.sqlctx.cli.startup.StartupBanner;
-import com.sqlctx.cli.view.DataViewTable;
-import com.sqlctx.datasource.ConnectionProfileStore;
+import com.sqlctx.ui.ResultExporter;
+import com.sqlctx.cli.StartupBanner;
+import com.sqlctx.ui.DataViewTable;
+import com.sqlctx.context.ConnectionProfileStore;
 import com.sqlctx.redis.RespClient.Bulk;
 import com.sqlctx.redis.RespClient.RespError;
-import com.sqlctx.shell.CompletionMenu;
-import com.sqlctx.shell.Dashboard;
-import com.sqlctx.shell.MenuItem;
-import com.sqlctx.shell.ShellReader;
-import com.sqlctx.shell.ShellStatusBar;
+import com.sqlctx.ui.CompletionMenu;
+import com.sqlctx.ui.Dashboard;
+import com.sqlctx.ui.MenuItem;
+import com.sqlctx.ui.ShellReader;
+import com.sqlctx.ui.ShellStatusBar;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.UserInterruptException;
 import org.jline.reader.impl.LineReaderImpl;

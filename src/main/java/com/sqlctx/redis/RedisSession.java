@@ -41,7 +41,7 @@ final class RedisSession implements RedisCompletion.Source {
     RedisCommandTree loadCommands() {
         try (RespClient client = RespClient.connect(
                 profile.sentinelMaster() != null ? RedisConnection.resolveMaster(profile) : profile, 5000)) {
-            return RedisCommandTree.load(client, com.sqlctx.datasource.ConnectionProfileStore.configDir().resolve("redis-docs"));
+            return RedisCommandTree.load(client, com.sqlctx.context.ConnectionProfileStore.configDir().resolve("redis-docs"));
         } catch (IOException e) {
             return RedisCommandTree.fallback();
         }

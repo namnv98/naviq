@@ -2,17 +2,15 @@ package com.sqlctx.cli;
 
 import com.sqlctx.util.I18n;
 
-import com.sqlctx.cli.command.ContextManager;
-import com.sqlctx.cli.command.StatementExecutor;
-import com.sqlctx.cli.repl.CommandDispatcher;
-import com.sqlctx.cli.repl.ReplLineReaderFactory;
-import com.sqlctx.cli.startup.StartupBanner;
-import com.sqlctx.cli.terminal.SqlHighlighter;
-import com.sqlctx.datasource.ConnectionProfileStore;
-import com.sqlctx.schema.Dialect;
-import com.sqlctx.dialect.DialectAdapters;
-import com.sqlctx.schema.SchemaIndex;
-import com.sqlctx.cli.view.BottomStatusBar;
+import com.sqlctx.sql.repl.StatementExecutor;
+import com.sqlctx.sql.repl.CommandDispatcher;
+import com.sqlctx.sql.repl.ReplLineReaderFactory;
+import com.sqlctx.sql.repl.SqlHighlighter;
+import com.sqlctx.context.ConnectionProfileStore;
+import com.sqlctx.sql.schema.Dialect;
+import com.sqlctx.sql.dialect.DialectAdapters;
+import com.sqlctx.sql.schema.SchemaIndex;
+import com.sqlctx.sql.repl.BottomStatusBar;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.Highlighter;
 import org.jline.reader.LineReader;
@@ -29,7 +27,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.sqlctx.cli.session.SqlctxSession.*;
+import static com.sqlctx.sql.repl.SqlctxSession.*;
 
 /**
  * Entry point: parse tham số dòng lệnh, kết nối DB, dựng terminal + shutdown hook, rồi hoặc chạy chế độ
@@ -159,7 +157,7 @@ public class SqlctxCli {
         statusBar.setDbInfo(ContextManager.dbLabel(dialect));
         statusBar.setQueryStatus("loading schema…");
         statusBar.render();
-        com.sqlctx.completion.GrammarWarmup.warmInBackground(dialect);
+        com.sqlctx.sql.completion.GrammarWarmup.warmInBackground(dialect);
         SchemaIndex.reloadInBackground(dialect, error -> {
             statusBar.setQueryStatus(error == null
                     ? "idle · " + SchemaIndex.schemaTableIndex.size() + " tables"
@@ -218,7 +216,7 @@ public class SqlctxCli {
                 String coloredPrompt = CommandDispatcher.buildPrompt();
                 line = pendingBuffer != null ? impl.readLine(coloredPrompt, null, pendingBuffer) : impl.readLine(coloredPrompt);
             } catch (UserInterruptException e) {
-                com.sqlctx.cli.terminal.MenuCompleter.discardMenu(terminal);
+                com.sqlctx.sql.repl.MenuCompleter.discardMenu(terminal);
                 pendingBuffer = null;
                 continue;
             } catch (EndOfFileException e) {
@@ -276,8 +274,8 @@ public class SqlctxCli {
         } catch (Exception e) {
             startupError = rootCauseMessage(e);
         }
-        com.sqlctx.completion.GrammarWarmup.warmInBackground(dialect);
-        com.sqlctx.lsp.SqlLanguageServerLauncher.run(dialect, startupError);
+        com.sqlctx.sql.completion.GrammarWarmup.warmInBackground(dialect);
+        com.sqlctx.sql.lsp.SqlLanguageServerLauncher.run(dialect, startupError);
     }
 
     /**
@@ -295,7 +293,7 @@ public class SqlctxCli {
                     : Dialect.POSTGRES;
             String file = System.getProperty("DB_FILE");
             String sql = file != null ? Files.readString(Paths.get(file)) : new String(System.in.readAllBytes(), StandardCharsets.UTF_8);
-            System.out.print(com.sqlctx.format.SqlFormatter.format(sql, dialect, com.sqlctx.format.SqlFormatter.Options.fromSystemProperties()));
+            System.out.print(com.sqlctx.sql.format.SqlFormatter.format(sql, dialect, com.sqlctx.sql.format.SqlFormatter.Options.fromSystemProperties()));
             if (!sql.endsWith("\n")) {
                 System.out.println();
             }

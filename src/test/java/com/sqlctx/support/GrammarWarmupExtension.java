@@ -1,7 +1,7 @@
 package com.sqlctx.support;
 
-import com.sqlctx.completion.GrammarWarmup;
-import com.sqlctx.schema.Dialect;
+import com.sqlctx.sql.completion.GrammarWarmup;
+import com.sqlctx.sql.schema.Dialect;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 

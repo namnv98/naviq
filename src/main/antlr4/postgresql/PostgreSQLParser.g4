@@ -8,7 +8,7 @@ superClass = PostgreSQLParserBase;
 }
 
 @header {
-package com.sqlctx.antlr4.postgresql;
+package com.sqlctx.sql.antlr4.postgresql;
 }
 
 root

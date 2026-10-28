@@ -132,7 +132,7 @@
                             <listener>true</listener>
                             <sourceDirectory>src/main/antlr4/postgresql</sourceDirectory>
                             <outputDirectory>
-                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/antlr4/postgresql
+                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/sql/antlr4/postgresql
                             </outputDirectory>
                         </configuration>
                     </execution>
@@ -147,7 +147,7 @@
                             <listener>true</listener>
                             <sourceDirectory>src/main/antlr4/oracle</sourceDirectory>
                             <outputDirectory>
-                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/antlr4/oracle
+                                ${project.build.directory}/generated-sources/antlr4/com/sqlctx/sql/antlr4/oracle
                             </outputDirectory>
                         </configuration>
                     </execution>

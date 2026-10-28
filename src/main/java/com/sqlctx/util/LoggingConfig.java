@@ -1,6 +1,5 @@
 package com.sqlctx.util;
 
-import com.sqlctx.util.I18n;
 
 import java.io.IOException;
 import java.io.InputStream;

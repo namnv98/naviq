@@ -1,7 +1,7 @@
 package com.sqlctx.redis;
 
-import com.sqlctx.shell.Dashboard;
-import com.sqlctx.shell.Screen;
+import com.sqlctx.ui.Dashboard;
+import com.sqlctx.ui.Screen;
 import com.sqlctx.util.I18n;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

@@ -111,4 +111,4 @@ Các khác biệt đã kiểm chứng trước đây:
 | `queries.txt` | Danh sách câu SQL cần so (cả 2 phía cùng đọc) |
 | `fixture.sql` | Dựng DB `sqlctx_fixture` |
 | `ij-completion-dump.groovy` | Chạy trong IntelliJ: completion từng câu -> `tools/intellij-compare/out/ij-out.tsv` |
-| `../../src/test/java/com/sqlctx/completion/IntellijCompareTest.java` | Chạy tool trên từng câu, so -> `tools/intellij-compare/out/compare.txt` |
+| `../../src/test/java/com/sqlctx/sql/completion/IntellijCompareTest.java` | Chạy tool trên từng câu, so -> `tools/intellij-compare/out/compare.txt` |

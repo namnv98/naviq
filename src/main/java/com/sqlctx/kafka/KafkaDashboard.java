@@ -1,8 +1,8 @@
 package com.sqlctx.kafka;
 
-import com.sqlctx.shell.Dashboard;
-import com.sqlctx.shell.Screen;
-import com.sqlctx.shell.Screen.Column;
+import com.sqlctx.ui.Dashboard;
+import com.sqlctx.ui.Screen;
+import com.sqlctx.ui.Screen.Column;
 import com.sqlctx.util.I18n;
 
 import org.apache.kafka.clients.admin.Admin;
