@@ -18,7 +18,7 @@ public class DataViewTable {
 
     private static final int DEFAULT_MAX_FIELD_WIDTH = 5000;
 
-    static final boolean ASCII =
+    public static final boolean ASCII =
         System.getProperty("os.name").toLowerCase().contains("win");
 
     /**
@@ -145,7 +145,7 @@ public class DataViewTable {
 
     // Viền bảng (khung + dấu "│" ngăn cột) - xám mờ, đứng lùi phía sau để dữ liệu/header nổi bật hơn thay vì
     // cạnh tranh cùng 1 màu trắng phẳng như trước.
-    static final String BORDER_COLOR = "\u001b[38;5;240m";
+    public static final String BORDER_COLOR = "\u001b[38;5;240m";
 
     static String border(String glyph) {
         return BORDER_COLOR + glyph + RESET;
@@ -267,7 +267,7 @@ public class DataViewTable {
         return sb.toString();
     }
 
-    static final String HEADER_COLOR = "\u001b[1;36m";
+    public static final String HEADER_COLOR = "\u001b[1;36m";
     static final String RESET = "\u001b[0m";
 
     private static String formatHeader(List<String> cells, int[] widths) {
@@ -404,7 +404,7 @@ public class DataViewTable {
     // Unicode display width
     // -------------------------------------------------------------------------
 
-    static int displayWidth(String s) {
+    public static int displayWidth(String s) {
         int width = 0;
         for (int i = 0; i < s.length(); ) {
             int cp = s.codePointAt(i);

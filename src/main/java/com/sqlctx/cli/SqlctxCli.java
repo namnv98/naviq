@@ -58,6 +58,11 @@ public class SqlctxCli {
         if (java.util.Arrays.asList(args).contains("--format")) {
             System.exit(runFormatter());
         }
+        // --net: xem traffic mạng (com.sqlctx.net) - --context= ở đây chỉ để lọc theo host:port, không kết nối DB.
+        if (com.sqlctx.net.NetCli.handles(args)) {
+            com.sqlctx.net.NetCli.run(args);
+            return;
+        }
         // Redis, Kafka chạy REPL riêng (com.sqlctx.redis, com.sqlctx.kafka), không đi qua phần SQL bên dưới.
         if (com.sqlctx.redis.RedisCli.handles()) {
             com.sqlctx.redis.RedisCli.run(args);

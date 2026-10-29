@@ -27,6 +27,7 @@ Query: 0.003s  ·  Fetch: 0.003s  ·  Total: 0.006s
 - **Hai dialect** // PostgreSQL và Oracle, mỗi bên grammar riêng, đứng sau chung 1 interface `DialectAdapter`
 - **Redis** // REPL riêng, gợi ý theo `COMMAND DOCS` của chính server đang nối: lệnh và tuỳ chọn đúng phiên bản, key đúng kiểu, field thật
 - **Kafka** // gõ lệnh `kafka-*.sh` như tài liệu (bỏ `--bootstrap-server`), gợi ý topic/group/config thật, Avro/JSON Schema/Protobuf qua Schema Registry
+- **Xem traffic** // `sqlctx --net`: mỗi sự kiện mạng 1 dòng dễ hiểu, kèm tên chương trình (eBPF) và nội dung giao thức đọc được: câu SQL Postgres, lệnh Redis, API Kafka, HTTP
 
 ## Cài
 
@@ -156,6 +157,39 @@ Khác tool gốc có chủ đích: consumer không `--group` đọc bằng `assi
 `\stats [GIÂY]` (cả Redis lẫn Kafka) mở dashboard toàn màn hình kiểu htop/k9s, tự làm mới (mặc định 2s với Redis, 5s với Kafka): ô tổng quan có thanh % và đường xu hướng, biểu đồ vùng có trục (đủ chỗ thì thêm hàng thứ hai: Tổng lag với Kafka, Bộ nhớ và Clients với Redis), bảng chọn được, ô cảnh báo đỏ/vàng. Với Kafka, bảng group có cột `chậm` (message đầu tiên chưa đọc đã nằm đó bao lâu, nội suy từ offset cuối qua các mẫu như kafka-lag-exporter; `>` khi lịch sử chưa đủ dài) và `ETA` (bao lâu nữa hết lag; `=` đọc kịp, `∞` không kịp); cảnh báo xét lag tại các lần commit như Burrow: "lag tăng" khi 5–10 lần commit liền lag không giảm, "kẹt" (đỏ) khi còn member, còn lag mà offset đứng yên quá 30 giây. Với Redis, hit %, evicted/s và CPU tính trong khoảng gần đây chứ không cộng dồn từ lúc server khởi động (như redis-stat/rrtop); cảnh báo evict, từ chối kết nối và lệnh chậm (SLOWLOG) chỉ hiện khi xảy ra trong 1 phút gần nhất; cột `repl lag` cho biết replica chậm hơn master bao nhiêu byte (báo khi tăng liên tục hoặc quá 10s không ack); chi tiết node có lệnh tốn thời gian nhất trong khoảng vừa qua, slowlog, LATENCY LATEST, uptime và giờ server; báo đỏ khi đồng hồ node vừa nhảy (lock/TTL trên node đó có thể hết hạn sai), vàng khi giờ node lệch quá 2s so với máy đang chạy sqlctx. Phím: `Tab` đổi bảng, `↑↓` chọn, `Enter` xem chi tiết (partition của topic, lag từng partition của group, INFO và các lệnh tốn thời gian nhất của node Redis), `+`/`-` đổi chu kỳ, `p` tạm dừng, `q`/`Esc`/Ctrl+C thoát. Chạy batch thì in 1 khung chữ.
 - Redis: mỗi node một dòng (cluster: mọi master và replica; server đơn/sentinel: master và replica của nó): ops/s, kB/s vào/ra, bộ nhớ/maxmemory, phân mảnh, client, hit rate, số key, evict. Cảnh báo: cluster_state khác ok, node lỗi, sắp đầy maxmemory hoặc không đặt maxmemory, đang evict, từ chối kết nối, lưu RDB/AOF lỗi, replica mất kết nối, master không có replica.
 - Kafka: broker (leader, replica, đĩa), số partition thiếu replica/mất leader, quorum, topic ghi nhiều nhất và group lag nhiều nhất. Tốc độ ghi/đọc (msg/s) tính từ chênh lệch offset giữa 2 lần làm mới, vì Admin API không có số liệu JMX. Cảnh báo: partition mất leader, thiếu replica, đĩa ≥ 80%, topic chỉ 1 replica, lag đang tăng, có lag mà không có consumer.
+
+## Xem traffic mạng
+
+```sh
+sqlctx --net                                  # mọi traffic, mọi interface
+sqlctx --net --context=dev                    # chỉ traffic tới DB của context (SQL, Redis hay Kafka)
+sqlctx --net --filter="port 443"              # bộ lọc kiểu tcpdump
+sqlctx --net --iface=wlan0
+sqlctx --net --pcap=cap.pcap                  # đọc file đã bắt (tcpdump -w)
+```
+
+```
+╭──────────────┬───┬────────────────┬──────────────────────────────┬──────────────────────────────────────────────────╮
+│ THỜI GIAN    │   │ CHƯƠNG TRÌNH   │ ĐÍCH                         │ CHUYỆN GÌ                                        │
+├──────────────┼───┼────────────────┼──────────────────────────────┼──────────────────────────────────────────────────┤
+│ 11:10:38.256 │ · │ psql           │ tester@naviq 127.0.0.1:54329 │ SQL đăng nhập tester@naviq (psql) · PostgreSQL   │
+│              │   │                │                              │ 18.6                                             │
+│ 11:10:38.262 │ ◆ │ psql           │ tester@naviq 127.0.0.1:54329 │ SQL select id, name from users → SELECT 3 · 6 ms │
+│ 11:10:38.263 │ ✗ │ psql           │ tester@naviq 127.0.0.1:54329 │ SQL select * from khongco → ERROR 42P01:         │
+│              │   │                │                              │ relation "khongco" does not exist                │
+│ 11:10:38.720 │ ◆ │ redis-cli      │ 127.0.0.1:63790              │ REDIS GET user:1 → "Nguyễn Văn A" · 87 µs        │
+│ 11:08:00.668 │ ✗ │ curl           │ 127.0.0.1:443                │ TỪ CHỐI kết nối                                  │
+│              │   │                │                              │ ↳ máy 127.0.0.1 có sống, nhưng không có gì chạy  │
+│              │   │                │                              │ ở cổng 443 (hoặc firewall reject)                │
+╰──────────────┴───┴────────────────┴──────────────────────────────┴──────────────────────────────────────────────────╯
+```
+
+Bảng in dần theo thời gian thực, cùng kiểu bảng kết quả SQL; chữ dài xuống dòng trong ô, bề ngang theo terminal. Đang chạy thì bấm `/` để lọc (gõ chữ có trong bất kỳ cột nào - tên chương trình, đích, câu SQL...; nhiều từ thì phải khớp hết, `-từ` để loại, không phân biệt hoa thường và dấu: `tu choi` khớp `TỪ CHỐI`; để trống là bỏ lọc), `e` chỉ hiện lỗi, `l` ẩn/hiện LAN, `p` tạm dừng (dòng mới được giữ lại, in ra khi chạy tiếp), `<` `>` (hoặc ←/→) đổi sang màn "Chi tiết kết nối": mỗi sự kiện 1 dòng với giao thức, nguồn IP:cổng, IP đích:cổng, ↑ gửi, ↓ nhận, thời lượng kết nối, PID (đổi màn thì vẽ lại các dòng gần nhất), `q` thoát. Câu SQL hiện đầy đủ, không cắt. Bắt gói bằng `tcpdump -w -` (cần cài tcpdump; hỏi mật khẩu sudo 1 lần), sqlctx tự giải mã pcap. Tên chương trình: có `bpftrace` thì dùng eBPF (móc vào kernel lúc chương trình mở kết nối - không sót kể cả kết nối chỉ sống vài micro giây), không thì tra `ss`. Thiết bị khác đi mạng qua máy này (điện thoại vào hotspot, máy ảo) thì cột chương trình hiện tên thiết bị trong ngoặc vuông, vd `[namnv98]`, lấy từ bảng cấp IP của dnsmasq / NetworkManager / libvirt (thiết bị không báo tên thì hiện IP); bắt ở interface hotspot: `sqlctx --net --iface ap0`. Nhận ra: kết nối bị từ chối / không ai trả lời / bị cắt ngang, gói gửi lại, đầy bộ đệm (win 0), DNS (gộp A+AAAA, tên miền không tồn tại), ping, ICMP không tới được / MTU, thiết bị LAN (SSDP, mDNS, LLMNR...). HTTPS chỉ đọc được tên miền (SNI). Giao thức nhận theo nội dung đầu luồng, bắt giữa chừng thì theo cổng (`--context=` cho biết thêm cổng nào là gì):
+
+- **PostgreSQL**: đăng nhập (user@db, app, phiên bản), mỗi câu SQL - cả simple query lẫn Parse/Bind/Execute của JDBC, prepared statement dùng lại theo tên - kèm kết quả (`SELECT 8`, `UPDATE 3`) hoặc lỗi (`ERROR 42P01: ...`) và thời gian. Kết nối bật SSL thì chỉ báo đã mã hoá.
+- **Redis**: mỗi lệnh kèm reply (kể cả pipeline), mật khẩu của `AUTH`, `HELLO ... AUTH`, `CONFIG SET requirepass` được che.
+- **Kafka**: tên API + độ trễ (ghép theo correlation id). Fetch/Heartbeat/Produce... gộp theo 5 giây; JoinGroup, SyncGroup, CreateTopics, SaslAuthenticate... in riêng từng lần.
+- **Oracle**: chỉ nhận ra kết nối (TNS không giải mã).
 
 ## Format
 

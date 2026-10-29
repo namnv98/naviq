@@ -231,3 +231,41 @@ không nén	no compression
 giờ producer đặt cho message	time set by the producer
 giờ broker ghi message	time the broker appended the message
 mọi replica	all replicas
+# sqlctx --net: thiết bị trong LAN (com.sqlctx.net.Lan)
+quảng bá	announcing
+đang tìm	looking for
+trả lời	answering
+phát	broadcasting
+mọi thiết bị	any device
+máy chủ media DLNA (chia sẻ phim/nhạc)	DLNA media server (shares video/music)
+TV/loa nhận phát media	TV/speaker that plays media
+router (cho phép app tự mở cổng)	router (lets apps open ports)
+router mở cổng (UPnP)	router port mapping (UPnP)
+cast lên TV (YouTube/Netflix)	cast to TV (YouTube/Netflix)
+thiết bị UPnP	UPnP device
+máy in	printer
+máy scan	scanner
+thiết bị Apple (iPhone/iPad/Mac)	Apple device (iPhone/iPad/Mac)
+thiết bị Apple	Apple device
+thiết bị Apple (AirDrop/Continuity)	Apple device (AirDrop/Continuity)
+ghép nối thiết bị Apple	Apple device pairing
+ghép nối iPhone với Mac/Xcode	iPhone pairing with Mac/Xcode
+đồng bộ iPhone (Finder/iTunes)	iPhone sync (Finder/iTunes)
+loa AirPlay	AirPlay speaker
+chia sẻ file SMB	SMB file sharing
+chia sẻ file Mac	Mac file sharing
+Matter (nhà thông minh)	Matter (smart home)
+Thread (nhà thông minh)	Thread (smart home)
+ADB (debug Android qua Wi-Fi)	ADB (Android debugging over Wi-Fi)
+máy tính	computer
+dò thiết bị UPnP/DLNA (TV, router, Chromecast...)	UPnP/DLNA discovery (TV, router, Chromecast...)
+dò thiết bị (máy in, AirPlay, .local)	device discovery (printers, AirPlay, .local)
+Windows hỏi tên máy trong LAN	Windows name lookup on the LAN
+Windows hỏi tên máy	Windows name lookup
+Windows chia sẻ	Windows sharing
+xin cấp IP	asking for an IP
+cấp IP	handing out IPs
+cấp IPv6	handing out IPv6
+xin cấp IPv6	asking for an IPv6
+Windows/máy in dò thiết bị	Windows/printer device discovery
+thống kê traffic (Open vSwitch)	traffic statistics (Open vSwitch)

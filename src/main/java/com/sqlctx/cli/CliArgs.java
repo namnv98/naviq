@@ -21,11 +21,11 @@ public final class CliArgs {
     static final Set<String> VALUE_OPTIONS = Set.of("context", "host", "port", "dbname", "user", "password", "dialect",
             "command", "file", "lang", "sslmode", "sslrootcert", "sslcert", "sslkey", "sslpassword", "sslwallet",
             "sslserverdnmatch", "keyword-case", "indent", "bootstrap-server", "bootstrap", "schema-registry",
-            "sentinel-master", "sentinel-password");
+            "sentinel-master", "sentinel-password", "iface", "filter", "pcap");
     /** Đúng/sai: "--readonly" trống là true, "--readonly false" / "--readonly=false" thì như viết. */
     static final Set<String> BOOLEAN_OPTIONS = Set.of("readonly", "tls", "ssl");
     /** Cờ không có giá trị (đọc thẳng từ args ở nơi dùng). */
-    static final Set<String> FLAGS = Set.of("yes", "lsp", "format");
+    static final Set<String> FLAGS = Set.of("yes", "lsp", "format", "net");
 
     /** Ghi các tuỳ chọn vào system property; trả danh sách lỗi (rỗng = ổn). */
     public static List<String> apply(String[] args) {

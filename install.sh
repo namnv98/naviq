@@ -10,7 +10,10 @@ INSTALL_DIR="$HOME/.local/share/sqlctx"
 BIN_DIR="$HOME/.local/bin"
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR"
-cp target/sqlctx-1.0.0.jar "$INSTALL_DIR/sqlctx.jar"
+# chép ra file tạm rồi mv (đổi tên là nguyên tử, ra inode mới): sqlctx đang chạy vẫn đọc bản cũ không bị crash,
+# thay vì cp ghi đè lên đúng file jar mà JVM đang mở
+cp target/sqlctx-1.0.0.jar "$INSTALL_DIR/sqlctx.jar.new"
+mv -f "$INSTALL_DIR/sqlctx.jar.new" "$INSTALL_DIR/sqlctx.jar"
 
 cat > "$BIN_DIR/sqlctx" << 'EOF'
 #!/bin/bash
