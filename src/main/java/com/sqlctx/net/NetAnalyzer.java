@@ -54,6 +54,9 @@ final class NetAnalyzer {
         double last;
         int syns;
         double synAck = -1;
+        boolean handshakeAcked;  // đã thấy ACK cuối của bắt tay 3 bước (chế độ chi tiết)
+        double lastStep = -1;    // gói điều khiển trước đó đã in ở chế độ chi tiết - để in khoảng cách
+        boolean serverHello;     // đã thấy gói TLS đầu tiên của server (chế độ chi tiết)
         long up;
         long down;
         int retrans;
@@ -76,6 +79,7 @@ final class NetAnalyzer {
             this.server = server;
             this.start = this.last = start;
             this.midStream = midStream;
+            this.handshakeAcked = midStream;
         }
 
         String program() {
@@ -271,11 +275,15 @@ final class NetAnalyzer {
             c.program();
         }
         if (c.done) {
+            if (p.has(Packet.FIN) || p.has(Packet.RST)) {
+                step(c, p.src().equals(c.client), p); // chiều còn lại đóng nốt: chỉ hiện ở chế độ chi tiết
+            }
             return;
         }
         c.last = now;
         boolean up = p.src().equals(c.client);
         int dir = up ? 0 : 1;
+        step(c, up, p);
 
         if (syn && !ack) {
             c.syns++;
@@ -331,6 +339,50 @@ final class NetAnalyzer {
         }
     }
 
+    /**
+     * Chế độ chi tiết (phím v): mỗi gói điều khiển của TCP - SYN, SYN-ACK, ACK cuối của bắt tay, FIN, RST - thành 1 dòng
+     * kèm thời gian từ gói điều khiển trước của cùng kết nối. Gói dữ liệu không in (đã có dòng yêu cầu SQL/Redis/HTTP).
+     * Tắt chế độ này thì không tạo dòng nào.
+     */
+    private void step(Conn c, boolean up, Packet p) {
+        if (!printer.verbose()) {
+            return;
+        }
+        boolean syn = p.has(Packet.SYN);
+        boolean ack = p.has(Packet.ACK);
+        String name;
+        String note;
+        NetPrinter.Style style = NetPrinter.Style.TCP;
+        if (syn && !ack) {
+            name = "SYN";
+            note = c.syns > 0 ? I18n.t("net.step.synAgain", c.syns + 1) : I18n.t("net.step.syn");
+        } else if (syn) {
+            name = "SYN-ACK";
+            note = I18n.t("net.step.synAck");
+        } else if (p.has(Packet.RST)) {
+            name = "RST";
+            style = NetPrinter.Style.RESET;
+            note = I18n.t(up ? "net.step.rstClient" : "net.step.rstServer");
+        } else if (p.has(Packet.FIN)) {
+            name = "FIN";
+            note = I18n.t(up ? "net.step.finClient" : "net.step.finServer");
+        } else if (up && ack && c.synAck >= 0 && !c.handshakeAcked) {
+            c.handshakeAcked = true;
+            name = "ACK";
+            note = I18n.t("net.step.ack");
+        } else {
+            return;
+        }
+        arrow(c, up, name, note, style);
+    }
+
+    /** 1 mũi tên của sơ đồ tuần tự, kèm thời gian từ gói trước đã vẽ của cùng kết nối. */
+    private void arrow(Conn c, boolean up, String label, String note, NetPrinter.Style style) {
+        String gap = c.lastStep < 0 ? null : "+" + NetFormat.duration(now - c.lastStep);
+        c.lastStep = now;
+        printer.arrow(now, c.program(), c.target(), new NetPrinter.Arrow(up, label, note, style, gap), c.detail(now));
+    }
+
     /** Ghép dữ liệu theo thứ tự cho bộ giải mã; thiếu đoạn (gói không bắt được) thì báo gap. */
     private void stream(Conn c, boolean up, Packet p) {
         int dir = up ? 0 : 1;
@@ -361,7 +413,16 @@ final class NetAnalyzer {
             if (sni != Tls.INCOMPLETE) {
                 c.sni = sni;
                 c.hello.clear();
+                if (printer.verbose()) {
+                    arrow(c, true, "TLS ClientHello", sni, NetPrinter.Style.TLS);
+                }
                 announce(c);
+            }
+        }
+        if (!up && !c.serverHello && "HTTPS".equals(c.label) && Tls.looksLikeHandshake(data)) {
+            c.serverHello = true;
+            if (printer.verbose()) {
+                arrow(c, false, "TLS ServerHello", I18n.t("net.step.serverHello"), NetPrinter.Style.TLS);
             }
         }
         if (c.decoder != null) {
@@ -431,7 +492,9 @@ final class NetAnalyzer {
             label = PORTS.getOrDefault(c.server.port(), "TCP");
         }
         String handshake = c.synAck >= 0 && c.syns > 0 ? NetFormat.dim(" · " + I18n.t("net.tcp.handshake", NetFormat.duration(c.synAck - c.start))) : "";
-        printer.emit(c.start, Kind.OPEN, c.program(), c.target(), NetFormat.green(I18n.t("net.tcp.open", label)) + handshake, null, c.detail(c.start));
+        // chế độ chi tiết in từng gói theo giờ thật: dòng "mở" lấy giờ lúc in để không chen giờ cũ vào giữa
+        double at = printer.verbose() ? Math.max(now, c.start) : c.start;
+        printer.emit(at, Kind.OPEN, c.program(), c.target(), NetFormat.green(I18n.t("net.tcp.open", label)) + handshake, null, c.detail(c.start));
     }
 
     private void close(Conn c, String how) {

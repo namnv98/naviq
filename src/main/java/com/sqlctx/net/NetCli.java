@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * sqlctx --net --filter="port 443"              bộ lọc kiểu tcpdump
  * sqlctx --net --context=dev                    chỉ traffic tới DB của context (SQL, Redis hay Kafka)
  * sqlctx --net --iface=wlan0 --pcap=cap.pcap    --pcap: đọc file đã bắt thay vì bắt trực tiếp
+ * sqlctx --net --verbose                        từng gói SYN/SYN-ACK/ACK/FIN/RST (như phím v lúc đang chạy)
  * </pre>
  */
 public final class NetCli {
@@ -105,6 +106,7 @@ public final class NetCli {
 
         int[] size = terminalSize();
         NetPrinter printer = new NetPrinter(out, size[0], size[1]);
+        printer.verbose(Arrays.asList(args).contains("--verbose"));
         NetAnalyzer analyzer = new NetAnalyzer(printer, processes, hints);
         BlockingQueue<Object> queue = new ArrayBlockingQueue<>(200_000);
         Thread reader = new Thread(() -> {

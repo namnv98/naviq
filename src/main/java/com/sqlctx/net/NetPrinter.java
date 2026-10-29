@@ -25,7 +25,7 @@ final class NetPrinter {
     enum Kind {
         OPEN("▶", NetFormat::green), CLOSE("■", NetFormat::dim), ERROR("✗", NetFormat::red), WARN("⚠", NetFormat::yellow),
         RETRY("…", NetFormat::yellow), REQUEST("◆", NetFormat::blue), DNS("◇", NetFormat::magenta),
-        PING("●", NetFormat::green), LAN("◎", NetFormat::blue), INFO("·", NetFormat::dim);
+        PING("●", NetFormat::green), LAN("◎", NetFormat::blue), INFO("·", NetFormat::dim), PACKET("›", NetFormat::dim);
 
         final String icon;
         final UnaryOperator<String> color;
@@ -38,6 +38,17 @@ final class NetPrinter {
 
     /** Thông tin thêm của 1 sự kiện cho các cột chi tiết; số âm / 0 = không biết. */
     record Detail(String proto, String source, String dest, long up, long down, double age, int pid) {
+    }
+
+    /** Kiểu mũi tên của sơ đồ gói (chế độ chi tiết): gói điều khiển TCP, bắt tay TLS, bị cắt ngang. */
+    enum Style { TCP, TLS, RESET }
+
+    /**
+     * 1 gói trong sơ đồ tuần tự của chế độ chi tiết: vẽ lúc in theo đúng bề ngang cột "chuyện gì" - trục trái là chương
+     * trình (cột chương trình), trục phải là đích (cột đích). {@code up}: chương trình -&gt; đích; {@code gap}: thời gian
+     * từ gói trước của cùng kết nối, null nếu là gói đầu.
+     */
+    record Arrow(boolean up, String label, String note, Style style, String gap) {
     }
 
     /** Cột sau giờ + icon: tên tiêu đề, bề ngang, căn phải. */
@@ -138,7 +149,8 @@ final class NetPrinter {
     }
 
     /** 1 dòng sự kiện, giữ lại để lọc / in sau khi hết tạm dừng. */
-    private record Row(double time, Kind kind, String program, String target, String what, String note, Detail detail) {
+    private record Row(double time, Kind kind, String program, String target, String what, String note, Detail detail,
+                       Arrow arrow) {
         /** Chữ (không màu, không dấu, thường) của mọi ô - để so với bộ lọc. */
         String searchable() {
             String extra = detail == null ? "" : detail.proto() + " " + detail.source() + " " + detail.dest()
@@ -154,6 +166,7 @@ final class NetPrinter {
     private String filterText = "";
     private boolean errorsOnly;
     private boolean hideLan;
+    private volatile boolean verbose;        // phím v: từng gói điều khiển TCP (NetAnalyzer chỉ tạo dòng khi bật)
     private boolean paused;
     private StringBuilder typing;            // khác null: đang gõ bộ lọc
     private final java.util.ArrayDeque<Row> held = new java.util.ArrayDeque<>();
@@ -166,7 +179,16 @@ final class NetPrinter {
     }
 
     synchronized void emit(double time, Kind kind, String program, String target, String what, String note, Detail detail) {
-        Row r = new Row(time, kind, program, target, what, note, detail);
+        emit(new Row(time, kind, program, target, what, note, detail, null));
+    }
+
+    /** 1 gói của sơ đồ tuần tự (chế độ chi tiết). */
+    synchronized void arrow(double time, String program, String target, Arrow a, Detail detail) {
+        String text = a.label() + (a.note() == null ? "" : " " + a.note());
+        emit(new Row(time, Kind.PACKET, program, target, text, null, detail, a));
+    }
+
+    private void emit(Row r) {
         if (history.size() >= HISTORY) {
             history.poll();
         }
@@ -186,7 +208,19 @@ final class NetPrinter {
         print(r);
     }
 
+    /** Chế độ chi tiết đang bật: NetAnalyzer hỏi trước khi tạo dòng cho từng gói SYN/ACK/FIN. */
+    boolean verbose() {
+        return verbose;
+    }
+
+    void verbose(boolean on) {
+        verbose = on;
+    }
+
     private boolean matches(Row r) {
+        if (!verbose && r.kind() == Kind.PACKET) {
+            return false;
+        }
         if (hideLan && r.kind() == Kind.LAN) {
             return false;
         }
@@ -236,7 +270,10 @@ final class NetPrinter {
         int whatAt = -1;
         for (int i = 0; i < visible.length; i++) {
             int w = widths[2 + i];
-            if (visible[i] == WHAT) {
+            if (visible[i] == WHAT && r.arrow() != null) {
+                whatAt = 2 + i;
+                what = new ArrayList<>(List.of(arrowLine(r.arrow(), w)));
+            } else if (visible[i] == WHAT) {
                 whatAt = 2 + i;
                 what = wrap(r.what(), w);
                 if (r.note() != null) {
@@ -258,6 +295,43 @@ final class NetPrinter {
             lines.add(row(cells));
         }
         return lines;
+    }
+
+    /** Chỗ để thời gian "+235 ms" ở cuối dòng mũi tên. */
+    private static final int GAP_WIDTH = 9;
+
+    /**
+     * Dòng mũi tên vừa đúng {@code w} ô: "│── SYN xin kết nối ──────▶│  +235 ms" (chương trình -&gt; đích) hoặc
+     * "│◀────── SYN-ACK server đồng ý ──│" (đích -&gt; chương trình). Chật thì bỏ ghi chú, rồi cắt nhãn.
+     */
+    static String arrowLine(Arrow a, int w) {
+        int gapW = w >= 30 ? GAP_WIDTH : 0;
+        int inner = w - gapW - 2;                  // trừ 2 trục │ │
+        char line = a.style() == Style.TLS ? '═' : '─';
+        String label = a.label();
+        String note = a.note();
+        // phần cố định: đầu mũi tên + 2 đoạn ngắn + khoảng trắng quanh chữ = 6 ô, tối thiểu 2 ô thân mũi tên
+        int room = inner - 6 - 2;
+        if (note != null && width(label) + 1 + width(note) > room) {
+            note = null;
+        }
+        if (width(label) > room) {
+            label = fitPlain(label, Math.max(1, room));
+        }
+        int textW = width(label) + (note == null ? 0 : 1 + width(note));
+        int fill = Math.max(2, inner - 6 - textW);
+        java.util.function.UnaryOperator<String> paint = a.style() == Style.TLS ? NetFormat::blue
+                : a.style() == Style.RESET ? NetFormat::red : NetFormat::dim;
+        String text = NetFormat.bold(a.style() == Style.TCP ? label : paint.apply(label))
+                + (note == null ? "" : " " + NetFormat.dim(note));
+        String two = String.valueOf(line).repeat(2);
+        String body = a.up()
+                ? paint.apply(two + " ") + text + paint.apply(" " + String.valueOf(line).repeat(fill + 1) + "▶")
+                : paint.apply("◀" + String.valueOf(line).repeat(fill + 1) + " ") + text + paint.apply(" " + two);
+        String bar = NetFormat.dim("│");
+        String gap = a.gap() == null || gapW == 0 ? " ".repeat(gapW)
+                : NetFormat.dim(String.format("%" + gapW + "s", fitPlain(a.gap(), gapW)));
+        return bar + body + bar + gap;
     }
 
     /** Nội dung 1 ô (1 dòng, cắt cho vừa) của cột không xuống dòng. */
@@ -383,6 +457,7 @@ final class NetPrinter {
             }
             case "e", "E" -> { errorsOnly = !errorsOnly; statusRow(false); }
             case "l", "L" -> { hideLan = !hideLan; statusRow(false); }
+            case "v", "V" -> { verbose = !verbose; statusRow(false); }
             case "p", "P", " " -> {
                 paused = !paused;
                 statusRow(false);
@@ -431,6 +506,9 @@ final class NetPrinter {
         }
         if (hideLan) {
             parts.add(I18n.t("net.key.lanHidden"));
+        }
+        if (verbose) {
+            parts.add(I18n.t("net.key.verbose"));
         }
         if (paused) {
             parts.add(NetFormat.yellow(I18n.t("net.key.paused")));

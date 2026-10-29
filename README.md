@@ -166,6 +166,7 @@ sqlctx --net --context=dev                    # chỉ traffic tới DB của con
 sqlctx --net --filter="port 443"              # bộ lọc kiểu tcpdump
 sqlctx --net --iface=wlan0
 sqlctx --net --pcap=cap.pcap                  # đọc file đã bắt (tcpdump -w)
+sqlctx --net --verbose                        # từng gói SYN/SYN-ACK/ACK/FIN/RST (lúc chạy: phím v bật/tắt)
 ```
 
 ```
