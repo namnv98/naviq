@@ -27,6 +27,7 @@ Query: 0.003s  ·  Fetch: 0.003s  ·  Total: 0.006s
 - **Hai dialect** // PostgreSQL và Oracle, mỗi bên grammar riêng, đứng sau chung 1 interface `DialectAdapter`
 - **Redis** // REPL riêng, gợi ý theo `COMMAND DOCS` của chính server đang nối: lệnh và tuỳ chọn đúng phiên bản, key đúng kiểu, field thật
 - **Kafka** // gõ lệnh `kafka-*.sh` như tài liệu (bỏ `--bootstrap-server`), gợi ý topic/group/config thật, Avro/JSON Schema/Protobuf qua Schema Registry
+- **Quét LAN** // `sqlctx --scan`: liệt kê mọi thiết bị đang bật trong mạng - tên, hãng, loại (Windows, Linux, iPhone, camera, máy chấm công...), cổng mở, dịch vụ quảng bá
 - **Xem traffic** // `sqlctx --net`: mỗi sự kiện mạng 1 dòng dễ hiểu, kèm tên chương trình (eBPF) và nội dung giao thức đọc được: câu SQL Postgres, lệnh Redis, API Kafka, HTTP
 
 ## Cài
@@ -157,6 +158,55 @@ Khác tool gốc có chủ đích: consumer không `--group` đọc bằng `assi
 `\stats [GIÂY]` (cả Redis lẫn Kafka) mở dashboard toàn màn hình kiểu htop/k9s, tự làm mới (mặc định 2s với Redis, 5s với Kafka): ô tổng quan có thanh % và đường xu hướng, biểu đồ vùng có trục (đủ chỗ thì thêm hàng thứ hai: Tổng lag với Kafka, Bộ nhớ và Clients với Redis), bảng chọn được, ô cảnh báo đỏ/vàng. Với Kafka, bảng group có cột `chậm` (message đầu tiên chưa đọc đã nằm đó bao lâu, nội suy từ offset cuối qua các mẫu như kafka-lag-exporter; `>` khi lịch sử chưa đủ dài) và `ETA` (bao lâu nữa hết lag; `=` đọc kịp, `∞` không kịp); cảnh báo xét lag tại các lần commit như Burrow: "lag tăng" khi 5–10 lần commit liền lag không giảm, "kẹt" (đỏ) khi còn member, còn lag mà offset đứng yên quá 30 giây. Với Redis, hit %, evicted/s và CPU tính trong khoảng gần đây chứ không cộng dồn từ lúc server khởi động (như redis-stat/rrtop); cảnh báo evict, từ chối kết nối và lệnh chậm (SLOWLOG) chỉ hiện khi xảy ra trong 1 phút gần nhất; cột `repl lag` cho biết replica chậm hơn master bao nhiêu byte (báo khi tăng liên tục hoặc quá 10s không ack); chi tiết node có lệnh tốn thời gian nhất trong khoảng vừa qua, slowlog, LATENCY LATEST, uptime và giờ server; báo đỏ khi đồng hồ node vừa nhảy (lock/TTL trên node đó có thể hết hạn sai), vàng khi giờ node lệch quá 2s so với máy đang chạy sqlctx. Phím: `Tab` đổi bảng, `↑↓` chọn, `Enter` xem chi tiết (partition của topic, lag từng partition của group, INFO và các lệnh tốn thời gian nhất của node Redis), `+`/`-` đổi chu kỳ, `p` tạm dừng, `q`/`Esc`/Ctrl+C thoát. Chạy batch thì in 1 khung chữ.
 - Redis: mỗi node một dòng (cluster: mọi master và replica; server đơn/sentinel: master và replica của nó): ops/s, kB/s vào/ra, bộ nhớ/maxmemory, phân mảnh, client, hit rate, số key, evict. Cảnh báo: cluster_state khác ok, node lỗi, sắp đầy maxmemory hoặc không đặt maxmemory, đang evict, từ chối kết nối, lưu RDB/AOF lỗi, replica mất kết nối, master không có replica.
 - Kafka: broker (leader, replica, đĩa), số partition thiếu replica/mất leader, quorum, topic ghi nhiều nhất và group lag nhiều nhất. Tốc độ ghi/đọc (msg/s) tính từ chênh lệch offset giữa 2 lần làm mới, vì Admin API không có số liệu JMX. Cảnh báo: partition mất leader, thiếu replica, đĩa ≥ 80%, topic chỉ 1 replica, lag đang tăng, có lag mà không có consumer.
+
+## Quét thiết bị trong LAN
+
+```sh
+sqlctx --scan                  # interface của route mặc định
+sqlctx --scan --iface=wlan0
+sqlctx --scan --fast           # bỏ quét cổng và trang web
+```
+
+```
+╭─────────────────┬──────────────────────────┬──────────────────────┬─────────────────┬────────────────────┬──────────────────────────────╮
+│ IP              │ THIẾT BỊ                 │ HÃNG / MAC           │ HĐH · PING      │ CỔNG MỞ            │ CHI TIẾT                     │
+├─────────────────┴──────────────────────────┴──────────────────────┴─────────────────┴────────────────────┴──────────────────────────────┤
+│ MẠNG · 2                                                                                                                                │
+├─────────────────┬──────────────────────────┬──────────────────────┬─────────────────┬────────────────────┬──────────────────────────────┤
+│ 192.168.168.23  │ (không rõ tên)           │ TP-Link Systems Inc. │ Unix-like       │ http:80 https:443  │ Web :80 "Login" TP-LINK      │
+│                 │ Router / AP              │ 30:68:93:4d:e3:7a    │ 12 ms · ttl 64  │                    │     HTTPD/1.0                │
+│                 │                          │                      │                 │                    │ TLS omadaeap.net · HK        │
+│                 │                          │                      │                 │                    │     hết hạn 2039-12-31 · tự  │
+│                 │                          │                      │                 │                    │     ký                       │
+├─────────────────┴──────────────────────────┴──────────────────────┴─────────────────┴────────────────────┴──────────────────────────────┤
+│ MÁY TÍNH · 14                                                                                                                           │
+├─────────────────┬──────────────────────────┬──────────────────────┬─────────────────┬────────────────────┬──────────────────────────────┤
+│ 192.168.168.14  │ DESKTOP-ETL08N5          │ AzureWave Technology │ Windows         │ netbios:139        │ SMB Windows 11 24H2 / Server │
+│                 │ Máy Windows              │ Inc.                 │ 66 ms · ttl 128 │ smb:445            │     2025 (10.0.26100)        │
+│                 │                          │ 9c:c7:d3:aa:b0:10    │                 │                    │ NetBIOS WORKGROUP · chia sẻ  │
+│                 │                          │                      │                 │                    │         file                 │
+```
+
+Luôn in mọi thông tin biết được, không cắt chữ. Chạy trong terminal thì kết quả mở thành danh sách toàn màn hình như kết quả SQL: cột IP đứng yên, cuộn dòng/cột bằng phím mũi tên, `x` xem 1 máy dạng "cột │ giá trị" với đủ mọi nguồn tin (tên khác, SMB, NetBIOS, mDNS, UPnP, SSH, web, chứng chỉ), `q` thoát. Sau đó (hoặc khi chạy qua pipe) in bảng chia nhóm (Mạng, Máy tính, Điện thoại, Camera & thiết bị), mỗi máy nhiều dòng, chữ dài thì xuống dòng. Cột LOẠI ghi cụ thể nhất biết được: bản Windows (qua SMB), bản Ubuntu/Debian (qua banner SSH), model máy Apple (mDNS).
+
+Không cần root, không cần cài thêm gì (sqlctx tự nói NetBIOS, mDNS, SSDP/UPnP, WS-Discovery, SNMP, RTSP). Ping cả dải (/24; dải lớn hơn /22 thì chỉ quét /22 quanh máy này) để kernel điền bảng ARP - máy chặn ping vẫn hiện vì vẫn phải trả lời ARP. Mỗi máy:
+
+- **Hãng** theo MAC (danh sách OUI của IEEE trong gói `hwdata`). Bit "locally administered" bật thì là MAC ngẫu nhiên (iPhone/Android/Windows bật "địa chỉ riêng tư") - không tra được hãng.
+- **Hệ điều hành** theo TTL của ping: 64 Linux/Android/iOS/macOS, 128 Windows, 255 thiết bị mạng/nhúng.
+- **Tên**: NetBIOS (máy Windows: tên máy, workgroup, có chia sẻ file), mDNS (tên `.local`, dịch vụ Bonjour, model máy Apple, **mọi cặp key=value trong bản ghi TXT**), UPnP (**mọi thẻ mô tả**: tên/hãng/model/số serial/số model/kiểu thiết bị/trang quản trị của TV, camera, router).
+- **Cổng mở** (24 cổng hay gặp, cổng nhạy cảm RDP/SMB/telnet/ADB/MQTT in đỏ), rồi hỏi sâu dịch vụ đang mở:
+  - **web** (mọi cổng web đang mở, không chỉ cổng đầu): tiêu đề, header Server, "realm" ô đăng nhập (camera/router hay ghi model ở đây); theo cả chuyển hướng http → https
+  - **SMB** (445): hỏi NTLM không đăng nhập như nmap `smb-os-discovery` → phiên bản Windows (`Windows 11 24H2 (10.0.26100)`), tên máy, domain - có cả khi máy tắt NetBIOS
+  - **SSH** (22): dòng chào, vd `OpenSSH_9.6p1 Ubuntu-3ubuntu13.20` → biết cả bản phân phối
+  - **TLS** (443/8443): chứng chỉ - CN/O/OU/L/ST/C và SAN (router, AP, camera hay ghi hãng/model ở đây, vd `omadaeap.net` là AP TP-Link Omada), hạn, tự ký hay không, nơi cấp
+  - **RTSP** (554/8554): hỏi `OPTIONS`, đọc header Server → hãng/model đầu ghi camera
+  - **SNMP** (UDP 161, community `public`): `sysDescr` (mô tả + firmware) và `sysName` của router, máy in, switch, NAS
+- **WS-Discovery** (multicast UDP 3702): máy Windows và máy in trả lời kể cả khi chặn ping và tắt NetBIOS - rồi hỏi tiếp metadata (WS-Transfer Get) lấy tên máy, hãng, model.
+- **Nghe thụ động mDNS**: ngoài việc hỏi, còn tham gia nhóm multicast 224.0.0.251 nghe mọi quảng bá của cả mạng - bắt được tên nhiều điện thoại/máy không trả lời hỏi trực tiếp (đọc cả bản ghi A/SRV để ra hostname).
+- **IPv6**: gộp địa chỉ IPv6 theo MAC từ bảng neighbor (`ip -6 neigh`).
+- **Loại** đoán từ các manh mối trên, mạnh trước yếu sau: cổng đặc trưng (62078 iPhone, 4370 máy chấm công ZKTeco, 554 camera, 9100 máy in), tên/dịch vụ, WS-Discovery (máy tính/máy in), rồi tới hãng card mạng.
+
+Cuối bảng là tổng hợp số thiết bị theo loại. Điện thoại và máy Windows bật firewall thường không trả lời tên: xem bảng DHCP trên router. Quét cổng có thể bị antivirus/IDS ghi lại - chỉ quét mạng mình được phép.
 
 ## Xem traffic mạng
 

@@ -25,7 +25,7 @@ public final class CliArgs {
     /** Đúng/sai: "--readonly" trống là true, "--readonly false" / "--readonly=false" thì như viết. */
     static final Set<String> BOOLEAN_OPTIONS = Set.of("readonly", "tls", "ssl");
     /** Cờ không có giá trị (đọc thẳng từ args ở nơi dùng). */
-    static final Set<String> FLAGS = Set.of("yes", "lsp", "format", "net", "verbose");
+    static final Set<String> FLAGS = Set.of("yes", "lsp", "format", "net", "verbose", "scan", "fast");
 
     /** Ghi các tuỳ chọn vào system property; trả danh sách lỗi (rỗng = ổn). */
     public static List<String> apply(String[] args) {

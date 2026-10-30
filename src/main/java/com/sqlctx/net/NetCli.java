@@ -288,7 +288,7 @@ public final class NetCli {
     }
 
     /** Số cột, số dòng của terminal. */
-    private static int[] terminalSize() {
+    static int[] terminalSize() {
         int[] size = {120, 40};
         try {
             Process p = new ProcessBuilder("sh", "-c", "stty size < /dev/tty").redirectError(ProcessBuilder.Redirect.DISCARD).start();

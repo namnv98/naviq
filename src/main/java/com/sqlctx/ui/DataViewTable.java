@@ -49,6 +49,15 @@ public class DataViewTable {
     }
 
     /**
+     * Luôn mở {@link GridView} toàn màn hình, kể cả khi bảng vừa màn hình - cho kết quả nhiều cột muốn duyệt từng bản
+     * ghi (sqlctx --scan). Cột không cắt ngắn (chỉ cắt ở mép màn hình, cuộn ngang hoặc x để xem đủ). Ô là chữ thường,
+     * không mã màu. Trả true nếu đã đổi cỡ cửa sổ lúc xem (như {@link #print}).
+     */
+    public static boolean view(Terminal terminal, List<String> columns, List<List<String>> rows) throws Exception {
+        return GridView.show(terminal, new GridView(columns, rows, Integer.MAX_VALUE));
+    }
+
+    /**
      * In các dòng thô (không vẽ khung bảng) - dùng cho EXPLAIN/EXPLAIN ANALYZE, nội dung đã tự có cấu
      * trúc cây thụt lề riêng, bó vào khung ô vuông chỉ làm rối và cắt cụt dòng dài vô ích. Vẫn tự phân
      * trang qua "less" khi số dòng vượt chiều cao terminal, giống print() cho bảng thường.

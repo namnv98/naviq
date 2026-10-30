@@ -241,6 +241,11 @@ final class NetPrinter {
     }
 
     /** Bỏ dấu, chữ thường: gõ "tu choi" vẫn khớp "TỪ CHỐI". */
+    /** Bỏ mã màu ANSI. */
+    static String plain(String s) {
+        return SGR.matcher(s).replaceAll("");
+    }
+
     static String fold(String s) {
         String plain = SGR.matcher(s).replaceAll("").replace('đ', 'd').replace('Đ', 'D');
         return java.text.Normalizer.normalize(plain, java.text.Normalizer.Form.NFD)
@@ -589,12 +594,19 @@ final class NetPrinter {
 
     /** In 1 bảng nhỏ có khung; ô có thể chứa mã màu ANSI; {@code rightAligned}: cột số căn phải. */
     static void table(PrintStream out, String title, List<String> headers, List<List<String>> rows, int... rightAligned) {
+        table(out, title, headers, rows, false, rightAligned);
+    }
+
+    /** Ô có "\n" thì in thành nhiều dòng; {@code rowLines}: kẻ ngang giữa các hàng (khi hàng cao nhiều dòng). */
+    static void table(PrintStream out, String title, List<String> headers, List<List<String>> rows, boolean rowLines, int... rightAligned) {
         java.util.Set<Integer> right = java.util.Arrays.stream(rightAligned).boxed().collect(java.util.stream.Collectors.toSet());
         int[] w = new int[headers.size()];
         for (int i = 0; i < w.length; i++) {
             w[i] = width(headers.get(i));
             for (List<String> r : rows) {
-                w[i] = Math.max(w[i], width(r.get(i)));
+                for (String line : r.get(i).split("\n", -1)) {
+                    w[i] = Math.max(w[i], width(line));
+                }
             }
         }
         String top = border("╭", "┬", "╮", w);
@@ -606,7 +618,17 @@ final class NetPrinter {
             out.println(staticRow(headers.stream().map(h -> NetFormat.color ? DataViewTable.HEADER_COLOR + h + RESET : h).toList(), w, right));
             out.println(border("├", "┼", "┤", w));
         }
-        rows.forEach(r -> out.println(staticRow(r, w, right)));
+        for (int r = 0; r < rows.size(); r++) {
+            if (rowLines && r > 0) {
+                out.println(border("├", "┼", "┤", w));
+            }
+            List<String[]> cells = rows.get(r).stream().map(c -> c.split("\n", -1)).toList();
+            int height = cells.stream().mapToInt(c -> c.length).max().orElse(1);
+            for (int line = 0; line < height; line++) {
+                int l = line;
+                out.println(staticRow(cells.stream().map(c -> l < c.length ? c[l] : "").toList(), w, right));
+            }
+        }
         out.println(border("╰", "┴", "╯", w));
     }
 
@@ -631,12 +653,73 @@ final class NetPrinter {
     // ---------------------------------------------------------------- vẽ / đo chữ
 
     private static String border(String left, String mid, String right, int[] w) {
+        return border(left, mid, right, "─", w);
+    }
+
+    private static String border(String left, String mid, String right, String fill, int[] w) {
         boolean ascii = DataViewTable.ASCII;
         StringBuilder sb = new StringBuilder(ascii ? "+" : left);
         for (int i = 0; i < w.length; i++) {
-            sb.append((ascii ? "-" : "─").repeat(w[i] + 2)).append(i < w.length - 1 ? (ascii ? "+" : mid) : (ascii ? "+" : right));
+            sb.append((ascii ? "-" : fill).repeat(w[i] + 2)).append(i < w.length - 1 ? (ascii ? "+" : mid) : (ascii ? "+" : right));
         }
         return bar(sb.toString());
+    }
+
+    /** 1 nhóm hàng trong {@link #groupedTable}: tiêu đề nhóm (đã tô màu) + các hàng. */
+    record Group(String title, List<List<String>> rows) {
+    }
+
+    /**
+     * Bảng chia nhóm: mọi nhóm chung 1 bộ độ rộng cột (thẳng hàng từ trên xuống), mỗi nhóm mở đầu bằng 1 dòng tiêu đề
+     * trải hết bề ngang; giữa các hàng trong nhóm kẻ nét đứt mờ, giữa các nhóm kẻ liền. Ô có "\n" in nhiều dòng.
+     */
+    static void groupedTable(PrintStream out, List<String> headers, List<Group> groups) {
+        int[] w = new int[headers.size()];
+        for (int i = 0; i < w.length; i++) {
+            w[i] = width(headers.get(i));
+            for (Group g : groups) {
+                for (List<String> r : g.rows()) {
+                    for (String line : r.get(i).split("\n", -1)) {
+                        w[i] = Math.max(w[i], width(line));
+                    }
+                }
+            }
+        }
+        int inner = sum(w) + 3 * w.length - 1;
+        java.util.Set<Integer> none = java.util.Set.of();
+        out.println(border("╭", "┬", "╮", w));
+        out.println(staticRow(headers.stream().map(h -> NetFormat.color ? DataViewTable.HEADER_COLOR + h + RESET : h).toList(), w, none));
+        for (Group g : groups) {
+            out.println(border("├", "┴", "┤", w));
+            String title = " " + g.title();
+            out.println(bar("│") + title + " ".repeat(Math.max(0, inner - width(title))) + bar("│"));
+            out.println(border("├", "┬", "┤", w));
+            for (int r = 0; r < g.rows().size(); r++) {
+                if (r > 0) {
+                    String dashed = border("├", "┼", "┤", "╌", w);
+                    out.println(NetFormat.color ? NetFormat.dim(SGR.matcher(dashed).replaceAll("")) : dashed);
+                }
+                List<String[]> cells = g.rows().get(r).stream().map(c -> c.split("\n", -1)).toList();
+                int height = cells.stream().mapToInt(c -> c.length).max().orElse(1);
+                for (int line = 0; line < height; line++) {
+                    int l = line;
+                    out.println(staticRow(cells.stream().map(c -> l < c.length ? c[l] : "").toList(), w, none));
+                }
+            }
+        }
+        out.println(border("╰", "┴", "╯", w));
+    }
+
+    /** Khung bo tròn có tiêu đề nằm trên viền trên, các dòng bên trong. */
+    static void box(PrintStream out, String title, List<String> lines) {
+        int inner = Math.max(width(title) + 4, lines.stream().mapToInt(NetPrinter::width).max().orElse(0) + 2);
+        boolean ascii = DataViewTable.ASCII;
+        String h = ascii ? "-" : "─";
+        out.println(bar(ascii ? "+" : "╭") + bar(h) + " " + title + " " + bar(h.repeat(Math.max(1, inner - width(title) - 3)) + (ascii ? "+" : "╮")));
+        for (String l : lines) {
+            out.println(bar("│") + " " + l + " ".repeat(Math.max(0, inner - 1 - width(l))) + bar("│"));
+        }
+        out.println(bar((ascii ? "+" : "╰") + h.repeat(inner) + (ascii ? "+" : "╯")));
     }
 
     private static String bar(String s) {

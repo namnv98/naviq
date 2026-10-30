@@ -58,9 +58,14 @@ final class GridView {
     private int recordScroll;
 
     GridView(List<String> columns, List<List<String>> rows) {
+        this(columns, rows, MAX_COL_WIDTH);
+    }
+
+    /** {@code maxColWidth}: cột rộng nhất trong lưới (Integer.MAX_VALUE = không cắt, chỉ cắt ở mép màn hình). */
+    GridView(List<String> columns, List<List<String>> rows, int maxColWidth) {
         this.columns = columns;
         this.rows = rows;
-        this.widths = DataViewTable.calcWidths(columns, rows, MAX_COL_WIDTH);
+        this.widths = DataViewTable.calcWidths(columns, rows, maxColWidth);
         this.numeric = DataViewTable.computeNumericColumns(rows, columns.size());
         this.left = firstScrollable();
     }
@@ -74,7 +79,10 @@ final class GridView {
      *         xoá và vẽ lại. Không đổi cỡ thì thoát màn hình phụ trả lại nguyên màn hình cũ, không cần vẽ gì thêm.
      */
     static boolean show(Terminal terminal, List<String> columns, List<List<String>> rows) throws IOException {
-        GridView view = new GridView(columns, rows);
+        return show(terminal, new GridView(columns, rows));
+    }
+
+    static boolean show(Terminal terminal, GridView view) throws IOException {
         PrintWriter out = terminal.writer();
         Attributes saved = terminal.enterRawMode();
         terminal.puts(Capability.enter_ca_mode);
