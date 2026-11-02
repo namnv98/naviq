@@ -37,12 +37,22 @@ import java.util.regex.Pattern;
  */
 final class LanProbes {
 
+    static {
+        // thiết bị LAN (camera, router, NAS) hay chỉ hỗ trợ cipher RSA / TLS cũ mà JDK tắt sẵn - server sẽ trả
+        // handshake_failure. Nới ra để còn bắt tay đọc được chứng chỉ và phiên bản TLS của chúng (và báo nếu quá cũ).
+        // Chỉ ảnh hưởng tiến trình chạy chế độ quét (chỉ chế độ này mới nạp LanProbes).
+        java.security.Security.setProperty("jdk.tls.disabledAlgorithms", "");
+    }
+
     /** Cổng hay gặp → tên ngắn. Cổng nào mở cũng là manh mối loại thiết bị (62078: iPhone, 4370: máy chấm công...). */
     static final Map<Integer, String> PORTS = linked(
-            22, "ssh", 23, "telnet", 53, "dns", 80, "http", 139, "netbios", 443, "https", 445, "smb", 548, "afp",
-            554, "rtsp", 631, "ipp", 1883, "mqtt", 3389, "rdp", 4370, "zkteco", 5000, "upnp/nas", 5555, "adb",
-            7000, "airplay", 8000, "hik-sdk", 8008, "googlecast", 8080, "http-alt", 8443, "https-alt",
-            9100, "printer", 37777, "dahua", 49152, "upnp", 62078, "iphone-sync");
+            21, "ftp", 22, "ssh", 23, "telnet", 25, "smtp", 53, "dns", 80, "http", 110, "pop3", 139, "netbios",
+            143, "imap", 443, "https", 445, "smb", 548, "afp", 554, "rtsp", 631, "ipp", 1883, "mqtt", 3306, "mysql",
+            3389, "rdp", 5000, "upnp/nas", 5432, "postgres", 5555, "adb", 5900, "vnc", 6379, "redis", 7000, "airplay",
+            8000, "hik-sdk", 8008, "googlecast", 8080, "http-alt", 8443, "https-alt", 9100, "printer", 37777, "dahua",
+            49152, "upnp", 62078, "iphone-sync");
+    /** Cổng mà server tự chào (hoặc chỉ cần 1 câu hỏi ngắn) để đọc tên + phiên bản dịch vụ. */
+    static final Set<Integer> BANNER_PORTS = Set.of(21, 25, 110, 143, 3306, 5900, 6379);
     /** Cổng dễ bị tấn công nếu lộ ra: in đỏ. */
     static final Set<Integer> RISKY_PORTS = Set.of(23, 445, 1883, 3389, 5555);
 
@@ -192,8 +202,14 @@ final class LanProbes {
      */
     static Map<String, Mdns> mdns(List<String> ips, int waitMs, String iface) {
         Map<String, Mdns> res = new ConcurrentHashMap<>();
-        List<String[]> common = List.of(new String[]{"_services._dns-sd._udp.local", "12"},
-                new String[]{"_device-info._tcp.local", "12"});
+        // _services._dns-sd liệt kê mọi loại dịch vụ 1 máy quảng bá; thêm vài loại hỏi thẳng để máy nào kén trả lời meta-query vẫn lộ tên/model
+        List<String[]> common = new ArrayList<>();
+        for (String type : List.of("_services._dns-sd._udp.local", "_device-info._tcp.local", "_printer._tcp.local",
+                "_ipp._tcp.local", "_ipps._tcp.local", "_homekit._tcp.local", "_hap._tcp.local", "_googlecast._tcp.local",
+                "_airplay._tcp.local", "_raop._tcp.local", "_spotify-connect._tcp.local", "_sonos._tcp.local",
+                "_matter._tcp.local", "_amzn-wplay._tcp.local", "_philips-hue._tcp.local")) {
+            common.add(new String[]{type, "12"});
+        }
         Thread passive = Thread.ofVirtual().start(() -> listenPassiveMdns(res, iface, waitMs));
         try (DatagramSocket s = new DatagramSocket()) {
             s.setSoTimeout(200);
@@ -370,9 +386,13 @@ final class LanProbes {
 
     // ---------------------------------------------------------------- SSDP / UPnP
 
-    /** IP → {location, server} của các thiết bị trả lời M-SEARCH ssdp:all. */
+    /**
+     * IP → {location, server} của thiết bị UPnP. Vừa chủ động hỏi M-SEARCH ssdp:all (đọc trả lời unicast), vừa nghe thụ
+     * động quảng bá NOTIFY trên nhóm multicast 1900 - bắt được cả thiết bị không trả lời M-SEARCH (TV, loa, router).
+     */
     static Map<String, Map<String, String>> ssdp(int waitMs) {
-        Map<String, Map<String, String>> res = new HashMap<>();
+        Map<String, Map<String, String>> res = new ConcurrentHashMap<>();
+        Thread passive = Thread.ofVirtual().start(() -> listenPassiveSsdp(res, waitMs));
         byte[] msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\n"
                 + "ST: ssdp:all\r\n\r\n").getBytes(StandardCharsets.US_ASCII);
         try (DatagramSocket s = new DatagramSocket()) {
@@ -389,20 +409,54 @@ final class LanProbes {
                 } catch (SocketTimeoutException e) {
                     continue;
                 }
-                Map<String, String> d = res.computeIfAbsent(p.getAddress().getHostAddress(), k -> new HashMap<>());
-                for (String line : new String(buf, 0, p.getLength(), StandardCharsets.UTF_8).split("\r?\n")) {
-                    int colon = line.indexOf(':');
-                    if (colon > 0) {
-                        String key = line.substring(0, colon).strip().toLowerCase(Locale.ROOT);
-                        if (key.equals("location") || key.equals("server")) {
-                            d.putIfAbsent(key, line.substring(colon + 1).strip());
-                        }
-                    }
-                }
+                mergeSsdp(res, p.getAddress().getHostAddress(), new String(buf, 0, p.getLength(), StandardCharsets.UTF_8));
             }
         } catch (IOException ignored) {
         }
+        try {
+            passive.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         return res;
+    }
+
+    /** Socket multicast riêng, tham gia nhóm 239.255.255.250:1900 nghe quảng bá NOTIFY của cả mạng; lặng lẽ bỏ qua nếu không mở được. */
+    private static void listenPassiveSsdp(Map<String, Map<String, String>> res, int waitMs) {
+        try (java.net.MulticastSocket m = new java.net.MulticastSocket(null)) {
+            m.setReuseAddress(true);
+            m.bind(new InetSocketAddress(1900));
+            m.joinGroup(new InetSocketAddress(InetAddress.getByName("239.255.255.250"), 1900), null);
+            m.setSoTimeout(200);
+            long end = System.currentTimeMillis() + waitMs;
+            byte[] buf = new byte[4096];
+            while (System.currentTimeMillis() < end) {
+                DatagramPacket p = new DatagramPacket(buf, buf.length);
+                try {
+                    m.receive(p);
+                } catch (SocketTimeoutException e) {
+                    continue;
+                }
+                mergeSsdp(res, p.getAddress().getHostAddress(), new String(buf, 0, p.getLength(), StandardCharsets.UTF_8));
+            }
+        } catch (IOException ignored) {
+        }
+    }
+
+    /** Gộp các dòng LOCATION/SERVER của 1 gói SSDP vào {@code res} theo IP gửi (an toàn khi 2 luồng cùng ghi). */
+    private static void mergeSsdp(Map<String, Map<String, String>> res, String ip, String text) {
+        Map<String, String> d = res.computeIfAbsent(ip, k -> new HashMap<>());
+        synchronized (d) {
+            for (String line : text.split("\r?\n")) {
+                int colon = line.indexOf(':');
+                if (colon > 0) {
+                    String key = line.substring(0, colon).strip().toLowerCase(Locale.ROOT);
+                    if (key.equals("location") || key.equals("server")) {
+                        d.putIfAbsent(key, line.substring(colon + 1).strip());
+                    }
+                }
+            }
+        }
     }
 
     /** Đọc file mô tả UPnP (XML ở LOCATION): mọi thẻ nhận dạng thiết bị, kể cả trang quản trị (presentationURL). */
@@ -447,6 +501,45 @@ final class LanProbes {
         }
     }
 
+    /**
+     * Đọc dòng chào của dịch vụ text đang mở (FTP/SMTP/POP3/IMAP/VNC tự chào; Redis thì hỏi PING; MySQL đọc phiên bản
+     * trong gói handshake). Trả chuỗi ngắn tên + phiên bản, hoặc null nếu không đọc được.
+     */
+    static String serviceBanner(String ip, int port) {
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(ip, port), 1500);
+            s.setSoTimeout(2000);
+            if (port == 6379) { // Redis không tự chào: hỏi PING (lệnh inline)
+                s.getOutputStream().write("PING\r\n".getBytes(StandardCharsets.US_ASCII));
+                s.getOutputStream().flush();
+            }
+            byte[] buf = s.getInputStream().readNBytes(256);
+            if (buf.length == 0) {
+                return null;
+            }
+            if (port == 3306) {
+                return mysqlVersion(buf);
+            }
+            String line = new String(buf, StandardCharsets.ISO_8859_1).split("\r?\n", 2)[0]
+                    .replaceAll("[^\\x20-\\x7E]", " ").strip(); // bỏ ký tự điều khiển (telnet IAC, mã nhị phân VNC...)
+            return line.isBlank() ? null : line.length() > 120 ? line.substring(0, 120) : line;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** Phiên bản MySQL/MariaDB trong gói handshake đầu: [0..2] độ dài, [3] seq, [4] protocol=10, rồi chuỗi version kết thúc bằng 0. */
+    private static String mysqlVersion(byte[] b) {
+        if (b.length < 6 || (b[4] & 0xFF) != 10) {
+            return null;
+        }
+        int end = 5;
+        while (end < b.length && b[end] != 0) {
+            end++;
+        }
+        return "MySQL/MariaDB " + new String(b, 5, end - 5, StandardCharsets.US_ASCII);
+    }
+
     record Cert(String subject, String issuer, List<String> names, String notAfter, boolean selfSigned, boolean expired) {
     }
 
@@ -456,6 +549,7 @@ final class LanProbes {
             raw.connect(new InetSocketAddress(ip, port), 1500);
             raw.setSoTimeout(2500);
             try (javax.net.ssl.SSLSocket s = (javax.net.ssl.SSLSocket) TRUST_ALL.getSocketFactory().createSocket(raw, ip, port, false)) {
+                enableLegacy(s);
                 s.startHandshake();
                 X509Certificate c = (X509Certificate) s.getSession().getPeerCertificates()[0];
                 List<String> names = new ArrayList<>();
@@ -466,6 +560,28 @@ final class LanProbes {
                 String issuer = c.getIssuerX500Principal().getName(javax.security.auth.x500.X500Principal.RFC2253);
                 return new Cert(subject, issuer, names, c.getNotAfter().toInstant().toString().substring(0, 10),
                         subject.equals(issuer), c.getNotAfter().before(new java.util.Date()));
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Giao thức + bộ mã TLS mà server chọn khi bắt tay; {@link #weak()} = còn dùng TLS cũ (< 1.2, nên bỏ). */
+    record TlsInfo(String protocol, String cipher) {
+        boolean weak() {
+            return protocol != null && protocol.compareTo("TLSv1.2") < 0; // SSLv3, TLSv1, TLSv1.1
+        }
+    }
+
+    /** Bắt tay TLS thật để biết phiên bản + cipher server chọn (camera/router cũ hay ép TLS 1.0/1.1). Null nếu không phải TLS. */
+    static TlsInfo tlsInfo(String ip, int port) {
+        try (Socket raw = new Socket()) {
+            raw.connect(new InetSocketAddress(ip, port), 1500);
+            raw.setSoTimeout(2500);
+            try (javax.net.ssl.SSLSocket s = (javax.net.ssl.SSLSocket) TRUST_ALL.getSocketFactory().createSocket(raw, ip, port, false)) {
+                enableLegacy(s);
+                s.startHandshake();
+                return new TlsInfo(s.getSession().getProtocol(), s.getSession().getCipherSuite());
             }
         } catch (Exception e) {
             return null;
@@ -532,6 +648,21 @@ final class LanProbes {
         } catch (IOException | RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * Liệt kê thư mục chia sẻ qua phiên SMB ẩn danh (dùng {@code smbclient} của Samba nếu có cài). Rỗng khi không cài
+     * smbclient hoặc máy không cho liệt kê ẩn danh. Bỏ share quản trị ẩn (tên kết thúc bằng $).
+     */
+    static List<String> smbShares(String ip) {
+        List<String> shares = new ArrayList<>();
+        for (String line : run(List.of("smbclient", "-g", "-N", "-L", "//" + ip), 6).split("\n")) {
+            String[] p = line.split("\\|"); // định dạng -g: "Disk|<tên>|<mô tả>"
+            if (p.length >= 2 && p[0].equalsIgnoreCase("Disk") && !p[1].isBlank() && !p[1].endsWith("$")) {
+                shares.add(p[1].strip());
+            }
+        }
+        return shares;
     }
 
     private static byte[] smb2Header(int command, long messageId) {
@@ -836,6 +967,12 @@ final class LanProbes {
         return sb.toString();
     }
 
+    /** Chào mọi protocol + cipher JDK hỗ trợ (kể cả RSA/TLS cũ) để bắt tay được với thiết bị LAN đời cũ. */
+    private static void enableLegacy(javax.net.ssl.SSLSocket s) {
+        s.setEnabledProtocols(s.getSupportedProtocols());
+        s.setEnabledCipherSuites(s.getSupportedCipherSuites());
+    }
+
     private static final SSLContext TRUST_ALL = trustAll();
 
     private static SSLContext trustAll() {
@@ -978,6 +1115,367 @@ final class LanProbes {
             }
         }
         return out;
+    }
+
+    /**
+     * MAC phần cứng nhúng trong địa chỉ IPv6 EUI-64 (giữa interface-id có {@code ff:fe}, bit U/L lật): tra được hãng cho
+     * thiết bị chỉ thấy qua IPv6. Null nếu là địa chỉ riêng tư/ngẫu nhiên (RFC 4941) - không nhúng MAC.
+     */
+    static String macFromEui64(List<String> ipv6) {
+        for (String addr : ipv6) {
+            try {
+                byte[] b = InetAddress.getByName(addr).getAddress();
+                if (b.length == 16 && (b[11] & 0xFF) == 0xFF && (b[12] & 0xFF) == 0xFE) {
+                    int[] m = {(b[8] & 0xFF) ^ 0x02, b[9] & 0xFF, b[10] & 0xFF, b[13] & 0xFF, b[14] & 0xFF, b[15] & 0xFF};
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < 6; i++) {
+                        sb.append(i == 0 ? "" : ":").append(String.format("%02x", m[i]));
+                    }
+                    return sb.toString();
+                }
+            } catch (IOException | RuntimeException ignored) {
+            }
+        }
+        return null;
+    }
+
+    // ---------------------------------------------------------------- reverse DNS (PTR) & LLMNR
+
+    /** Gói truy vấn DNS chuẩn 1 câu hỏi; {@code rd}=đệ quy (DNS thường bật, LLMNR tắt). */
+    static byte[] dnsPtrQuery(String name, int type, boolean rd) {
+        java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+        int id = new java.util.Random().nextInt(0x10000);
+        b.writeBytes(new byte[]{(byte) (id >> 8), (byte) id, (byte) (rd ? 1 : 0), 0, 0, 1, 0, 0, 0, 0, 0, 0});
+        for (String label : name.split("\\.")) {
+            byte[] l = label.getBytes(StandardCharsets.UTF_8);
+            b.write(l.length);
+            b.writeBytes(l);
+        }
+        b.write(0);
+        b.writeBytes(new byte[]{0, (byte) type, 0, 1}); // type, class IN
+        return b.toByteArray();
+    }
+
+    /** Tên PTR đầu tiên trong phần trả lời của 1 gói DNS/LLMNR; null nếu không có bản ghi PTR. */
+    static String parsePtr(byte[] buf) {
+        int qd = u16(buf, 4);
+        int an = u16(buf, 6);
+        if (an == 0) {
+            return null;
+        }
+        int[] off = {12};
+        for (int i = 0; i < qd; i++) {
+            name(buf, off);
+            off[0] += 4;
+        }
+        for (int i = 0; i < an && off[0] + 10 <= buf.length; i++) {
+            name(buf, off);
+            int type = u16(buf, off[0]);
+            int len = u16(buf, off[0] + 8);
+            int data = off[0] + 10;
+            off[0] = data + len;
+            if (type == 12) {
+                String n = name(buf, new int[]{data});
+                if (n != null && !n.isBlank()) {
+                    return n;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Hỏi PTR tên ngược của {@code ip} tới resolver của LAN (thường là router) - nhiều router trả thẳng hostname DHCP. */
+    static String reverseDns(String resolver, String ip) {
+        if (resolver == null) {
+            return null;
+        }
+        return askPtr(resolver, 53, dnsPtrQuery(reverseName(ip), 12, true), 1200);
+    }
+
+    /** LLMNR (unicast UDP 5355): máy Windows tắt NetBIOS/mDNS vẫn trả tên của mình. Best-effort, hỏng thì null. */
+    static String llmnr(String ip) {
+        return askPtr(ip, 5355, dnsPtrQuery(reverseName(ip), 12, false), 800);
+    }
+
+    private static String askPtr(String host, int port, byte[] query, int timeoutMs) {
+        try (DatagramSocket s = new DatagramSocket()) {
+            s.setSoTimeout(timeoutMs);
+            s.send(new DatagramPacket(query, query.length, InetAddress.getByName(host), port));
+            byte[] buf = new byte[2048];
+            DatagramPacket p = new DatagramPacket(buf, buf.length);
+            s.receive(p);
+            String n = parsePtr(java.util.Arrays.copyOf(buf, p.getLength()));
+            return n == null ? null : n.replaceFirst("\\.(local|lan|home|localdomain)$", "");
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------- UPnP: bảng chuyển cổng ra Internet (IGD)
+
+    /** 1 dòng chuyển cổng của router: giao thức, cổng ngoài → máy nội bộ:cổng, mô tả. */
+    record PortMap(String proto, int externalPort, String internalClient, int internalPort, String desc) {
+    }
+
+    private static String xmlTag(String xml, String tag) {
+        Matcher m = Pattern.compile("<" + tag + ">(.*?)</" + tag + ">", Pattern.DOTALL).matcher(xml);
+        return m.find() ? m.group(1).strip() : null;
+    }
+
+    /**
+     * Bảng chuyển cổng (port-forward) ra Internet của router qua UPnP IGD: tải mô tả ở {@code rootDescUrl}, tìm dịch vụ
+     * WAN*Connection và controlURL, rồi gọi GetGenericPortMappingEntry lần lượt index 0,1,2... tới khi hết. Rỗng nếu
+     * router không bật UPnP (hoặc đã tắt - nên tắt).
+     */
+    static List<PortMap> upnpPortMappings(String rootDescUrl) {
+        List<PortMap> out = new ArrayList<>();
+        String[] got = httpGet(rootDescUrl, 131072);
+        if (got == null) {
+            return out;
+        }
+        String svcType = null;
+        String ctrl = null;
+        Matcher sm = Pattern.compile("<service>(.*?)</service>", Pattern.DOTALL).matcher(got[1]);
+        while (sm.find()) {
+            String blk = sm.group(1);
+            if (blk.contains("WANIPConnection") || blk.contains("WANPPPConnection")) {
+                svcType = xmlTag(blk, "serviceType");
+                ctrl = xmlTag(blk, "controlURL");
+                if (svcType != null && ctrl != null) {
+                    break;
+                }
+            }
+        }
+        if (svcType == null || ctrl == null) {
+            return out;
+        }
+        String control = URI.create(rootDescUrl).resolve(ctrl).toString();
+        for (int i = 0; i < 64; i++) {
+            PortMap pm = getPortMapping(control, svcType, i);
+            if (pm == null) {
+                break; // hết bảng: router trả lỗi SOAP (SpecifiedArrayIndexInvalid)
+            }
+            out.add(pm);
+        }
+        return out;
+    }
+
+    private static PortMap getPortMapping(String controlUrl, String svcType, int index) {
+        String body = "<?xml version=\"1.0\"?>"
+                + "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
+                + "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body>"
+                + "<u:GetGenericPortMappingEntry xmlns:u=\"" + svcType + "\">"
+                + "<NewPortMappingIndex>" + index + "</NewPortMappingIndex>"
+                + "</u:GetGenericPortMappingEntry></s:Body></s:Envelope>";
+        try {
+            HttpURLConnection c = (HttpURLConnection) URI.create(controlUrl).toURL().openConnection();
+            c.setConnectTimeout(2000);
+            c.setReadTimeout(2500);
+            c.setDoOutput(true);
+            c.setRequestMethod("POST");
+            c.setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"");
+            c.setRequestProperty("SOAPAction", "\"" + svcType + "#GetGenericPortMappingEntry\"");
+            c.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
+            int code = c.getResponseCode();
+            InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            String resp = in == null ? "" : new String(in.readNBytes(32768), StandardCharsets.UTF_8);
+            c.disconnect();
+            if (code != 200) {
+                return null;
+            }
+            String ext = xmlTag(resp, "NewExternalPort");
+            String client = xmlTag(resp, "NewInternalClient");
+            if (ext == null || client == null || client.isBlank()) {
+                return null;
+            }
+            String proto = xmlTag(resp, "NewProtocol");
+            return new PortMap(proto == null ? "" : proto, parsePort(ext), client, parsePort(xmlTag(resp, "NewInternalPort")),
+                    java.util.Objects.requireNonNullElse(xmlTag(resp, "NewPortMappingDescription"), ""));
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static int parsePort(String s) {
+        try {
+            return s == null ? 0 : Integer.parseInt(s.strip());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    // ---------------------------------------------------------------- IPP (máy in)
+
+    /**
+     * Máy in qua IPP (cổng 631): model, tình trạng, mức mực/toner, số việc đang chờ. Thử trước đường dẫn {@code rpHint}
+     * (lấy từ mDNS TXT {@code rp=...}, vd hàng đợi CUPS {@code printers/Canon_MF240}), rồi các đường dẫn phổ biến. Null nếu không trả lời IPP.
+     */
+    static String ippPrinter(String ip, int port, String rpHint) {
+        List<String> paths = new ArrayList<>();
+        if (rpHint != null && !rpHint.isBlank()) {
+            paths.add(rpHint.startsWith("/") ? rpHint : "/" + rpHint);
+        }
+        paths.add("/ipp/print");
+        paths.add("/");
+        for (String rp : paths) {
+            String r = ippGetAttributes(ip, port, rp);
+            if (r != null) {
+                return r;
+            }
+        }
+        // CUPS: hỏi danh sách hàng đợi qua IPP (web UI thường chặn remote) rồi truy từng /printers/<tên>
+        int n = 0;
+        for (String name : cupsQueues(ip, port)) {
+            if (n++ >= 5) {
+                break;
+            }
+            String r = ippGetAttributes(ip, port, "/printers/" + name);
+            if (r != null) {
+                return r;
+            }
+        }
+        return null;
+    }
+
+    private static String ippGetAttributes(String ip, int port, String rp) {
+        byte[] resp = ippPost(ip, port, rp, ippRequest(0x000B, "ipp://" + ip + ":" + port + rp, "all")); // Get-Printer-Attributes
+        return resp == null ? null : ippSummary(ippParse(resp));
+    }
+
+    /** Hỏi CUPS liệt kê tên các hàng đợi in (CUPS-Get-Printers) - để truy IPP theo /printers/&lt;tên&gt; khi không có gợi ý mDNS. */
+    private static List<String> cupsQueues(String ip, int port) {
+        byte[] resp = ippPost(ip, port, "/", ippRequest(0x4002, "ipp://" + ip + ":" + port + "/", "printer-name"));
+        return resp == null ? List.of() : ippParse(resp).getOrDefault("printer-name", List.of());
+    }
+
+    private static byte[] ippPost(String ip, int port, String rp, byte[] body) {
+        try {
+            HttpURLConnection c = (HttpURLConnection) URI.create("http://" + ip + ":" + port + rp).toURL().openConnection();
+            c.setConnectTimeout(1500);
+            c.setReadTimeout(2500);
+            c.setDoOutput(true);
+            c.setRequestMethod("POST");
+            c.setRequestProperty("Content-Type", "application/ipp");
+            c.getOutputStream().write(body);
+            int code = c.getResponseCode();
+            InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+            byte[] resp = in == null ? new byte[0] : in.readNBytes(65536);
+            c.disconnect();
+            return resp.length < 9 ? null : resp;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static byte[] ippRequest(int operation, String uri, String requestedAttr) {
+        java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
+        b.writeBytes(new byte[]{0x02, 0x00, (byte) (operation >> 8), (byte) operation, 0, 0, 0, 1}); // v2.0, op, request-id 1
+        b.write(0x01);                                                                               // operation-attributes-tag
+        ippAttr(b, 0x47, "attributes-charset", "utf-8");
+        ippAttr(b, 0x48, "attributes-natural-language", "en");
+        ippAttr(b, 0x45, "printer-uri", uri);
+        ippAttr(b, 0x44, "requested-attributes", requestedAttr);
+        b.write(0x03);                                                                               // end-of-attributes-tag
+        return b.toByteArray();
+    }
+
+    private static void ippAttr(java.io.ByteArrayOutputStream b, int tag, String name, String val) {
+        b.write(tag);
+        byte[] n = name.getBytes(StandardCharsets.US_ASCII);
+        b.writeBytes(new byte[]{(byte) (n.length >> 8), (byte) n.length});
+        b.writeBytes(n);
+        byte[] v = val.getBytes(StandardCharsets.UTF_8);
+        b.writeBytes(new byte[]{(byte) (v.length >> 8), (byte) v.length});
+        b.writeBytes(v);
+    }
+
+    /** Đọc các nhóm thuộc tính của trả lời IPP, rút model / tình trạng / mực / việc chờ thành 1 dòng ngắn. */
+    /** Duyệt các nhóm thuộc tính của gói IPP thành map tên → danh sách giá trị (gộp 1setOf và nhiều nhóm printer). */
+    private static Map<String, List<String>> ippParse(byte[] b) {
+        Map<String, List<String>> a = new LinkedHashMap<>();
+        int p = 8; // bỏ header: version(2) + status-code(2) + request-id(4)
+        String lastName = null;
+        while (p < b.length) {
+            int tag = b[p++] & 0xFF;
+            if (tag <= 0x05) { // thẻ phân nhóm (operation/printer/job/end...)
+                if (tag == 0x03) {
+                    break;     // end-of-attributes
+                }
+                continue;
+            }
+            if (p + 2 > b.length) {
+                break;
+            }
+            int nlen = (b[p] & 0xFF) << 8 | b[p + 1] & 0xFF;
+            p += 2;
+            if (p + nlen + 2 > b.length) {
+                break;
+            }
+            String name = new String(b, p, nlen, StandardCharsets.UTF_8);
+            p += nlen;
+            int vlen = (b[p] & 0xFF) << 8 | b[p + 1] & 0xFF;
+            p += 2;
+            if (p + vlen > b.length) {
+                break;
+            }
+            String key = nlen == 0 ? lastName : name; // name-len 0 = giá trị tiếp theo của thuộc tính trước (1setOf)
+            String val;
+            if (tag == 0x21 || tag == 0x23 || tag == 0x22) { // integer / enum / boolean
+                long v = 0;
+                for (int i = 0; i < vlen; i++) {
+                    v = v << 8 | b[p + i] & 0xFF;
+                }
+                val = String.valueOf(v);
+            } else {
+                val = new String(b, p, vlen, StandardCharsets.UTF_8);
+            }
+            p += vlen;
+            if (key != null) {
+                a.computeIfAbsent(key, k -> new ArrayList<>()).add(val);
+            }
+            if (nlen > 0) {
+                lastName = name;
+            }
+        }
+        return a;
+    }
+
+    /** Rút model / tình trạng / mực / việc chờ của 1 máy in từ map thuộc tính IPP thành 1 dòng ngắn. */
+    private static String ippSummary(Map<String, List<String>> a) {
+        if (a.isEmpty()) {
+            return null;
+        }
+        List<String> bits = new ArrayList<>();
+        String model = firstVal(a, "printer-make-and-model");
+        if (model != null) {
+            bits.add(model);
+        }
+        String st = firstVal(a, "printer-state");
+        if (st != null) {
+            String s = switch (st) {
+                case "3" -> "idle";
+                case "4" -> "printing";
+                case "5" -> "stopped";
+                default -> "state " + st;
+            };
+            String msg = firstVal(a, "printer-state-message");
+            bits.add(s + (msg == null || msg.isBlank() ? "" : " (" + msg.strip() + ")"));
+        }
+        List<String> names = a.getOrDefault("marker-names", List.of());
+        List<String> levels = a.getOrDefault("marker-levels", List.of());
+        for (int i = 0; i < names.size() && i < levels.size(); i++) {
+            bits.add(names.get(i) + " " + levels.get(i) + "%");
+        }
+        String jobs = firstVal(a, "queued-job-count");
+        if (jobs != null && !jobs.equals("0")) {
+            bits.add(jobs + " job chờ");
+        }
+        return bits.isEmpty() ? null : String.join(" · ", bits);
+    }
+
+    private static String firstVal(Map<String, List<String>> a, String key) {
+        List<String> v = a.get(key);
+        return v == null || v.isEmpty() ? null : v.get(0);
     }
 
     // ----------------------------------------------------------------

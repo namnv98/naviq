@@ -46,9 +46,12 @@ final class GridView {
     private static final String[] BOTTOM = ASCII ? new String[]{"+", "+", "+"} : new String[]{"╰", "┴", "╯"};
 
     private final List<String> columns;
-    private final List<List<String>> rows;
-    private final int[] widths;
-    private final boolean[] numeric;
+    private final int maxColWidth;
+    private List<List<String>> rows;
+    private int[] widths;
+    private boolean[] numeric;
+    /** Dữ liệu mới do luồng khác bơm vào (chế độ tự làm mới); vòng vẽ nhận ở lần thăm dò kế tiếp. */
+    private volatile List<List<String>> pending;
 
     private int cursor;
     private int top;
@@ -64,10 +67,25 @@ final class GridView {
     /** {@code maxColWidth}: cột rộng nhất trong lưới (Integer.MAX_VALUE = không cắt, chỉ cắt ở mép màn hình). */
     GridView(List<String> columns, List<List<String>> rows, int maxColWidth) {
         this.columns = columns;
+        this.maxColWidth = maxColWidth;
         this.rows = rows;
         this.widths = DataViewTable.calcWidths(columns, rows, maxColWidth);
         this.numeric = DataViewTable.computeNumericColumns(rows, columns.size());
         this.left = firstScrollable();
+    }
+
+    /** Bơm dữ liệu mới từ luồng khác; vòng vẽ của {@link #show} sẽ nhận ở lần thăm dò kế tiếp. */
+    void offer(List<List<String>> newRows) {
+        this.pending = newRows;
+    }
+
+    /** Thay dữ liệu khi đang xem: tính lại độ rộng cột, giữ con trỏ trong phạm vi mới (gọi trên luồng vẽ). */
+    private void setRows(List<List<String>> newRows) {
+        this.rows = newRows;
+        this.widths = DataViewTable.calcWidths(columns, newRows, maxColWidth);
+        this.numeric = DataViewTable.computeNumericColumns(newRows, columns.size());
+        cursor = Math.min(cursor, Math.max(0, newRows.size() - 1));
+        top = Math.min(top, Math.max(0, newRows.size() - 1));
     }
 
     // -------------------------------------------------------------------------
@@ -103,6 +121,10 @@ final class GridView {
                         width = terminal.getWidth();
                         height = terminal.getHeight();
                         view.handle("resize", width, height);
+                        draw(out, view.render(width, height));
+                    } else if (view.pending != null) { // luồng nền vừa bơm dữ liệu mới (chế độ tự làm mới)
+                        view.setRows(view.pending);
+                        view.pending = null;
                         draw(out, view.render(width, height));
                     }
                     continue;
@@ -150,8 +172,9 @@ final class GridView {
         bind(km, t, "end", Capability.key_end, "\u001b[F", "\u001bOF", "\u001b[4~", "G");
         km.bind("colHome", "0");
         km.bind("colEnd", "$");
-        km.bind("record", "x", "X");
-        km.bind("quit", "q", "Q", "\r", "\n", "\u001b", "\u0003");
+        km.bind("record", "x", "X", "\r", "\n"); // Enter cũng mở/đóng chế độ xem đầy đủ 1 bản ghi
+        km.bind("back", "\u001b");               // Esc: đang xem bản ghi thì quay lại list, ở list thì thoát
+        km.bind("quit", "q", "Q", "\u0003");
         return km;
     }
 
@@ -171,6 +194,14 @@ final class GridView {
     boolean handle(String op, int width, int height) {
         int page = dataHeight(height);
         if (op.equals("quit")) {
+            return false;
+        }
+        if (op.equals("back")) { // Esc: ở bản ghi thì về list, ở list thì thoát
+            if (recordMode) {
+                recordMode = false;
+                recordScroll = 0;
+                return true;
+            }
             return false;
         }
         if (op.equals("record")) {
@@ -391,7 +422,7 @@ final class GridView {
         }
         colPart += " of " + columns.size();
         // Chỉ ASCII: mũi tên, "·", "–" có terminal vẽ rộng 2 ô, làm dòng cuối tràn và cuộn cả màn hình.
-        return " " + rowPart + " | " + colPart + " | arrows PgUp/PgDn g/G 0/$ | x record | q quit";
+        return " " + rowPart + " | " + colPart + " | arrows PgUp/PgDn g/G 0/$ | Enter/x record | q quit";
     }
 
     private void renderRecord(List<String> lines, int width, int page) {
@@ -403,7 +434,7 @@ final class GridView {
             int k = recordScroll + i;
             lines.add(k < body.size() ? body.get(k) : "");
         }
-        lines.add(statusLine(" left/right prev/next record | up/down PgUp/PgDn scroll | x grid | q quit", width));
+        lines.add(statusLine(" left/right prev/next record | up/down PgUp/PgDn scroll | Enter/x/Esc back to list | q quit", width));
     }
 
     /** Thân của bản ghi đang chọn: mỗi cột 1 dòng "tên │ giá trị", giá trị dài xuống dòng theo độ rộng màn hình. */
@@ -418,7 +449,19 @@ final class GridView {
             return out;
         }
         List<String> row = rows.get(cursor);
+        // Cột có dữ liệu lên trước, cột rỗng xuống cuối: không ẩn gì nhưng thông tin thật hiện ngay, khỏi cuộn xuống tìm.
+        List<Integer> order = new ArrayList<>();
         for (int c = 0; c < columns.size(); c++) {
+            if (c < row.size() && !clean(row.get(c)).isBlank()) {
+                order.add(c);
+            }
+        }
+        for (int c = 0; c < columns.size(); c++) {
+            if (c >= row.size() || clean(row.get(c)).isBlank()) {
+                order.add(c);
+            }
+        }
+        for (int c : order) {
             String name = truncate(clean(columns.get(c)), nameW);
             String value = c < row.size() ? clean(row.get(c)) : "";
             String style = styleForValue(value);

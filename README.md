@@ -165,6 +165,8 @@ Khác tool gốc có chủ đích: consumer không `--group` đọc bằng `assi
 sqlctx --scan                  # interface của route mặc định
 sqlctx --scan --iface=wlan0
 sqlctx --scan --fast           # bỏ quét cổng và trang web
+sqlctx --scan --wait=10        # nghe quảng bá (mDNS/SSDP) lâu hơn (mặc định 5s) - bắt thêm máy chợt thức
+sqlctx --scan --watch          # mở listview như trên nhưng tự làm mới, tích luỹ thông tin theo thời gian (--watch=8: 8s/vòng, mặc định 10s), thêm cột TÌNH TRẠNG; q thoát
 ```
 
 ```
@@ -187,26 +189,29 @@ sqlctx --scan --fast           # bỏ quét cổng và trang web
 │                 │                          │                      │                 │                    │         file                 │
 ```
 
-Luôn in mọi thông tin biết được, không cắt chữ. Chạy trong terminal thì kết quả mở thành danh sách toàn màn hình như kết quả SQL: cột IP đứng yên, cuộn dòng/cột bằng phím mũi tên, `x` xem 1 máy dạng "cột │ giá trị" với đủ mọi nguồn tin (tên khác, SMB, NetBIOS, mDNS, UPnP, SSH, web, chứng chỉ), `q` thoát. Sau đó (hoặc khi chạy qua pipe) in bảng chia nhóm (Mạng, Máy tính, Điện thoại, Camera & thiết bị), mỗi máy nhiều dòng, chữ dài thì xuống dòng. Cột LOẠI ghi cụ thể nhất biết được: bản Windows (qua SMB), bản Ubuntu/Debian (qua banner SSH), model máy Apple (mDNS).
+Luôn in mọi thông tin biết được, không cắt chữ. Chạy trong terminal thì kết quả mở thành danh sách toàn màn hình như kết quả SQL: cột IP đứng yên, cuộn dòng/cột bằng phím mũi tên, **Enter** (hoặc `x`) xem 1 máy dạng "cột │ giá trị" với **đầy đủ mọi thông tin lấy được, không ẩn/cắt gì** (mọi tên, cổng, chi tiết, SMB, NetBIOS, mDNS + bản ghi TXT, UPnP, SSH, web, chứng chỉ, SNMP, WSD, IPv6, TLS), `q` thoát. Sau đó (hoặc khi chạy qua pipe) in bảng chia nhóm (Mạng, Máy tính, Điện thoại, Camera & thiết bị), mỗi máy nhiều dòng, chữ dài thì xuống dòng. Cột LOẠI ghi cụ thể nhất biết được: bản Windows (qua SMB), bản Ubuntu/Debian (qua banner SSH), model máy Apple (mDNS).
 
-Không cần root, không cần cài thêm gì (sqlctx tự nói NetBIOS, mDNS, SSDP/UPnP, WS-Discovery, SNMP, RTSP). Ping cả dải (/24; dải lớn hơn /22 thì chỉ quét /22 quanh máy này) để kernel điền bảng ARP - máy chặn ping vẫn hiện vì vẫn phải trả lời ARP. Mỗi máy:
+Không cần root, không cần cài thêm gì (sqlctx tự nói NetBIOS, mDNS, SSDP/UPnP, WS-Discovery, SNMP, RTSP, IPP). Ping cả dải (/24; dải lớn hơn /22 thì chỉ quét /22 quanh máy này) để kernel điền bảng ARP - máy chặn ping vẫn hiện vì vẫn phải trả lời ARP. Mỗi máy:
 
 - **Hãng** theo MAC (danh sách OUI của IEEE trong gói `hwdata`). Bit "locally administered" bật thì là MAC ngẫu nhiên (iPhone/Android/Windows bật "địa chỉ riêng tư") - không tra được hãng.
 - **Hệ điều hành** theo TTL của ping: 64 Linux/Android/iOS/macOS, 128 Windows, 255 thiết bị mạng/nhúng.
-- **Tên**: NetBIOS (máy Windows: tên máy, workgroup, có chia sẻ file), mDNS (tên `.local`, dịch vụ Bonjour, model máy Apple, **mọi cặp key=value trong bản ghi TXT**), UPnP (**mọi thẻ mô tả**: tên/hãng/model/số serial/số model/kiểu thiết bị/trang quản trị của TV, camera, router).
+- **Tên**: NetBIOS (máy Windows: tên máy, workgroup, có chia sẻ file), mDNS (tên `.local`, dịch vụ Bonjour, model máy Apple, **mọi cặp key=value trong bản ghi TXT**; hỏi chủ động nhiều loại dịch vụ: máy in, HomeKit, Chromecast, AirPlay, Sonos, Matter, Hue...), UPnP (**mọi thẻ mô tả**: tên/hãng/model/số serial/số model/kiểu thiết bị/trang quản trị của TV, camera, router), **reverse DNS (PTR)** hỏi qua router (nhiều router trả thẳng hostname DHCP - lấp tên cho điện thoại/máy in không tự quảng bá), **LLMNR** (máy Windows tắt NetBIOS/mDNS vẫn trả tên), và **bảng cấp IP (DHCP)** khi máy này là hotspot / máy chủ mạng ảo (dnsmasq, NetworkManager, libvirt).
 - **Cổng mở** (24 cổng hay gặp, cổng nhạy cảm RDP/SMB/telnet/ADB/MQTT in đỏ), rồi hỏi sâu dịch vụ đang mở:
   - **web** (mọi cổng web đang mở, không chỉ cổng đầu): tiêu đề, header Server, "realm" ô đăng nhập (camera/router hay ghi model ở đây); theo cả chuyển hướng http → https
   - **SMB** (445): hỏi NTLM không đăng nhập như nmap `smb-os-discovery` → phiên bản Windows (`Windows 11 24H2 (10.0.26100)`), tên máy, domain - có cả khi máy tắt NetBIOS
   - **SSH** (22): dòng chào, vd `OpenSSH_9.6p1 Ubuntu-3ubuntu13.20` → biết cả bản phân phối
-  - **TLS** (443/8443): chứng chỉ - CN/O/OU/L/ST/C và SAN (router, AP, camera hay ghi hãng/model ở đây, vd `omadaeap.net` là AP TP-Link Omada), hạn, tự ký hay không, nơi cấp
+  - **TLS** (443/8443): chứng chỉ - CN/O/OU/L/ST/C và SAN (router, AP, camera hay ghi hãng/model ở đây, vd `omadaeap.net` là AP TP-Link Omada), hạn, tự ký hay không, nơi cấp; kèm **phiên bản + cipher** server chọn (chào cả cipher RSA/TLS cũ mà JDK tắt sẵn để bắt tay được với thiết bị đời cũ, rồi cảnh báo nếu còn < TLS 1.2)
+  - **SMB share** (445): nếu có `smbclient`, thử liệt kê thư mục chia sẻ qua phiên ẩn danh
   - **RTSP** (554/8554): hỏi `OPTIONS`, đọc header Server → hãng/model đầu ghi camera
+  - **IPP** (631): hỏi `Get-Printer-Attributes` (và `CUPS-Get-Printers` để tìm hàng đợi) → model máy in, tình trạng (idle/printing/stopped), **mức mực/toner**, số việc đang chờ
+  - **Banner dịch vụ text** đang mở: FTP (21), SMTP (25), POP3 (110), IMAP (143), MySQL/MariaDB (3306), VNC (5900), Redis (6379) → tên + phiên bản
   - **SNMP** (UDP 161, community `public`): `sysDescr` (mô tả + firmware) và `sysName` của router, máy in, switch, NAS
 - **WS-Discovery** (multicast UDP 3702): máy Windows và máy in trả lời kể cả khi chặn ping và tắt NetBIOS - rồi hỏi tiếp metadata (WS-Transfer Get) lấy tên máy, hãng, model.
-- **Nghe thụ động mDNS**: ngoài việc hỏi, còn tham gia nhóm multicast 224.0.0.251 nghe mọi quảng bá của cả mạng - bắt được tên nhiều điện thoại/máy không trả lời hỏi trực tiếp (đọc cả bản ghi A/SRV để ra hostname).
-- **IPv6**: gộp địa chỉ IPv6 theo MAC từ bảng neighbor (`ip -6 neigh`).
+- **Nghe thụ động mDNS + SSDP**: ngoài việc hỏi, còn tham gia nhóm multicast 224.0.0.251 (mDNS) và 239.255.255.250 (SSDP) nghe quảng bá/NOTIFY của cả mạng - bắt được tên/UPnP của nhiều điện thoại, TV, loa, router không trả lời hỏi trực tiếp (mDNS đọc cả bản ghi A/SRV để ra hostname).
+- **IPv6**: gộp địa chỉ IPv6 theo MAC từ bảng neighbor (`ip -6 neigh`); MAC ẩn/không tra được thì thử bóc MAC phần cứng nhúng trong địa chỉ IPv6 EUI-64 để tra hãng; máy **chỉ có IPv6** (không có trong ARP IPv4) cũng được thêm vào danh sách.
 - **Loại** đoán từ các manh mối trên, mạnh trước yếu sau: cổng đặc trưng (62078 iPhone, 4370 máy chấm công ZKTeco, 554 camera, 9100 máy in), tên/dịch vụ, WS-Discovery (máy tính/máy in), rồi tới hãng card mạng.
 
-Cuối bảng là tổng hợp số thiết bị theo loại. Điện thoại và máy Windows bật firewall thường không trả lời tên: xem bảng DHCP trên router. Quét cổng có thể bị antivirus/IDS ghi lại - chỉ quét mạng mình được phép.
+Cuối bảng là tổng hợp số thiết bị theo loại, rồi **bảng cảnh báo bảo mật** (chỉ hiện khi có) - đọc lại kết quả đã quét để chỉ ra điểm yếu hay gặp trên mạng của chính mình, xếp theo mức CAO/VỪA/THẤP: cổng quản trị không mã hoá (telnet 23, ADB 5555), dịch vụ lộ ra LAN (SMB 445, RDP 3389, MQTT 1883), SNMP trả lời community `public` (lộ thông tin thiết bị), chứng chỉ TLS đã hết hạn, TLS còn dùng phiên bản cũ (< 1.2), router mở cổng ra Internet qua UPnP (port-forward), máy cho liệt kê SMB share ẩn danh, và máy không phải gateway nhưng trùng MAC với gateway (nghi ARP spoofing / người đứng giữa). Điện thoại (nhất là iPhone/iPad dùng MAC riêng tư) khi ngủ/khoá hầu như không trả lời gì ngoài ARP, chỉ lộ tên khi chợt thức và tự quảng bá qua mDNS/Bonjour - nên dùng `--watch`: mở chính listview đó nhưng tự làm mới, quét lặp lại và tích luỹ thông tin theo thời gian (mọi thứ đã lấy được - tên, cổng, dịch vụ, IPP, TLS... - thì giữ, không mất khi máy ngủ lại; thêm cột TÌNH TRẠNG đánh dấu máy đang online / vừa rời mạng). Quét cổng có thể bị antivirus/IDS ghi lại - chỉ quét mạng mình được phép.
 
 ## Xem traffic mạng
 

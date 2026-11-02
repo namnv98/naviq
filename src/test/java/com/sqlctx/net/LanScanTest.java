@@ -252,4 +252,40 @@ class LanScanTest {
         assertEquals("Chromecast", d.model);
         assertEquals("TV phong khach", d.txt.get("fn"));
     }
+
+    @Test
+    void cảnhBáoBảoMậtTheoCổngChứngChỉVàTrùngMacGateway() {
+        com.sqlctx.util.I18n.set(com.sqlctx.util.I18n.Lang.VI, false);
+        LanScan.Host gw = new LanScan.Host();
+        gw.ip = "192.168.1.1";
+        gw.mac = "aa:bb:cc:dd:ee:ff";
+        gw.gateway = true;
+
+        LanScan.Host pc = new LanScan.Host();      // telnet (CAO) + SMB (VỪA)
+        pc.ip = "192.168.1.20";
+        pc.mac = "9c:c7:d3:aa:af:52";
+        pc.ports = List.of(23, 445);
+
+        LanScan.Host cam = new LanScan.Host();      // chứng chỉ hết hạn (THẤP)
+        cam.ip = "192.168.1.30";
+        cam.mac = "30:68:93:4d:e3:7a";
+        cam.ports = List.of();
+        cam.cert = new LanProbes.Cert("CN=cam", "CN=cam", List.of(), "2020-01-01", true, true);
+
+        LanScan.Host rogue = new LanScan.Host();    // trùng MAC gateway (CAO, nghi ARP spoofing)
+        rogue.ip = "192.168.1.66";
+        rogue.mac = "AA:BB:CC:DD:EE:FF";
+        rogue.ports = List.of();
+
+        List<LanScan.Finding> f = LanScan.securityFindings(List.of(gw, pc, cam, rogue));
+        // nặng trước: 2 CAO (telnet .20, trùng-mac .66) rồi VỪA (SMB .20) rồi THẤP (cert .30)
+        assertEquals(List.of(LanScan.Severity.HIGH, LanScan.Severity.HIGH, LanScan.Severity.MED, LanScan.Severity.LOW),
+                f.stream().map(LanScan.Finding::sev).toList());
+        assertEquals(List.of("192.168.1.20", "192.168.1.66", "192.168.1.20", "192.168.1.30"),
+                f.stream().map(LanScan.Finding::ip).toList());
+        assertTrue(f.get(1).msg().contains("aa:bb:cc:dd:ee:ff"), f.get(1).msg());
+        assertTrue(f.get(3).msg().contains("2020-01-01"), f.get(3).msg());
+        // gateway tự nó không bị gắn cờ trùng-mac
+        assertTrue(f.stream().noneMatch(x -> x.ip().equals("192.168.1.1")));
+    }
 }

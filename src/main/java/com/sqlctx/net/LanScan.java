@@ -89,6 +89,14 @@ public final class LanScan {
         LanProbes.Snmp snmp;
         LanProbes.WsdDevice wsd;
         List<String> ipv6 = List.of();
+        String dhcpName;
+        String ptrName;
+        String llmnr;
+        List<LanProbes.PortMap> portForwards = List.of();
+        LanProbes.TlsInfo tls;
+        List<String> smbShares = List.of();
+        Map<Integer, String> banners = Map.of(); // cổng text → dòng chào (FTP/SMTP/MySQL/VNC/Redis...)
+        String ipp;                               // máy in qua IPP: model, tình trạng, mực
 
         /** Nguồn → tên, mạnh nhất trước; bỏ tên trùng (không phân biệt hoa thường). */
         Map<String, String> names() {
@@ -106,6 +114,9 @@ public final class LanScan {
             if (wsd != null) {
                 all.put("WSD", wsd.name);
             }
+            all.put("LLMNR", llmnr);
+            all.put("DHCP", dhcpName);
+            all.put("DNS", ptrName);
             all.put("UPnP", upnp.get("friendlyName"));
             Map<String, String> out = new LinkedHashMap<>();
             java.util.Set<String> seen = new java.util.HashSet<>();
@@ -128,6 +139,11 @@ public final class LanScan {
         /** Mọi chữ biết về máy (chữ thường) để dò từ khoá. */
         String blob() {
             StringBuilder sb = new StringBuilder(vendor).append(' ').append(name());
+            for (String n : new String[]{dhcpName, ptrName, llmnr}) {
+                if (n != null) {
+                    sb.append(' ').append(n);
+                }
+            }
             if (netbios != null) {
                 sb.append(' ').append(netbios.workgroup()).append(' ').append(netbios.user());
             }
@@ -153,6 +169,10 @@ public final class LanScan {
             }
             if (wsd != null) {
                 sb.append(' ').append(wsd.type).append(' ').append(wsd.name).append(' ').append(wsd.manufacturer).append(' ').append(wsd.model);
+            }
+            banners.values().forEach(v -> sb.append(' ').append(v));
+            if (ipp != null) {
+                sb.append(' ').append(ipp);
             }
             return sb.toString().toLowerCase(Locale.ROOT);
         }
@@ -200,17 +220,45 @@ public final class LanScan {
         }
         String self = addr.group(1);
         int prefix = Math.max(Integer.parseInt(addr.group(2)), 22); // dải lớn hơn /22 thì chỉ quét quanh máy này
-        int selfInt = toInt(self);
         int mask = prefix == 0 ? 0 : -1 << (32 - prefix);
-        int network = selfInt & mask;
+        int network = toInt(self) & mask;
         int size = 1 << (32 - prefix);
         String cidr = toIp(network) + "/" + prefix;
         Matcher gw = Pattern.compile("default via (\\S+)").matcher(LanProbes.run(List.of("ip", "-4", "route", "show", "default", "dev", iface), 3));
         String gateway = gw.find() ? gw.group(1) : null;
         boolean fast = Arrays.asList(args).contains("--fast");
+        int waitMs = (int) Math.clamp(propInt("DB_WAIT", 5) * 1000L, 1000, 30000); // nghe quảng bá (mDNS/SSDP/WSD) bao lâu
+        String[] net = {iface, cidr, gateway, self};
 
+        if (System.getProperty("DB_WATCH") != null) { // --watch (có thể kèm =số giây giữa 2 vòng)
+            watchLoop(out, net, network, size, mask, Math.clamp(propInt("DB_WATCH", 10), 3, 600), waitMs);
+            return;
+        }
         long started = System.nanoTime();
-        status(I18n.t("scan.scanning", cidr, iface));
+        List<Host> hosts = discover(net, network, size, mask, fast, waitMs);
+        status(null);
+        render(out, hosts, net, (System.nanoTime() - started) / 1e9);
+        System.exit(0);
+    }
+
+    /** Số trong system property (vd DB_WAIT=3); {@code def} nếu thiếu hoặc không phải số (vd --watch trống → "true"). */
+    private static int propInt(String key, int def) {
+        try {
+            return Integer.parseInt(System.getProperty(key, "").strip());
+        } catch (NumberFormatException e) {
+            return def;
+        }
+    }
+
+    /**
+     * Một lượt quét đầy đủ: ping cả dải cho kernel điền ARP, rồi hỏi từng máy (NetBIOS, mDNS, SSDP/UPnP, WS-Discovery,
+     * reverse DNS, LLMNR, DHCP) và - khi không {@code fast} - quét cổng + hỏi sâu dịch vụ. Trả danh sách máy theo IP.
+     */
+    private static List<Host> discover(String[] net, int network, int size, int mask, boolean fast, int waitMs) throws Exception {
+        String iface = net[0];
+        String gateway = net[2];
+        String self = net[3];
+        status(I18n.t("scan.scanning", net[1], iface));
         Map<String, double[]> pings = new ConcurrentHashMap<>();
         try (ExecutorService ex = Executors.newVirtualThreadPerTaskExecutor()) {
             Semaphore limit = new Semaphore(64); // mỗi ping là 1 tiến trình: đừng mở 1000 cái cùng lúc
@@ -238,16 +286,22 @@ public final class LanScan {
         status(I18n.t("scan.probing", ips.size()));
 
         Map<String, List<String>> v6 = LanProbes.ipv6Table(iface);
+        Devices dhcp = new Devices(); // tên từ bảng cấp IP (DHCP) khi máy này là hotspot / máy chủ mạng ảo
+        String resolver = gateway;    // hỏi PTR qua router: nhiều router trả thẳng hostname DHCP
         List<Host> hosts = new ArrayList<>();
         String ifaceName = iface;
         try (ExecutorService ex = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<Map<String, LanProbes.Mdns>> mdns = ex.submit(() -> LanProbes.mdns(ips, 3000, ifaceName));
-            Future<Map<String, Map<String, String>>> ssdp = ex.submit(() -> LanProbes.ssdp(3000));
-            Future<Map<String, LanProbes.WsdDevice>> wsd = ex.submit(() -> LanProbes.wsdiscover(3000, ifaceName));
+            Future<Map<String, LanProbes.Mdns>> mdns = ex.submit(() -> LanProbes.mdns(ips, waitMs, ifaceName));
+            Future<Map<String, Map<String, String>>> ssdp = ex.submit(() -> LanProbes.ssdp(waitMs));
+            Future<Map<String, LanProbes.WsdDevice>> wsd = ex.submit(() -> LanProbes.wsdiscover(waitMs, ifaceName));
             Map<String, Future<LanProbes.NetBios>> nb = new LinkedHashMap<>();
             Map<String, Future<List<Integer>>> ports = new LinkedHashMap<>();
+            Map<String, Future<String>> ptr = new LinkedHashMap<>();
+            Map<String, Future<String>> llmnr = new LinkedHashMap<>();
             for (String ip : ips) {
                 nb.put(ip, ex.submit(() -> LanProbes.netbios(ip)));
+                ptr.put(ip, ex.submit(() -> LanProbes.reverseDns(resolver, ip)));
+                llmnr.put(ip, ex.submit(() -> LanProbes.llmnr(ip)));
                 if (!fast) {
                     ports.put(ip, ex.submit(() -> openPorts(ex, ip)));
                 }
@@ -281,6 +335,16 @@ public final class LanScan {
                 h.mdns = mdnsRes.get(ip);
                 h.wsd = wsdRes.get(ip);
                 h.ipv6 = v6.getOrDefault(h.mac, List.of());
+                if (h.randomMac || "?".equals(h.vendor)) { // MAC ẩn/không tra được: thử suy hãng từ IPv6 EUI-64
+                    String eui = LanProbes.macFromEui64(h.ipv6);
+                    String v = eui == null ? null : oui.get(eui.substring(0, 8));
+                    if (v != null) {
+                        h.vendor = v;
+                    }
+                }
+                h.dhcpName = dhcp.name(ip);
+                h.ptrName = ptr.get(ip).get();
+                h.llmnr = llmnr.get(ip).get();
                 if (!fast) {
                     h.ports = ports.get(ip).get();
                     services.put(ip, ex.submit(() -> probeServices(h)));
@@ -292,6 +356,10 @@ public final class LanScan {
                 if (upnp.containsKey(h.ip)) {
                     u.putAll(upnp.get(h.ip).get());
                 }
+                Map<String, String> ssdpHost = ssdpRes.getOrDefault(h.ip, Map.of());
+                if (h.gateway && ssdpHost.containsKey("location")) {
+                    h.portForwards = LanProbes.upnpPortMappings(ssdpHost.get("location"));
+                }
                 u.remove("location");
                 h.upnp = u;
                 if (services.containsKey(h.ip)) {
@@ -299,10 +367,179 @@ public final class LanScan {
                 }
             }
         }
-        status(null);
-        double seconds = (System.nanoTime() - started) / 1e9;
-        render(out, hosts, new String[]{iface, cidr, gateway, self}, seconds);
+
+        // máy chỉ có IPv6 (không xuất hiện trong ARP IPv4): thêm từ bảng neighbor IPv6, lấy được MAC/hãng/IPv6
+        java.util.Set<String> knownMacs = hosts.stream().map(h -> h.mac).filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        v6.forEach((mac, addrs) -> {
+            if (knownMacs.contains(mac) || addrs.isEmpty()) {
+                return;
+            }
+            Host h = new Host();
+            h.ip = addrs.stream().filter(x -> !x.startsWith("fe80")).findFirst().orElse(addrs.get(0)); // ưu tiên địa chỉ global
+            h.mac = mac;
+            h.randomMac = LanProbes.randomMac(mac);
+            h.vendor = h.randomMac ? I18n.t("scan.randomMac") : oui.getOrDefault(mac.substring(0, 8), "?");
+            if ("?".equals(h.vendor)) {
+                String eui = LanProbes.macFromEui64(addrs);
+                String v = eui == null ? null : oui.get(eui.substring(0, 8));
+                if (v != null) {
+                    h.vendor = v;
+                }
+            }
+            h.ipv6 = addrs;
+            hosts.add(h);
+        });
+        return hosts;
+    }
+
+    /**
+     * {@code --scan --watch}: mở đúng listview toàn màn hình như {@code --scan} (cuộn, bấm x xem bản ghi) nhưng tự làm
+     * mới - một luồng nền quét lại mỗi vài giây, tích luỹ tên theo thời gian (điện thoại/iPad ngủ chỉ lộ tên khi chợt
+     * thức), giữ mọi thông tin đã lấy (cổng, dịch vụ, IPP, TLS...), thêm cột TÌNH TRẠNG (online / vừa rời). q thoát.
+     */
+    private static void watchLoop(PrintStream out, String[] net, int network, int size, int mask, int intervalSec, int waitMs) throws Exception {
+        quiet = true;
+        Map<String, Host> store = new LinkedHashMap<>(); // key = MAC (hoặc IP), bản ghi gộp tốt nhất theo thời gian
+        Map<String, Long> lastSeen = new java.util.HashMap<>();
+        long[] roundTime = {0};
+        mergeRound(store, lastSeen, roundTime, discover(net, network, size, mask, false, waitMs)); // quét đầy đủ để có dữ liệu mở listview
+
+        // chạy qua pipe / terminal câm: không mở được listview, quét 1 lần rồi in bảng thường
+        if (System.console() == null || !NetFormat.stdoutIsTerminal()) {
+            render(out, new ArrayList<>(store.values()), net, 0);
+            return;
+        }
+        try (org.jline.terminal.Terminal t = org.jline.terminal.TerminalBuilder.builder().system(true).ffm(false)
+                .encoding(StandardCharsets.UTF_8).build()) {
+            if (org.jline.terminal.Terminal.TYPE_DUMB.equals(t.getType()) || org.jline.terminal.Terminal.TYPE_DUMB_COLOR.equals(t.getType())) {
+                render(out, new ArrayList<>(store.values()), net, 0);
+                return;
+            }
+            com.sqlctx.ui.DataViewTable.viewLive(t, watchColumns(), watchRows(store, lastSeen, roundTime[0]), () -> {
+                try {
+                    mergeRound(store, lastSeen, roundTime, discover(net, network, size, mask, false, waitMs));
+                } catch (Exception e) {
+                    return null; // một vòng lỗi: giữ nguyên bảng cũ
+                }
+                return watchRows(store, lastSeen, roundTime[0]);
+            }, intervalSec * 1000L);
+        }
         System.exit(0);
+    }
+
+    /** Gộp 1 vòng quét vào kho: giữ tên đã học ở vòng trước, cập nhật mốc "thấy lần cuối". */
+    private static void mergeRound(Map<String, Host> store, Map<String, Long> lastSeen, long[] roundTime, List<Host> now) {
+        long t = System.currentTimeMillis();
+        roundTime[0] = t;
+        for (Host h : now) {
+            String key = h.mac != null ? h.mac : h.ip;
+            Host prev = store.get(key);
+            if (prev != null) {
+                carryNames(prev, h);
+            }
+            store.put(key, h);
+            lastSeen.put(key, t);
+        }
+    }
+
+    /**
+     * Chép sang {@code to} mọi thông tin vòng mới chưa lấy lại được (máy ngủ lại, hoặc probe lỡ 1 vòng) - thông tin đã
+     * lấy được chỉ giữ, không mất: tên, cổng mở, và mọi dịch vụ đã hỏi sâu (web, SSH, TLS, SMB, IPP, banner...).
+     */
+    private static void carryNames(Host from, Host to) {
+        if (to.netbios == null) {
+            to.netbios = from.netbios;
+        }
+        if (to.mdns == null) {
+            to.mdns = from.mdns;
+        }
+        if (to.wsd == null) {
+            to.wsd = from.wsd;
+        }
+        if (to.smb == null) {
+            to.smb = from.smb;
+        }
+        if (to.dhcpName == null || to.dhcpName.isBlank()) {
+            to.dhcpName = from.dhcpName;
+        }
+        if (to.ptrName == null || to.ptrName.isBlank()) {
+            to.ptrName = from.ptrName;
+        }
+        if (to.llmnr == null || to.llmnr.isBlank()) {
+            to.llmnr = from.llmnr;
+        }
+        if (to.upnp.isEmpty()) {
+            to.upnp = from.upnp;
+        }
+        if ("?".equals(to.vendor) && !"?".equals(from.vendor)) {
+            to.vendor = from.vendor;
+        }
+        // cổng + dịch vụ hỏi sâu: giữ lại nếu vòng này không quét được (máy ngủ / probe lỗi)
+        if (to.ports.isEmpty() && !from.ports.isEmpty()) {
+            to.ports = from.ports;
+        }
+        if (to.web.isEmpty()) {
+            to.web = from.web;
+        }
+        if (to.ssh == null) {
+            to.ssh = from.ssh;
+        }
+        if (to.cert == null) {
+            to.cert = from.cert;
+        }
+        if (to.tls == null) {
+            to.tls = from.tls;
+        }
+        if (to.rtsp == null) {
+            to.rtsp = from.rtsp;
+        }
+        if (to.snmp == null) {
+            to.snmp = from.snmp;
+        }
+        if (to.smbShares.isEmpty()) {
+            to.smbShares = from.smbShares;
+        }
+        if (to.ipp == null) {
+            to.ipp = from.ipp;
+        }
+        if (to.banners.isEmpty()) {
+            to.banners = from.banners;
+        }
+        if (to.portForwards.isEmpty()) {
+            to.portForwards = from.portForwards;
+        }
+        if (to.ttl < 0 && from.ttl >= 0) {
+            to.ttl = from.ttl;
+            to.rtt = from.rtt;
+        }
+    }
+
+    /** Cột của listview {@code --watch}: thêm cột TÌNH TRẠNG (đứng yên bên trái) rồi tới các cột như {@code --scan}. */
+    private static List<String> watchColumns() {
+        List<String> cols = new ArrayList<>();
+        cols.add(I18n.t("scan.watch.status"));
+        cols.addAll(gridColumns());
+        return cols;
+    }
+
+    /** Hàng của listview {@code --watch}: sắp theo IP, mỗi hàng = ô tình trạng (online / vừa rời) + hàng như {@code --scan}. */
+    private static List<List<String>> watchRows(Map<String, Host> store, Map<String, Long> lastSeen, long roundTime) {
+        List<Host> hosts = new ArrayList<>(store.values());
+        hosts.sort(java.util.Comparator.comparingLong(h -> Integer.toUnsignedLong(toInt(h.ip))));
+        List<List<String>> base = gridRows(hosts); // ô chữ thường, không màu - listview tự tô
+        List<List<String>> out = new ArrayList<>();
+        for (int i = 0; i < hosts.size(); i++) {
+            Host h = hosts.get(i);
+            long seen = lastSeen.getOrDefault(h.mac != null ? h.mac : h.ip, 0L);
+            String status = seen == roundTime ? I18n.t("scan.watch.online")
+                    : I18n.t("scan.watch.ago", String.valueOf((roundTime - seen) / 1000));
+            List<String> r = new ArrayList<>();
+            r.add(status);
+            r.addAll(base.get(i));
+            out.add(r);
+        }
+        return out;
     }
 
     /** Hỏi sâu các dịch vụ đang mở: trang web, banner SSH, chứng chỉ HTTPS, SMB (phiên bản Windows, tên máy). */
@@ -314,10 +551,12 @@ public final class LanScan {
         for (int port : List.of(443, 8443)) {
             if (h.cert == null && h.ports.contains(port)) {
                 h.cert = LanProbes.tlsCert(h.ip, port);
+                h.tls = LanProbes.tlsInfo(h.ip, port);
             }
         }
         if (h.ports.contains(445)) {
             h.smb = LanProbes.smb(h.ip);
+            h.smbShares = LanProbes.smbShares(h.ip);
         }
         for (int port : List.of(554, 8554)) {
             if (h.rtsp == null && h.ports.contains(port)) {
@@ -325,6 +564,20 @@ public final class LanScan {
             }
         }
         h.snmp = LanProbes.snmp(h.ip); // UDP 161, không nằm trong quét cổng TCP nên luôn thử
+        if (h.ports.contains(631)) {
+            String rp = h.mdns == null ? null : h.mdns.txt.get("rp"); // hàng đợi CUPS từ mDNS, vd printers/Canon_MF240
+            h.ipp = LanProbes.ippPrinter(h.ip, 631, rp); // model, tình trạng, mức mực
+        }
+        Map<Integer, String> banners = new LinkedHashMap<>();
+        for (int port : h.ports) {
+            if (LanProbes.BANNER_PORTS.contains(port)) {
+                String bn = LanProbes.serviceBanner(h.ip, port);
+                if (bn != null) {
+                    banners.put(port, bn);
+                }
+            }
+        }
+        h.banners = banners;
     }
 
     private static List<Integer> openPorts(ExecutorService ex, String ip) throws Exception {
@@ -363,7 +616,7 @@ public final class LanScan {
         if (p.contains(8008) || b.contains("_googlecast")) {
             return Kind.CAST;
         }
-        if (p.contains(9100) || p.contains(631) || b.contains("_ipp") || b.contains("printer")
+        if (p.contains(9100) || p.contains(631) || b.contains("_ipp") || b.contains("printer") || h.ipp != null
                 || h.wsd != null && h.wsd.type.contains("Print")) {
             return Kind.PRINTER;
         }
@@ -393,6 +646,66 @@ public final class LanScan {
             return Kind.PC;
         }
         return h.randomMac ? Kind.PHONE_PRIVATE : Kind.UNKNOWN;
+    }
+
+    // ---------------------------------------------------------------- cảnh báo bảo mật
+
+    /** Mức độ của 1 cảnh báo, theo thứ tự in (nặng trước). */
+    enum Severity {HIGH, MED, LOW}
+
+    record Finding(Severity sev, String ip, String name, String msg) {
+    }
+
+    /**
+     * Soi từng máy tìm điểm yếu hay gặp trên LAN của chính mình (không tấn công gì thêm, chỉ đọc lại kết quả đã quét):
+     * cổng quản trị không mã hoá (telnet, ADB), dịch vụ lộ ra LAN (SMB, RDP, MQTT), SNMP trả lời community "public",
+     * chứng chỉ TLS hết hạn, và máy không phải gateway nhưng trùng MAC với gateway - dấu hiệu ARP spoofing / người đứng giữa.
+     */
+    static List<Finding> securityFindings(List<Host> hosts) {
+        String gwMac = hosts.stream().filter(h -> h.gateway && h.mac != null).map(h -> h.mac).findFirst().orElse(null);
+        List<Finding> f = new ArrayList<>();
+        for (Host h : hosts) {
+            String name = h.name();
+            if (h.ports.contains(23)) {
+                f.add(new Finding(Severity.HIGH, h.ip, name, I18n.t("scan.sec.telnet")));
+            }
+            if (h.ports.contains(5555)) {
+                f.add(new Finding(Severity.HIGH, h.ip, name, I18n.t("scan.sec.adb")));
+            }
+            if (h.ports.contains(445)) {
+                f.add(new Finding(Severity.MED, h.ip, name, I18n.t("scan.sec.smb")));
+            }
+            if (h.ports.contains(3389)) {
+                f.add(new Finding(Severity.MED, h.ip, name, I18n.t("scan.sec.rdp")));
+            }
+            if (h.ports.contains(1883)) {
+                f.add(new Finding(Severity.MED, h.ip, name, I18n.t("scan.sec.mqtt")));
+            }
+            if (h.snmp != null) {
+                f.add(new Finding(Severity.MED, h.ip, name, I18n.t("scan.sec.snmp")));
+            }
+            if (h.cert != null && h.cert.expired()) {
+                f.add(new Finding(Severity.LOW, h.ip, name, I18n.t("scan.sec.cert", h.cert.notAfter())));
+            }
+            if (h.tls != null && h.tls.weak()) {
+                f.add(new Finding(Severity.MED, h.ip, name, I18n.t("scan.sec.tls", h.tls.protocol())));
+            }
+            if (!h.smbShares.isEmpty()) {
+                f.add(new Finding(Severity.MED, h.ip, name, I18n.t("scan.sec.shares", String.join(", ", h.smbShares))));
+            }
+            if (!h.gateway && gwMac != null && gwMac.equalsIgnoreCase(h.mac)) {
+                f.add(new Finding(Severity.HIGH, h.ip, name, I18n.t("scan.sec.gwmac", gwMac)));
+            }
+            for (LanProbes.PortMap pm : h.portForwards) {
+                // cổng nội bộ nhạy cảm (RDP/SMB/telnet/ADB) mở thẳng ra Internet là nguy hiểm nhất
+                Severity sev = LanProbes.RISKY_PORTS.contains(pm.internalPort()) ? Severity.HIGH : Severity.MED;
+                f.add(new Finding(sev, h.ip, name, I18n.t("scan.sec.portfwd", pm.proto() + " " + pm.externalPort(),
+                        pm.internalClient() + ":" + pm.internalPort())));
+            }
+        }
+        f.sort(java.util.Comparator.comparingInt((Finding x) -> x.sev().ordinal())
+                .thenComparing(x -> Integer.toUnsignedLong(toInt(x.ip()))));
+        return f;
     }
 
     // ---------------------------------------------------------------- hiển thị
@@ -425,7 +738,7 @@ public final class LanScan {
         return List.of(I18n.t("scan.col.ip"), I18n.t("scan.col.name"), I18n.t("scan.col.type"), I18n.t("scan.col.vendorShort"),
                 "MAC", I18n.t("scan.col.ping") + " ms", "TTL", I18n.t("scan.col.osShort"), I18n.t("scan.col.ports"),
                 I18n.t("scan.col.details"), I18n.t("scan.col.otherNames"), "SMB", "NetBIOS", "mDNS", "mDNS TXT",
-                "UPnP", "SSH", "Web", "RTSP", "SNMP", "WSD", "IPv6", "TLS");
+                "UPnP", "SSH", "Web", "RTSP", "IPP", I18n.t("scan.col.services"), "SNMP", "WSD", "IPv6", "TLS");
     }
 
     /** 1 hàng chữ thường (không màu, không cắt) mỗi máy, theo {@link #gridColumns()}; thiếu thì ô rỗng. */
@@ -462,6 +775,10 @@ public final class LanScan {
                     + w.server() + (w.realm().isEmpty() ? "" : " realm=\"" + w.realm() + "\"")).strip())
                     .collect(java.util.stream.Collectors.joining("  ·  "));
             String rtsp = h.rtsp == null ? "" : h.rtsp;
+            String ipp = h.ipp == null ? "" : h.ipp;
+            String banner = h.banners.entrySet().stream()
+                    .map(e -> LanProbes.PORTS.getOrDefault(e.getKey(), String.valueOf(e.getKey())) + " " + e.getValue())
+                    .collect(java.util.stream.Collectors.joining(" · "));
             String snmp = "";
             if (h.snmp != null) {
                 snmp = java.util.stream.Stream.of(h.snmp.name(), h.snmp.descr())
@@ -483,7 +800,7 @@ public final class LanScan {
             rows.add(List.of(h.ip, name, typeText(h, kind), h.vendor,
                     h.mac == null ? "" : h.mac, h.ttl < 0 ? "" : String.format(Locale.ROOT, "%.0f", h.rtt),
                     h.ttl < 0 ? "" : String.valueOf(h.ttl), h.os() == null ? I18n.t("scan.noPing") : I18n.t("scan.os." + h.os()),
-                    ports, NetPrinter.plain(clue(h, Integer.MAX_VALUE)), others, smb, netbios, mdns, mdnsTxt, upnp, ssh, web, rtsp, snmp, wsd, ipv6, tls));
+                    ports, NetPrinter.plain(clue(h, Integer.MAX_VALUE)), others, smb, netbios, mdns, mdnsTxt, upnp, ssh, web, rtsp, ipp, banner, snmp, wsd, ipv6, tls));
         }
         return rows;
     }
@@ -635,43 +952,7 @@ public final class LanScan {
         NetPrinter.box(out, NetFormat.bold(I18n.t("scan.info.title")), info);
         out.println();
 
-        // bảng: 5 cột đầu dựng trước để biết còn bao nhiêu chỗ cho cột chi tiết (vừa bề ngang terminal)
-        List<String> headers = List.of(I18n.t("scan.col.ip"), I18n.t("scan.col.device"), I18n.t("scan.col.vendor"),
-                I18n.t("scan.col.os"), I18n.t("scan.col.ports"), I18n.t("scan.col.details"));
-        Map<Host, List<String>> cells = new LinkedHashMap<>();
-        int columns = NetCli.terminalSize()[0];
-        int[] w = new int[5];
-        for (Host h : hosts) {
-            List<String> c = List.of(NetFormat.bold(NetFormat.blue(h.ip)), device(h, kinds.get(h)), vendor(h), os(h), ports(h));
-            for (int i = 0; i < 5; i++) {
-                for (String line : c.get(i).split("\n")) {
-                    w[i] = Math.max(w[i], Math.max(NetPrinter.width(line), NetPrinter.width(headers.get(i))));
-                }
-            }
-            cells.put(h, c);
-        }
-        int used = Arrays.stream(w).sum() + 3 * 6 + 1;
-        int detailWidth = Math.clamp(columns - used - 2, 26, 72);
-
-        List<NetPrinter.Group> groups = new ArrayList<>();
-        for (Section sec : Section.values()) {
-            List<Host> in = hosts.stream().filter(h -> kinds.get(h).section() == sec)
-                    .sorted(java.util.Comparator.comparing((Host h) -> kinds.get(h).ordinal()).thenComparing(h -> Integer.toUnsignedLong(toInt(h.ip))))
-                    .toList();
-            if (in.isEmpty()) {
-                continue;
-            }
-            List<List<String>> rows = new ArrayList<>();
-            for (Host h : in) {
-                List<String> r = new ArrayList<>(cells.get(h));
-                r.add(details(h, detailWidth));
-                rows.add(r);
-            }
-            String title = NetFormat.bold(I18n.t("scan.section." + sec.name().toLowerCase(Locale.ROOT)).toUpperCase(Locale.ROOT))
-                    + NetFormat.dim(" · " + in.size());
-            groups.add(new NetPrinter.Group(title, rows));
-        }
-        NetPrinter.groupedTable(out, headers, groups);
+        deviceTable(out, hosts, kinds, null);
 
         // tổng hợp: thanh ngang theo số lượng
         Map<Kind, Integer> counts = new LinkedHashMap<>();
@@ -691,6 +972,86 @@ public final class LanScan {
         for (String note : I18n.t("scan.legend").split(" · ")) {
             out.println(NetFormat.dim("  • " + note));
         }
+
+        // cảnh báo bảo mật: chỉ in khi có, in sau phần tổng hợp
+        List<Finding> findings = securityFindings(hosts);
+        if (!findings.isEmpty()) {
+            out.println();
+            int ipW = findings.stream().mapToInt(x -> x.ip().length()).max().orElse(0);
+            String[] tags = new String[findings.size()];
+            int tagW = 0;
+            for (int i = 0; i < findings.size(); i++) {
+                tags[i] = switch (findings.get(i).sev()) {
+                    case HIGH -> NetFormat.red(I18n.t("scan.sec.high"));
+                    case MED -> NetFormat.yellow(I18n.t("scan.sec.med"));
+                    case LOW -> NetFormat.dim(I18n.t("scan.sec.low"));
+                };
+                tagW = Math.max(tagW, NetPrinter.width(tags[i]));
+            }
+            List<String> lines = new ArrayList<>();
+            for (int i = 0; i < findings.size(); i++) {
+                Finding fi = findings.get(i);
+                String tag = tags[i] + " ".repeat(tagW - NetPrinter.width(tags[i]));
+                String ip = NetFormat.bold(fi.ip()) + " ".repeat(ipW - fi.ip().length());
+                String msg = fi.msg() + (fi.name().isBlank() ? "" : NetFormat.dim("  · " + fi.name()));
+                lines.add(tag + "  " + ip + "  " + msg);
+            }
+            NetPrinter.box(out, NetFormat.bold(I18n.t("scan.sec.title")) + NetFormat.dim(" · " + findings.size()), lines);
+            out.println(NetFormat.dim("  " + I18n.t("scan.sec.hint")));
+        }
+    }
+
+    /**
+     * Bảng thiết bị chia nhóm (MẠNG / MÁY TÍNH / ĐIỆN THOẠI / THIẾT BỊ), cột CHI TIẾT co theo bề ngang terminal. Dùng
+     * chung cho quét một lần và chế độ {@code --watch}; {@code status} != null thì thêm cột TÌNH TRẠNG (online/mới/đã rời).
+     */
+    private static void deviceTable(PrintStream out, List<Host> hosts, Map<Host, Kind> kinds,
+                                    java.util.function.Function<Host, String> status) {
+        // 5 cột đầu dựng trước để biết còn bao nhiêu chỗ cho cột chi tiết (vừa bề ngang terminal)
+        List<String> headers = new ArrayList<>(List.of(I18n.t("scan.col.ip"), I18n.t("scan.col.device"),
+                I18n.t("scan.col.vendor"), I18n.t("scan.col.os"), I18n.t("scan.col.ports"), I18n.t("scan.col.details")));
+        if (status != null) {
+            headers.add(I18n.t("scan.watch.status"));
+        }
+        Map<Host, List<String>> cells = new LinkedHashMap<>();
+        int columns = NetCli.terminalSize()[0];
+        int[] w = new int[5];
+        for (Host h : hosts) {
+            List<String> c = List.of(NetFormat.bold(NetFormat.blue(h.ip)), device(h, kinds.get(h)), vendor(h), os(h), ports(h));
+            for (int i = 0; i < 5; i++) {
+                for (String line : c.get(i).split("\n")) {
+                    w[i] = Math.max(w[i], Math.max(NetPrinter.width(line), NetPrinter.width(headers.get(i))));
+                }
+            }
+            cells.put(h, c);
+        }
+        int statusW = status == null ? 0 : Math.max(NetPrinter.width(headers.getLast()),
+                hosts.stream().mapToInt(h -> NetPrinter.width(status.apply(h))).max().orElse(0));
+        int used = Arrays.stream(w).sum() + statusW + 3 * headers.size() + 1;
+        int detailWidth = Math.clamp(columns - used - 2, 26, 72);
+
+        List<NetPrinter.Group> groups = new ArrayList<>();
+        for (Section sec : Section.values()) {
+            List<Host> in = hosts.stream().filter(h -> kinds.get(h).section() == sec)
+                    .sorted(java.util.Comparator.comparing((Host h) -> kinds.get(h).ordinal()).thenComparing(h -> Integer.toUnsignedLong(toInt(h.ip))))
+                    .toList();
+            if (in.isEmpty()) {
+                continue;
+            }
+            List<List<String>> rows = new ArrayList<>();
+            for (Host h : in) {
+                List<String> r = new ArrayList<>(cells.get(h));
+                r.add(details(h, detailWidth));
+                if (status != null) {
+                    r.add(status.apply(h));
+                }
+                rows.add(r);
+            }
+            String title = NetFormat.bold(I18n.t("scan.section." + sec.name().toLowerCase(Locale.ROOT)).toUpperCase(Locale.ROOT))
+                    + NetFormat.dim(" · " + in.size());
+            groups.add(new NetPrinter.Group(title, rows));
+        }
+        NetPrinter.groupedTable(out, headers, groups);
     }
 
     private static String infoLine(String key, String value) {
@@ -764,6 +1125,9 @@ public final class LanScan {
             }
             labeled(lines, NetFormat.blue("SMB"), String.join(" · ", bits), width);
         }
+        if (!h.smbShares.isEmpty()) {
+            labeled(lines, NetFormat.blue("Shares"), String.join(", ", h.smbShares), width);
+        }
         LanProbes.NetBios nb = h.netbios;
         if (nb != null && (nb.workgroup() != null || nb.fileShare())) {
             List<String> bits = new ArrayList<>();
@@ -824,6 +1188,13 @@ public final class LanScan {
         if (h.rtsp != null) {
             labeled(lines, NetFormat.green("RTSP"), h.rtsp, width);
         }
+        for (var e : h.banners.entrySet()) {
+            labeled(lines, NetFormat.green(LanProbes.PORTS.getOrDefault(e.getKey(), String.valueOf(e.getKey())).toUpperCase(Locale.ROOT)),
+                    e.getValue(), width);
+        }
+        if (h.ipp != null) {
+            labeled(lines, NetFormat.magenta("IPP"), h.ipp, width);
+        }
         if (h.snmp != null) {
             if (h.snmp.name() != null && !h.snmp.name().isBlank()) {
                 labeled(lines, NetFormat.blue("SNMP"), h.snmp.name(), width);
@@ -861,6 +1232,17 @@ public final class LanScan {
             }
             labeled(lines, NetFormat.yellow("TLS"), who, width);
             labeled(lines, " ".repeat(3), state, width);
+        }
+        if (h.tls != null) {
+            String proto = h.tls.weak() ? NetFormat.red(h.tls.protocol() + " " + I18n.t("scan.tls.weak")) : h.tls.protocol();
+            labeled(lines, h.cert == null ? NetFormat.yellow("TLS") : " ".repeat(3), proto + NetFormat.dim(" · " + h.tls.cipher()), width);
+        }
+        boolean first = true;
+        for (LanProbes.PortMap pm : h.portForwards) {
+            String desc = pm.desc().isBlank() ? "" : " \"" + pm.desc() + "\"";
+            labeled(lines, first ? NetFormat.red(I18n.t("scan.portForward")) : " ".repeat(NetPrinter.width(I18n.t("scan.portForward"))),
+                    pm.proto() + " " + pm.externalPort() + " → " + pm.internalClient() + ":" + pm.internalPort() + desc, width);
+            first = false;
         }
         return lines.isEmpty() ? NetFormat.dim("—") : String.join("\n", lines);
     }
@@ -933,9 +1315,13 @@ public final class LanScan {
 
     private static volatile String statusText;
     private static Thread spinner;
+    private static volatile boolean quiet; // chế độ --watch tự vẽ lại màn hình, tắt spinner trạng thái
 
     /** Dòng trạng thái trên stderr: terminal thì có spinner + đồng hồ chạy, ghi đè tại chỗ; null = xoá. */
     private static synchronized void status(String text) {
+        if (quiet) {
+            return;
+        }
         if (!NetFormat.color) {
             if (text != null) {
                 System.err.println(text);
@@ -975,11 +1361,19 @@ public final class LanScan {
     }
 
     static int toInt(String ip) {
-        int v = 0;
-        for (String o : ip.split("\\.")) {
-            v = v << 8 | Integer.parseInt(o);
+        String[] o = ip.split("\\.");
+        if (o.length != 4) {
+            return Integer.MAX_VALUE; // không phải IPv4 (vd máy chỉ có IPv6): xếp cuối danh sách
         }
-        return v;
+        try {
+            int v = 0;
+            for (String p : o) {
+                v = v << 8 | Integer.parseInt(p);
+            }
+            return v;
+        } catch (NumberFormatException e) {
+            return Integer.MAX_VALUE;
+        }
     }
 
     static String toIp(int v) {

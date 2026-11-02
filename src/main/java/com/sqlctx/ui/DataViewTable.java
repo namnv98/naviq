@@ -58,6 +58,34 @@ public class DataViewTable {
     }
 
     /**
+     * Như {@link #view} nhưng tự làm mới: mở listview với {@code initial}, rồi cứ mỗi {@code intervalMs} một luồng nền
+     * gọi {@code refresher} lấy dữ liệu mới và bơm vào bảng (người dùng vẫn cuộn / xem bản ghi bình thường). Thoát khi
+     * bấm q; luồng nền dừng theo. {@code refresher} chạy ở luồng nền nên có thể quét mạng lâu mà không làm kẹt phím.
+     */
+    public static boolean viewLive(Terminal terminal, List<String> columns, List<List<String>> initial,
+                                   java.util.function.Supplier<List<List<String>>> refresher, long intervalMs) throws Exception {
+        GridView view = new GridView(columns, initial, Integer.MAX_VALUE);
+        Thread bg = Thread.ofVirtual().start(() -> {
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    Thread.sleep(intervalMs);
+                    List<List<String>> next = refresher.get();
+                    if (next != null) {
+                        view.offer(next);
+                    }
+                }
+            } catch (InterruptedException ignored) {
+            } catch (RuntimeException ignored) { // một vòng quét lỗi không được làm sập cả màn hình
+            }
+        });
+        try {
+            return GridView.show(terminal, view);
+        } finally {
+            bg.interrupt();
+        }
+    }
+
+    /**
      * In các dòng thô (không vẽ khung bảng) - dùng cho EXPLAIN/EXPLAIN ANALYZE, nội dung đã tự có cấu
      * trúc cây thụt lề riêng, bó vào khung ô vuông chỉ làm rối và cắt cụt dòng dài vô ích. Vẫn tự phân
      * trang qua "less" khi số dòng vượt chiều cao terminal, giống print() cho bảng thường.
